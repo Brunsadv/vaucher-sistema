@@ -1,9 +1,9 @@
 """
 Backend - Vaucher & Álvares Sistema de Cadastro
-FastAPI + PostgreSQL + Geração de Documentos + Envio de E-mail
+FastAPI + PostgreSQL + Geração de Documentos + Resend para E-mail
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, EmailStr
@@ -13,14 +13,11 @@ import json
 import zipfile
 import shutil
 from datetime import datetime
-import smtplib
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from email.mime.base import MIMEBase
-from email import encoders
 import uuid
 import hashlib
 import logging
+import httpx
+import base64
 
 # Configurar logging detalhado
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +34,7 @@ from psycopg2.extras import RealDictCursor
 app = FastAPI(
     title="Vaucher & Álvares - API",
     description="Sistema de cadastro de clientes e geração de documentos",
-    version="2.0.0"
+    version="2.1.0"
 )
 
 # CORS - permitir acesso dos frontends
@@ -61,13 +58,16 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELOS_DIR = os.path.join(BASE_DIR, "modelos")
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 GERADOS_DIR = os.path.join(BASE_DIR, "documentos_gerados")
+ENVIO_DIR = os.path.join(BASE_DIR, "documentos_envio")
 
 # Criar diretórios se não existirem
-for dir_path in [MODELOS_DIR, UPLOADS_DIR, GERADOS_DIR]:
+for dir_path in [MODELOS_DIR, UPLOADS_DIR, GERADOS_DIR, ENVIO_DIR]:
     os.makedirs(dir_path, exist_ok=True)
 
-# Banco de dados
+# Banco de dados e E-mail
 DATABASE_URL = os.getenv("DATABASE_URL")
+RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
 
 # ============================================
 # BANCO DE DADOS
@@ -112,10 +112,11 @@ def init_db():
     except Exception as e:
         logger.error(f"Erro ao criar tabelas: {e}")
 
-# Inicializar banco ao iniciar
 @app.on_event("startup")
 def startup():
     logger.info("Iniciando aplicação...")
+    logger.info(f"RESEND_API_KEY configurada: {bool(RESEND_API_KEY)}")
+    logger.info(f"FROM_EMAIL: {FROM_EMAIL}")
     init_db()
 
 # ============================================
@@ -260,10 +261,6 @@ class LoginResponse(BaseModel):
     nome: Optional[str] = None
     message: Optional[str] = None
 
-class EnviarEmailRequest(BaseModel):
-    assunto: Optional[str] = "Documentos - Vaucher & Álvares Advogados"
-    mensagem: Optional[str] = ""
-
 # ============================================
 # UTILITÁRIOS
 # ============================================
@@ -355,7 +352,6 @@ class GeradorDocumentos:
         if not os.path.exists(modelo_path):
             raise FileNotFoundError(f"Modelo não encontrado: {modelo_path}")
         
-        # Criar pasta do cliente usando ID do cadastro
         cliente_dir = os.path.join(GERADOS_DIR, cadastro_id)
         os.makedirs(cliente_dir, exist_ok=True)
         
@@ -363,11 +359,9 @@ class GeradorDocumentos:
         os.makedirs(temp_dir, exist_ok=True)
         
         try:
-            # Extrair modelo
             with zipfile.ZipFile(modelo_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
             
-            # Substituir no document.xml
             doc_xml_path = os.path.join(temp_dir, 'word', 'document.xml')
             with open(doc_xml_path, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -377,7 +371,6 @@ class GeradorDocumentos:
             with open(doc_xml_path, 'w', encoding='utf-8') as f:
                 f.write(content)
             
-            # Criar documento
             saida_path = os.path.join(cliente_dir, nome_saida)
             
             with zipfile.ZipFile(saida_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
@@ -411,135 +404,64 @@ class GeradorDocumentos:
 gerador = GeradorDocumentos()
 
 # ============================================
-# ENVIO DE E-MAIL
+# ENVIO DE E-MAIL COM RESEND
 # ============================================
 
-class EmailService:
-    def __init__(self):
-        self.smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
-        self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
-        self.smtp_user = os.getenv('SMTP_USER', '')
-        self.smtp_pass = os.getenv('SMTP_PASS', '')
-        self.from_email = os.getenv('FROM_EMAIL', 'atendimento@vaucherealvares.com')
-        
-        logger.info(f"EmailService configurado: host={self.smtp_host}, port={self.smtp_port}, user={self.smtp_user}")
+async def enviar_email_resend(destinatario: str, assunto: str, corpo_html: str, anexos: List[dict] = None) -> bool:
+    """Envia e-mail usando a API do Resend."""
+    if not RESEND_API_KEY:
+        logger.error("RESEND_API_KEY não configurada!")
+        return False
     
-    def enviar_confirmacao_cadastro(self, destinatario: str, nome: str) -> bool:
-        """Envia e-mail de confirmação de cadastro."""
-        assunto = "Cadastro Recebido - Vaucher & Álvares Advogados"
-        
-        corpo_html = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2 style="color: #8B1538;">Vaucher & Álvares Advogados</h2>
-                <p>Prezado(a) <strong>{nome}</strong>,</p>
-                <p>Seu cadastro foi recebido com sucesso!</p>
-                <p>Nossa equipe irá analisar as informações e documentos enviados. 
-                Em breve você receberá o Contrato de Honorários e a Procuração 
-                para assinatura.</p>
-                <p><strong>Prazo estimado:</strong> até 2 dias úteis.</p>
-                <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-                <p style="font-size: 12px; color: #666;">
-                    Vaucher & Álvares Sociedade de Advogados<br>
-                    Rua Lima, nº 106, Jardim das Américas, Cuiabá-MT<br>
-                    (65) 3023-5959 | atendimento@vaucherealvares.com
-                </p>
-            </div>
-        </body>
-        </html>
-        """
-        
-        return self._enviar(destinatario, assunto, corpo_html)
+    logger.info(f"Enviando e-mail via Resend para {destinatario}")
     
-    def enviar_documentos(self, destinatario: str, nome: str, arquivos: List[str], assunto: str = None, mensagem_extra: str = "") -> bool:
-        """Envia documentos para o cliente."""
-        if not assunto:
-            assunto = "Seus Documentos - Vaucher & Álvares Advogados"
-        
-        corpo_html = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; color: #333;">
-            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                <h2 style="color: #8B1538;">Vaucher & Álvares Advogados</h2>
-                <p>Prezado(a) <strong>{nome}</strong>,</p>
-                <p>Seguem em anexo os documentos para sua análise e assinatura.</p>
-                {f'<p>{mensagem_extra}</p>' if mensagem_extra else ''}
-                <p>Por favor, leia atentamente os documentos. Após assiná-los, 
-                você pode enviá-los de volta por e-mail ou entregá-los 
-                pessoalmente em nosso escritório.</p>
-                <p><strong>Dúvidas?</strong> Entre em contato conosco.</p>
-                <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-                <p style="font-size: 12px; color: #666;">
-                    Vaucher & Álvares Sociedade de Advogados<br>
-                    Rua Lima, nº 106, Jardim das Américas, Cuiabá-MT<br>
-                    (65) 3023-5959 | atendimento@vaucherealvares.com
-                </p>
-            </div>
-        </body>
-        </html>
-        """
-        
-        return self._enviar(destinatario, assunto, corpo_html, arquivos)
+    payload = {
+        "from": FROM_EMAIL,
+        "to": [destinatario],
+        "subject": assunto,
+        "html": corpo_html
+    }
     
-    def _enviar(self, destinatario: str, assunto: str, corpo_html: str, anexos: List[str] = None) -> bool:
-        """Envia e-mail."""
-        logger.info(f"Tentando enviar e-mail para {destinatario}")
-        logger.info(f"SMTP: {self.smtp_host}:{self.smtp_port}, User: {self.smtp_user}")
-        
-        if not self.smtp_user or not self.smtp_pass:
-            logger.error("Credenciais SMTP não configuradas!")
-            return False
-        
-        try:
-            msg = MIMEMultipart()
-            msg['From'] = self.from_email
-            msg['To'] = destinatario
-            msg['Subject'] = assunto
+    if anexos:
+        payload["attachments"] = anexos
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                timeout=30.0
+            )
             
-            msg.attach(MIMEText(corpo_html, 'html'))
+            logger.info(f"Resend response status: {response.status_code}")
+            logger.info(f"Resend response body: {response.text}")
             
-            # Anexos
-            if anexos:
-                for arquivo in anexos:
-                    if os.path.exists(arquivo):
-                        logger.info(f"Anexando arquivo: {arquivo}")
-                        with open(arquivo, 'rb') as f:
-                            part = MIMEBase('application', 'octet-stream')
-                            part.set_payload(f.read())
-                            encoders.encode_base64(part)
-                            part.add_header(
-                                'Content-Disposition',
-                                f'attachment; filename={os.path.basename(arquivo)}'
-                            )
-                            msg.attach(part)
-                    else:
-                        logger.warning(f"Arquivo não encontrado: {arquivo}")
-            
-            # Enviar
-            logger.info("Conectando ao servidor SMTP...")
-            server = smtplib.SMTP(self.smtp_host, self.smtp_port)
-            server.set_debuglevel(1)  # Debug SMTP
-            server.starttls()
-            logger.info("TLS iniciado, fazendo login...")
-            server.login(self.smtp_user, self.smtp_pass)
-            logger.info("Login OK, enviando mensagem...")
-            server.send_message(msg)
-            server.quit()
-            
-            logger.info(f"E-mail enviado com sucesso para {destinatario}")
-            return True
-        except smtplib.SMTPAuthenticationError as e:
-            logger.error(f"Erro de autenticação SMTP: {e}")
-            return False
-        except smtplib.SMTPException as e:
-            logger.error(f"Erro SMTP: {e}")
-            return False
-        except Exception as e:
-            logger.error(f"Erro ao enviar e-mail: {e}")
-            return False
+            if response.status_code == 200:
+                logger.info(f"E-mail enviado com sucesso para {destinatario}")
+                return True
+            else:
+                logger.error(f"Erro do Resend: {response.text}")
+                return False
+    except Exception as e:
+        logger.error(f"Erro ao enviar e-mail: {e}")
+        return False
 
-email_service = EmailService()
+def preparar_anexo(caminho_arquivo: str) -> dict:
+    """Prepara um arquivo para ser anexado ao e-mail."""
+    if not os.path.exists(caminho_arquivo):
+        return None
+    
+    with open(caminho_arquivo, "rb") as f:
+        conteudo = base64.b64encode(f.read()).decode("utf-8")
+    
+    return {
+        "filename": os.path.basename(caminho_arquivo),
+        "content": conteudo
+    }
 
 # ============================================
 # ROTAS DA API
@@ -547,11 +469,15 @@ email_service = EmailService()
 
 @app.get("/")
 def root():
-    return {"message": "Vaucher & Álvares API", "status": "online", "version": "2.0"}
+    return {"message": "Vaucher & Álvares API", "status": "online", "version": "2.1"}
 
 @app.get("/health")
 def health():
-    return {"status": "healthy", "database": "connected" if get_db() else "disconnected"}
+    return {
+        "status": "healthy", 
+        "database": "connected" if get_db() else "disconnected",
+        "email": "resend" if RESEND_API_KEY else "not_configured"
+    }
 
 # --- AUTENTICAÇÃO ---
 
@@ -562,16 +488,9 @@ def login(request: LoginRequest):
     
     if user and user['senha'] == request.senha:
         token = gerar_token(request.email)
-        return LoginResponse(
-            success=True,
-            token=token,
-            nome=user['nome']
-        )
+        return LoginResponse(success=True, token=token, nome=user['nome'])
     
-    return LoginResponse(
-        success=False,
-        message="E-mail ou senha incorretos"
-    )
+    return LoginResponse(success=False, message="E-mail ou senha incorretos")
 
 # --- CADASTROS ---
 
@@ -593,9 +512,33 @@ async def criar_cadastro(dados: DadosCliente):
     if salvar_cadastro(novo_cadastro):
         logger.info(f"Cadastro salvo com ID: {novo_cadastro['id']}")
         
-        # Tentar enviar e-mail de confirmação
+        # Enviar e-mail de confirmação
         try:
-            email_service.enviar_confirmacao_cadastro(dados.email, dados.nome)
+            corpo_html = f"""
+            <html>
+            <body style="font-family: Arial, sans-serif; color: #333;">
+                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                    <h2 style="color: #8B1538;">Vaucher & Álvares Advogados</h2>
+                    <p>Prezado(a) <strong>{dados.nome}</strong>,</p>
+                    <p>Seu cadastro foi recebido com sucesso!</p>
+                    <p>Nossa equipe irá analisar as informações e documentos enviados. 
+                    Em breve você receberá o Contrato de Honorários e a Procuração 
+                    para assinatura.</p>
+                    <p><strong>Prazo estimado:</strong> até 2 dias úteis.</p>
+                    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+                    <p style="font-size: 12px; color: #666;">
+                        Vaucher & Álvares Sociedade de Advogados<br>
+                        atendimento@vaucherealvares.com
+                    </p>
+                </div>
+            </body>
+            </html>
+            """
+            await enviar_email_resend(
+                dados.email,
+                "Cadastro Recebido - Vaucher & Álvares Advogados",
+                corpo_html
+            )
         except Exception as e:
             logger.error(f"Erro ao enviar e-mail de confirmação: {e}")
         
@@ -633,12 +576,10 @@ def gerar_documentos(cadastro_id: str):
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
     try:
-        # Gerar documentos
         dados = cadastro["dados"]
         arquivos = gerador.gerar_todos(dados, cadastro_id)
         logger.info(f"Documentos gerados: {arquivos}")
         
-        # Atualizar cadastro
         cadastro["status"] = "documentos_gerados"
         cadastro["arquivos_gerados"] = arquivos
         salvar_cadastro(cadastro)
@@ -646,7 +587,7 @@ def gerar_documentos(cadastro_id: str):
         return {
             "success": True,
             "arquivos": arquivos,
-            "message": "Documentos gerados com sucesso! Use o botão 'Enviar por E-mail' para enviar ao cliente."
+            "message": "Documentos gerados com sucesso!"
         }
     except Exception as e:
         logger.error(f"Erro ao gerar documentos: {e}")
@@ -657,9 +598,9 @@ async def enviar_email_documentos(
     cadastro_id: str,
     assunto: str = Form(default="Seus Documentos - Vaucher & Álvares Advogados"),
     mensagem: str = Form(default=""),
-    anexos_extras: List[UploadFile] = File(default=[])
+    arquivos: List[UploadFile] = File(default=[])
 ):
-    """Envia documentos por e-mail para o cliente."""
+    """Envia documentos por e-mail - VOCÊ escolhe quais arquivos anexar."""
     logger.info(f"Enviando e-mail para cadastro: {cadastro_id}")
     
     cadastro = buscar_cadastro(cadastro_id)
@@ -667,42 +608,51 @@ async def enviar_email_documentos(
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
     dados = cadastro["dados"]
-    arquivos_para_enviar = []
+    anexos_email = []
     
-    # Adicionar contrato e procuração se existirem
-    if cadastro.get("arquivos_gerados"):
-        if cadastro["arquivos_gerados"].get("contrato"):
-            arquivos_para_enviar.append(cadastro["arquivos_gerados"]["contrato"])
-        if cadastro["arquivos_gerados"].get("procuracao"):
-            arquivos_para_enviar.append(cadastro["arquivos_gerados"]["procuracao"])
+    # Processar arquivos enviados pelo admin
+    if arquivos:
+        for arquivo in arquivos:
+            if arquivo.filename:
+                logger.info(f"Processando anexo: {arquivo.filename}")
+                conteudo = await arquivo.read()
+                anexos_email.append({
+                    "filename": arquivo.filename,
+                    "content": base64.b64encode(conteudo).decode("utf-8")
+                })
     
-    # Salvar e adicionar anexos extras
-    if anexos_extras:
-        cliente_dir = os.path.join(GERADOS_DIR, cadastro_id)
-        os.makedirs(cliente_dir, exist_ok=True)
-        
-        for anexo in anexos_extras:
-            if anexo.filename:
-                file_path = os.path.join(cliente_dir, anexo.filename)
-                with open(file_path, "wb") as f:
-                    content = await anexo.read()
-                    f.write(content)
-                arquivos_para_enviar.append(file_path)
-                logger.info(f"Anexo extra salvo: {file_path}")
+    if not anexos_email:
+        raise HTTPException(status_code=400, detail="Nenhum arquivo selecionado para envio")
     
-    # Enviar e-mail
-    sucesso = email_service.enviar_documentos(
-        dados["email"],
-        dados["nome"],
-        arquivos_para_enviar,
-        assunto,
-        mensagem
-    )
+    # Montar e-mail
+    corpo_html = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333;">
+        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #8B1538;">Vaucher & Álvares Advogados</h2>
+            <p>Prezado(a) <strong>{dados['nome']}</strong>,</p>
+            <p>Seguem em anexo os documentos para sua análise e assinatura.</p>
+            {f'<p>{mensagem}</p>' if mensagem else ''}
+            <p>Por favor, leia atentamente os documentos. Após assiná-los, 
+            você pode enviá-los de volta por e-mail ou entregá-los 
+            pessoalmente em nosso escritório.</p>
+            <p><strong>Dúvidas?</strong> Entre em contato conosco.</p>
+            <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
+            <p style="font-size: 12px; color: #666;">
+                Vaucher & Álvares Sociedade de Advogados<br>
+                atendimento@vaucherealvares.com
+            </p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    sucesso = await enviar_email_resend(dados["email"], assunto, corpo_html, anexos_email)
     
     if sucesso:
         cadastro["status"] = "enviado"
         salvar_cadastro(cadastro)
-        return {"success": True, "message": f"E-mail enviado para {dados['email']}"}
+        return {"success": True, "message": f"E-mail enviado para {dados['email']} com {len(anexos_email)} anexo(s)"}
     else:
         raise HTTPException(status_code=500, detail="Erro ao enviar e-mail. Verifique os logs.")
 
@@ -722,7 +672,7 @@ def download_documento(cadastro_id: str, tipo: str):
     
     raise HTTPException(status_code=404, detail="Documento não encontrado")
 
-# --- UPLOAD DE DOCUMENTOS ---
+# --- UPLOAD DE DOCUMENTOS DO CLIENTE ---
 
 @app.post("/api/cadastros/{cadastro_id}/upload")
 async def upload_documento(cadastro_id: str, arquivo: UploadFile = File(...)):
@@ -733,7 +683,6 @@ async def upload_documento(cadastro_id: str, arquivo: UploadFile = File(...)):
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
-    # Salvar arquivo
     cliente_dir = os.path.join(UPLOADS_DIR, cadastro_id)
     os.makedirs(cliente_dir, exist_ok=True)
     
@@ -742,7 +691,6 @@ async def upload_documento(cadastro_id: str, arquivo: UploadFile = File(...)):
         content = await arquivo.read()
         f.write(content)
     
-    # Atualizar cadastro
     if arquivo.filename not in cadastro["documentos"]:
         cadastro["documentos"].append(arquivo.filename)
     salvar_cadastro(cadastro)
@@ -755,31 +703,9 @@ def download_upload_cliente(cadastro_id: str, filename: str):
     file_path = os.path.join(UPLOADS_DIR, cadastro_id, filename)
     
     if os.path.exists(file_path):
-        return FileResponse(
-            file_path,
-            filename=filename,
-            media_type="application/octet-stream"
-        )
+        return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
     
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
-
-# --- TESTE DE E-MAIL ---
-
-@app.post("/api/teste-email")
-def teste_email(destinatario: str = Form(...)):
-    """Endpoint para testar envio de e-mail."""
-    logger.info(f"Teste de e-mail para: {destinatario}")
-    
-    sucesso = email_service._enviar(
-        destinatario,
-        "Teste - Vaucher & Álvares Sistema",
-        "<h1>Teste de E-mail</h1><p>Se você recebeu este e-mail, a configuração está funcionando!</p>"
-    )
-    
-    if sucesso:
-        return {"success": True, "message": f"E-mail de teste enviado para {destinatario}"}
-    else:
-        return {"success": False, "message": "Falha ao enviar e-mail. Verifique os logs no Railway."}
 
 # ============================================
 # INICIALIZAÇÃO

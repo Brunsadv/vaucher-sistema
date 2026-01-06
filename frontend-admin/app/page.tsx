@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp } from 'lucide-react'
+import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -168,22 +168,33 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
 const EmailModal = ({ cadastro, onClose, onSuccess }: { cadastro: Cadastro, onClose: () => void, onSuccess: () => void }) => {
   const [assunto, setAssunto] = useState('Seus Documentos - Vaucher & Álvares Advogados')
   const [mensagem, setMensagem] = useState('')
-  const [anexosExtras, setAnexosExtras] = useState<File[]>([])
+  const [arquivosParaEnviar, setArquivosParaEnviar] = useState<File[]>([])
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      setAnexosExtras(prev => [...prev, ...Array.from(e.target.files!)])
+      setArquivosParaEnviar(prev => [...prev, ...Array.from(e.target.files!)])
     }
   }
 
-  const removeAnexo = (index: number) => {
-    setAnexosExtras(prev => prev.filter((_, i) => i !== index))
+  const removeArquivo = (index: number) => {
+    setArquivosParaEnviar(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
   }
 
   const handleEnviar = async () => {
+    if (arquivosParaEnviar.length === 0) {
+      setErro('Selecione pelo menos um arquivo para enviar')
+      return
+    }
+
     setEnviando(true)
     setErro('')
 
@@ -192,8 +203,8 @@ const EmailModal = ({ cadastro, onClose, onSuccess }: { cadastro: Cadastro, onCl
       formData.append('assunto', assunto)
       formData.append('mensagem', mensagem)
       
-      anexosExtras.forEach(file => {
-        formData.append('anexos_extras', file)
+      arquivosParaEnviar.forEach(file => {
+        formData.append('arquivos', file)
       })
 
       const response = await fetch(`${API_URL}/api/cadastros/${cadastro.id}/enviar-email`, {
@@ -226,7 +237,7 @@ const EmailModal = ({ cadastro, onClose, onSuccess }: { cadastro: Cadastro, onCl
               <X className="w-6 h-6" />
             </button>
           </div>
-          <p className="text-gray-500 text-sm mt-1">Para: {cadastro.dados.email}</p>
+          <p className="text-gray-500 text-sm mt-1">Para: <strong>{cadastro.dados.email}</strong></p>
         </div>
 
         <div className="p-6 space-y-4">
@@ -252,51 +263,43 @@ const EmailModal = ({ cadastro, onClose, onSuccess }: { cadastro: Cadastro, onCl
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Documentos a enviar</label>
-            <div className="space-y-2">
-              {cadastro.arquivos_gerados?.contrato && (
-                <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                  <FileText className="w-4 h-4 text-green-600" />
-                  <span className="text-sm text-green-800">Contrato de Honorários</span>
-                  <CheckCircle className="w-4 h-4 text-green-600 ml-auto" />
-                </div>
-              )}
-              {cadastro.arquivos_gerados?.procuracao && (
-                <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                  <FileText className="w-4 h-4 text-green-600" />
-                  <span className="text-sm text-green-800">Procuração</span>
-                  <CheckCircle className="w-4 h-4 text-green-600 ml-auto" />
-                </div>
-              )}
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Anexar outros documentos</label>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Arquivos para enviar <span className="text-red-600">*</span>
+            </label>
+            <p className="text-xs text-gray-500 mb-3">
+              Faça o download dos documentos acima, edite se necessário, e depois anexe aqui para enviar.
+            </p>
+            
             <input
               type="file"
               multiple
               ref={fileInputRef}
               onChange={handleFileSelect}
+              accept=".doc,.docx,.pdf,.jpg,.jpeg,.png"
               className="hidden"
             />
+            
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-4 py-2 border border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-red-400 hover:text-red-600 w-full justify-center"
+              className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-red-400 hover:text-red-600 w-full justify-center bg-gray-50"
             >
-              <Paperclip className="w-4 h-4" />
-              Adicionar anexos
+              <Upload className="w-5 h-5" />
+              Selecionar arquivos para enviar
             </button>
 
-            {anexosExtras.length > 0 && (
-              <div className="mt-2 space-y-2">
-                {anexosExtras.map((file, index) => (
-                  <div key={index} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+            {arquivosParaEnviar.length > 0 && (
+              <div className="mt-3 space-y-2">
+                <p className="text-sm font-medium text-gray-700">Arquivos selecionados ({arquivosParaEnviar.length}):</p>
+                {arquivosParaEnviar.map((file, index) => (
+                  <div key={index} className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <FileUp className="w-4 h-4 text-gray-500" />
-                      <span className="text-sm text-gray-700">{file.name}</span>
+                      <FileText className="w-4 h-4 text-green-600" />
+                      <div>
+                        <span className="text-sm text-green-800">{file.name}</span>
+                        <span className="text-xs text-green-600 ml-2">{formatFileSize(file.size)}</span>
+                      </div>
                     </div>
-                    <button onClick={() => removeAnexo(index)} className="text-gray-400 hover:text-red-600">
+                    <button onClick={() => removeArquivo(index)} className="text-green-600 hover:text-red-600">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
@@ -321,7 +324,7 @@ const EmailModal = ({ cadastro, onClose, onSuccess }: { cadastro: Cadastro, onCl
           </button>
           <button
             onClick={handleEnviar}
-            disabled={enviando}
+            disabled={enviando || arquivosParaEnviar.length === 0}
             className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {enviando ? (
@@ -432,8 +435,8 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
         if (selectedCadastro?.id === id) {
           setSelectedCadastro(prev => prev ? { ...prev, status: 'documentos_gerados', arquivos_gerados: data.arquivos } : null)
         }
-        setMensagemSucesso('Documentos gerados com sucesso!')
-        setTimeout(() => setMensagemSucesso(''), 3000)
+        setMensagemSucesso('Documentos gerados com sucesso! Faça o download, edite se necessário, e envie por e-mail.')
+        setTimeout(() => setMensagemSucesso(''), 5000)
       }
     } catch (err) {
       console.error('Erro ao gerar:', err)
@@ -484,6 +487,7 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
             </div>
 
             <div className="p-6 space-y-6">
+              {/* Dados Pessoais */}
               <div className="bg-gray-50 rounded-xl p-6">
                 <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
                   <User className="w-5 h-5 text-gray-600" />
@@ -500,6 +504,7 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                 </div>
               </div>
 
+              {/* Demanda */}
               <div className="bg-gray-50 rounded-xl p-6">
                 <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
                   <Briefcase className="w-5 h-5 text-gray-600" />
@@ -512,6 +517,7 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                 </div>
               </div>
 
+              {/* Documentos do Cliente */}
               <div className="bg-gray-50 rounded-xl p-6">
                 <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
                   <FolderOpen className="w-5 h-5 text-gray-600" />
@@ -529,8 +535,9 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                           href={`${API_URL}/api/cadastros/${c.id}/uploads/${encodeURIComponent(doc)}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                          className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm font-medium"
                         >
+                          <Download className="w-4 h-4" />
                           Baixar
                         </a>
                       </div>
@@ -541,6 +548,40 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                 )}
               </div>
 
+              {/* Documentos Gerados */}
+              {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao) && (
+                <div className="bg-purple-50 rounded-xl p-6">
+                  <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                    <FileCheck className="w-5 h-5 text-purple-600" />
+                    Documentos Gerados
+                  </h3>
+                  <p className="text-sm text-gray-600 mb-4">
+                    Baixe os documentos, edite no Word se necessário, e depois envie por e-mail.
+                  </p>
+                  <div className="flex flex-wrap gap-3">
+                    {c.arquivos_gerados.contrato && (
+                      <a
+                        href={`${API_URL}/api/cadastros/${c.id}/download/contrato`}
+                        className="flex items-center gap-2 bg-white border border-purple-200 text-purple-700 font-medium px-4 py-2 rounded-lg hover:bg-purple-100"
+                      >
+                        <Download className="w-4 h-4" />
+                        Baixar Contrato
+                      </a>
+                    )}
+                    {c.arquivos_gerados.procuracao && (
+                      <a
+                        href={`${API_URL}/api/cadastros/${c.id}/download/procuracao`}
+                        className="flex items-center gap-2 bg-white border border-purple-200 text-purple-700 font-medium px-4 py-2 rounded-lg hover:bg-purple-100"
+                      >
+                        <Download className="w-4 h-4" />
+                        Baixar Procuração
+                      </a>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Ações */}
               <div className="border-t pt-6">
                 <h3 className="font-semibold text-gray-800 mb-4">Ações</h3>
                 <div className="flex flex-wrap gap-3">
@@ -554,7 +595,7 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                     </button>
                   )}
                   
-                  {(c.status === 'validado' || c.status === 'pendente') && (
+                  {(c.status === 'validado' || c.status === 'pendente') && !c.arquivos_gerados?.contrato && (
                     <button
                       onClick={() => handleGerarDocumentos(c.id)}
                       disabled={gerandoDocs}
@@ -574,7 +615,7 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                     </button>
                   )}
 
-                  {(c.status === 'documentos_gerados' || c.status === 'validado' || c.arquivos_gerados?.contrato) && (
+                  {c.status !== 'pendente' && (
                     <button
                       onClick={() => setShowEmailModal(true)}
                       className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium px-6 py-3 rounded-xl"
@@ -589,26 +630,6 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                       <CheckCircle className="w-5 h-5" />
                       Documentos enviados para {c.dados.email}
                     </div>
-                  )}
-
-                  {c.arquivos_gerados?.contrato && (
-                    <a
-                      href={`${API_URL}/api/cadastros/${c.id}/download/contrato`}
-                      className="flex items-center gap-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-6 py-3 rounded-xl"
-                    >
-                      <Download className="w-5 h-5" />
-                      Baixar Contrato
-                    </a>
-                  )}
-
-                  {c.arquivos_gerados?.procuracao && (
-                    <a
-                      href={`${API_URL}/api/cadastros/${c.id}/download/procuracao`}
-                      className="flex items-center gap-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-6 py-3 rounded-xl"
-                    >
-                      <Download className="w-5 h-5" />
-                      Baixar Procuração
-                    </a>
                   )}
                 </div>
               </div>
