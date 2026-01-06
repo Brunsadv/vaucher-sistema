@@ -85,7 +85,7 @@ function StepIndicator({ step }: { step: number }) {
 
 export default function Home() {
   const [step, setStep] = useState(1)
-  const [files, setFiles] = useState<{name: string, size: string}[]>([])
+  const [files, setFiles] = useState<File[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState('')
@@ -101,7 +101,6 @@ export default function Home() {
   const [email, setEmail] = useState('')
   const [telefone, setTelefone] = useState('')
   const [tipoDemanda, setTipoDemanda] = useState('')
-  const [objetoContrato, setObjetoContrato] = useState('')
   const [poderesEspecificos, setPoderesEspecificos] = useState('')
   const [observacoes, setObservacoes] = useState('')
 
@@ -115,10 +114,7 @@ export default function Home() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      const newFiles = Array.from(e.target.files).map(file => ({
-        name: file.name,
-        size: (file.size / 1024).toFixed(1) + ' KB'
-      }))
+      const newFiles = Array.from(e.target.files)
       setFiles(prev => [...prev, ...newFiles])
     }
   }
@@ -127,10 +123,17 @@ export default function Home() {
     setFiles(prev => prev.filter((_, i) => i !== index))
   }
 
+  const formatFileSize = (bytes: number) => {
+    if (bytes < 1024) return bytes + ' B'
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
+  }
+
   const handleSubmit = async () => {
     setSubmitting(true)
     setError('')
     
+    // OBJETO DO CONTRATO = PODERES ESPECÍFICOS (conforme solicitado)
     const formData = {
       nome,
       nacionalidade,
@@ -143,24 +146,47 @@ export default function Home() {
       email,
       telefone,
       tipo_demanda: tipoDemanda,
-      objeto_contrato: objetoContrato,
+      objeto_contrato: poderesEspecificos,  // IGUAL aos poderes específicos
       poderes_especificos: poderesEspecificos,
       observacoes
     }
     
     try {
+      // 1. Criar o cadastro
       const response = await fetch(`${API_URL}/api/cadastros`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(formData)
       })
       
-      if (response.ok) {
-        setSubmitted(true)
-      } else {
+      if (!response.ok) {
         const data = await response.json()
         setError(data.detail || 'Erro ao enviar cadastro')
+        setSubmitting(false)
+        return
       }
+
+      const result = await response.json()
+      const cadastroId = result.id
+
+      // 2. Enviar os arquivos (se houver)
+      if (files.length > 0) {
+        for (const file of files) {
+          const uploadData = new FormData()
+          uploadData.append('arquivo', file)
+          
+          try {
+            await fetch(`${API_URL}/api/cadastros/${cadastroId}/upload`, {
+              method: 'POST',
+              body: uploadData
+            })
+          } catch (uploadErr) {
+            console.error('Erro ao enviar arquivo:', file.name)
+          }
+        }
+      }
+
+      setSubmitted(true)
     } catch (err) {
       setError('Erro de conexão. Tente novamente.')
     } finally {
@@ -173,7 +199,7 @@ export default function Home() {
       case 1:
         return nome && cpf && rg && dataNascimento && estadoCivil && profissao && enderecoCompleto && email && telefone
       case 2:
-        return tipoDemanda && objetoContrato && poderesEspecificos
+        return tipoDemanda && poderesEspecificos
       case 3:
         return true
       default:
@@ -445,28 +471,16 @@ export default function Home() {
               
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Descrição do Caso <span className="text-red-600">*</span>
-                </label>
-                <textarea
-                  value={objetoContrato}
-                  onChange={(e) => setObjetoContrato(e.target.value)}
-                  placeholder="Descreva brevemente a situação e o que pretende com a ação..."
-                  rows={4}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent transition-all duration-200 bg-white resize-none"
-                />
-              </div>
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Poderes Específicos (para Procuração) <span className="text-red-600">*</span>
+                  Objeto do Contrato e Poderes da Procuração <span className="text-red-600">*</span>
                 </label>
                 <textarea
                   value={poderesEspecificos}
                   onChange={(e) => setPoderesEspecificos(e.target.value)}
-                  placeholder="Preenchido automaticamente conforme o tipo de demanda..."
-                  rows={3}
+                  placeholder="Preenchido automaticamente conforme o tipo de demanda. Você pode editar se necessário."
+                  rows={4}
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent transition-all duration-200 bg-white resize-none"
                 />
+                <p className="text-xs text-gray-500 mt-1">Este texto será usado tanto no Contrato quanto na Procuração.</p>
               </div>
               
               <div className="mb-4">
@@ -499,7 +513,7 @@ export default function Home() {
                 <input
                   type="file"
                   multiple
-                  accept=".pdf,.jpg,.jpeg,.png"
+                  accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                   onChange={handleFileUpload}
                   className="hidden"
                   id="file-upload"
@@ -507,7 +521,7 @@ export default function Home() {
                 <label htmlFor="file-upload" className="cursor-pointer">
                   <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-600 font-medium">Clique para selecionar arquivos</p>
-                  <p className="text-gray-400 text-sm mt-1">PDF, JPG ou PNG</p>
+                  <p className="text-gray-400 text-sm mt-1">PDF, JPG, PNG, DOC ou DOCX</p>
                 </label>
               </div>
               
@@ -530,7 +544,7 @@ export default function Home() {
                         <FileText className="w-5 h-5 text-red-700" />
                         <div>
                           <p className="text-sm font-medium text-gray-700">{file.name}</p>
-                          <p className="text-xs text-gray-400">{file.size}</p>
+                          <p className="text-xs text-gray-400">{formatFileSize(file.size)}</p>
                         </div>
                       </div>
                       <button onClick={() => removeFile(index)} className="text-gray-400 hover:text-red-600">
@@ -562,7 +576,7 @@ export default function Home() {
                     <span className="font-medium ml-1">{tiposDemanda.find(t => t.value === tipoDemanda)?.label}</span>
                   </div>
                   <div className="sm:col-span-2">
-                    <span className="text-gray-500">Documentos:</span> 
+                    <span className="text-gray-500">Documentos anexados:</span> 
                     <span className="font-medium ml-1">{files.length} arquivo(s)</span>
                   </div>
                 </div>

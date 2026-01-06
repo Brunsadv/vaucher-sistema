@@ -318,7 +318,14 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                           <FileText className="w-5 h-5 text-red-600" />
                           <span className="text-sm font-medium">{doc}</span>
                         </div>
-                        <button className="text-blue-600 hover:text-blue-800 text-sm font-medium">Visualizar</button>
+                        <a 
+                          href={`${API_URL}/api/cadastros/${c.id}/uploads/${encodeURIComponent(doc)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                        >
+                          Baixar
+                        </a>
                       </div>
                     ))}
                   </div>

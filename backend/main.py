@@ -39,8 +39,6 @@ app.add_middleware(
         "http://localhost:3001",
         "https://cadastro.vaucherealvares.com.br",
         "https://painel.vaucherealvares.com.br",
-	"https://vaucher-cliente.vercel.app",
-        "https://vaucher-admin.vercel.app",
         # Adicione seus domínios Vercel aqui após deploy
     ],
     allow_credentials=True,
@@ -535,6 +533,20 @@ async def upload_documento(cadastro_id: str, arquivo: UploadFile = File(...)):
             return {"success": True, "filename": arquivo.filename}
     
     raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+
+@app.get("/api/cadastros/{cadastro_id}/uploads/{filename}")
+def download_upload_cliente(cadastro_id: str, filename: str):
+    """Faz download de um arquivo enviado pelo cliente."""
+    file_path = os.path.join(UPLOADS_DIR, cadastro_id, filename)
+    
+    if os.path.exists(file_path):
+        return FileResponse(
+            file_path,
+            filename=filename,
+            media_type="application/octet-stream"
+        )
+    
+    raise HTTPException(status_code=404, detail="Arquivo não encontrado")
 
 # ============================================
 # INICIALIZAÇÃO
