@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield } from 'lucide-react'
+import { useState, useEffect, useRef } from 'react'
+import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -45,6 +45,10 @@ interface Cadastro {
     observacoes?: string
   }
   documentos: string[]
+  arquivos_gerados?: {
+    contrato?: string
+    procuracao?: string
+  }
 }
 
 // Tela de Login
@@ -160,14 +164,194 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
   )
 }
 
+// Modal de Envio de E-mail
+const EmailModal = ({ cadastro, onClose, onSuccess }: { cadastro: Cadastro, onClose: () => void, onSuccess: () => void }) => {
+  const [assunto, setAssunto] = useState('Seus Documentos - Vaucher & Álvares Advogados')
+  const [mensagem, setMensagem] = useState('')
+  const [anexosExtras, setAnexosExtras] = useState<File[]>([])
+  const [enviando, setEnviando] = useState(false)
+  const [erro, setErro] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setAnexosExtras(prev => [...prev, ...Array.from(e.target.files!)])
+    }
+  }
+
+  const removeAnexo = (index: number) => {
+    setAnexosExtras(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleEnviar = async () => {
+    setEnviando(true)
+    setErro('')
+
+    try {
+      const formData = new FormData()
+      formData.append('assunto', assunto)
+      formData.append('mensagem', mensagem)
+      
+      anexosExtras.forEach(file => {
+        formData.append('anexos_extras', file)
+      })
+
+      const response = await fetch(`${API_URL}/api/cadastros/${cadastro.id}/enviar-email`, {
+        method: 'POST',
+        body: formData
+      })
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        onSuccess()
+        onClose()
+      } else {
+        setErro(data.detail || data.message || 'Erro ao enviar e-mail')
+      }
+    } catch (err) {
+      setErro('Erro de conexão. Tente novamente.')
+    } finally {
+      setEnviando(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-bold text-gray-800">Enviar Documentos por E-mail</h2>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+              <X className="w-6 h-6" />
+            </button>
+          </div>
+          <p className="text-gray-500 text-sm mt-1">Para: {cadastro.dados.email}</p>
+        </div>
+
+        <div className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Assunto</label>
+            <input
+              type="text"
+              value={assunto}
+              onChange={(e) => setAssunto(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Mensagem adicional (opcional)</label>
+            <textarea
+              value={mensagem}
+              onChange={(e) => setMensagem(e.target.value)}
+              placeholder="Adicione uma mensagem personalizada..."
+              rows={3}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent resize-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Documentos a enviar</label>
+            <div className="space-y-2">
+              {cadastro.arquivos_gerados?.contrato && (
+                <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                  <FileText className="w-4 h-4 text-green-600" />
+                  <span className="text-sm text-green-800">Contrato de Honorários</span>
+                  <CheckCircle className="w-4 h-4 text-green-600 ml-auto" />
+                </div>
+              )}
+              {cadastro.arquivos_gerados?.procuracao && (
+                <div className="flex items-center gap-2 bg-green-50 border border-green-200 rounded-lg px-3 py-2">
+                  <FileText className="w-4 h-4 text-green-600" />
+                  <span className="text-sm text-green-800">Procuração</span>
+                  <CheckCircle className="w-4 h-4 text-green-600 ml-auto" />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Anexar outros documentos</label>
+            <input
+              type="file"
+              multiple
+              ref={fileInputRef}
+              onChange={handleFileSelect}
+              className="hidden"
+            />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2 border border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-red-400 hover:text-red-600 w-full justify-center"
+            >
+              <Paperclip className="w-4 h-4" />
+              Adicionar anexos
+            </button>
+
+            {anexosExtras.length > 0 && (
+              <div className="mt-2 space-y-2">
+                {anexosExtras.map((file, index) => (
+                  <div key={index} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <FileUp className="w-4 h-4 text-gray-500" />
+                      <span className="text-sm text-gray-700">{file.name}</span>
+                    </div>
+                    <button onClick={() => removeAnexo(index)} className="text-gray-400 hover:text-red-600">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {erro && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+              {erro}
+            </div>
+          )}
+        </div>
+
+        <div className="p-6 border-t bg-gray-50 flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleEnviar}
+            disabled={enviando}
+            className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {enviando ? (
+              <>
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                Enviando...
+              </>
+            ) : (
+              <>
+                <Send className="w-4 h-4" />
+                Enviar E-mail
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Dashboard Administrativo
 const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }) => {
   const [cadastros, setCadastros] = useState<Cadastro[]>([])
   const [selectedCadastro, setSelectedCadastro] = useState<Cadastro | null>(null)
   const [filterStatus, setFilterStatus] = useState('todos')
   const [searchTerm, setSearchTerm] = useState('')
-  const [sendingDocs, setSendingDocs] = useState(false)
+  const [gerandoDocs, setGerandoDocs] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [showEmailModal, setShowEmailModal] = useState(false)
+  const [mensagemSucesso, setMensagemSucesso] = useState('')
 
   const tiposDemanda: Record<string, string> = {
     'adicional_insalubridade': 'Adicional de Insalubridade',
@@ -209,16 +393,18 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
     const styles: Record<string, string> = {
       pendente: 'bg-amber-100 text-amber-800 border-amber-200',
       validado: 'bg-blue-100 text-blue-800 border-blue-200',
+      documentos_gerados: 'bg-purple-100 text-purple-800 border-purple-200',
       enviado: 'bg-green-100 text-green-800 border-green-200'
     }
     const labels: Record<string, string> = {
       pendente: 'Pendente',
       validado: 'Validado',
-      enviado: 'Docs Enviados'
+      documentos_gerados: 'Docs Prontos',
+      enviado: 'Enviado'
     }
     return (
-      <span className={`px-3 py-1 rounded-full text-xs font-medium border ${styles[status]}`}>
-        {labels[status]}
+      <span className={`px-3 py-1 rounded-full text-xs font-medium border ${styles[status] || styles.pendente}`}>
+        {labels[status] || status}
       </span>
     )
   }
@@ -235,18 +421,33 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
     }
   }
 
-  const handleEnviarDocumentos = async (id: string) => {
-    setSendingDocs(true)
+  const handleGerarDocumentos = async (id: string) => {
+    setGerandoDocs(true)
     try {
-      await fetch(`${API_URL}/api/cadastros/${id}/gerar-documentos`, { method: 'POST' })
-      setCadastros(prev => prev.map(c => c.id === id ? { ...c, status: 'enviado' } : c))
-      if (selectedCadastro?.id === id) {
-        setSelectedCadastro(prev => prev ? { ...prev, status: 'enviado' } : null)
+      const response = await fetch(`${API_URL}/api/cadastros/${id}/gerar-documentos`, { method: 'POST' })
+      const data = await response.json()
+      
+      if (data.success) {
+        setCadastros(prev => prev.map(c => c.id === id ? { ...c, status: 'documentos_gerados', arquivos_gerados: data.arquivos } : c))
+        if (selectedCadastro?.id === id) {
+          setSelectedCadastro(prev => prev ? { ...prev, status: 'documentos_gerados', arquivos_gerados: data.arquivos } : null)
+        }
+        setMensagemSucesso('Documentos gerados com sucesso!')
+        setTimeout(() => setMensagemSucesso(''), 3000)
       }
     } catch (err) {
-      console.error('Erro ao enviar:', err)
+      console.error('Erro ao gerar:', err)
     } finally {
-      setSendingDocs(false)
+      setGerandoDocs(false)
+    }
+  }
+
+  const handleEmailEnviado = () => {
+    if (selectedCadastro) {
+      setCadastros(prev => prev.map(c => c.id === selectedCadastro.id ? { ...c, status: 'enviado' } : c))
+      setSelectedCadastro(prev => prev ? { ...prev, status: 'enviado' } : null)
+      setMensagemSucesso('E-mail enviado com sucesso!')
+      setTimeout(() => setMensagemSucesso(''), 3000)
     }
   }
 
@@ -263,6 +464,13 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
             <ArrowLeft className="w-5 h-5" />
             Voltar para lista
           </button>
+
+          {mensagemSucesso && (
+            <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg mb-4 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5" />
+              {mensagemSucesso}
+            </div>
+          )}
 
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
             <div className="bg-gradient-to-r from-gray-800 to-gray-900 text-white p-6">
@@ -299,8 +507,7 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                 </h3>
                 <div className="space-y-4 text-sm">
                   <div><p className="text-gray-500">Tipo</p><p className="font-medium">{tiposDemanda[c.dados.tipo_demanda]}</p></div>
-                  <div><p className="text-gray-500">Descrição do Caso</p><p className="font-medium mt-1">{c.dados.objeto_contrato}</p></div>
-                  <div><p className="text-gray-500">Poderes Específicos</p><p className="font-medium mt-1">{c.dados.poderes_especificos}</p></div>
+                  <div><p className="text-gray-500">Objeto do Contrato / Poderes</p><p className="font-medium mt-1">{c.dados.objeto_contrato || c.dados.poderes_especificos}</p></div>
                   {c.dados.observacoes && <div><p className="text-gray-500">Observações</p><p className="font-medium mt-1">{c.dados.observacoes}</p></div>}
                 </div>
               </div>
@@ -308,7 +515,7 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
               <div className="bg-gray-50 rounded-xl p-6">
                 <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
                   <FolderOpen className="w-5 h-5 text-gray-600" />
-                  Documentos Enviados ({c.documentos.length})
+                  Documentos do Cliente ({c.documentos.length})
                 </h3>
                 {c.documentos.length > 0 ? (
                   <div className="space-y-2">
@@ -330,7 +537,7 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                     ))}
                   </div>
                 ) : (
-                  <p className="text-gray-500 text-sm">Nenhum documento enviado</p>
+                  <p className="text-gray-500 text-sm">Nenhum documento enviado pelo cliente</p>
                 )}
               </div>
 
@@ -347,23 +554,33 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                     </button>
                   )}
                   
-                  {c.status === 'validado' && (
+                  {(c.status === 'validado' || c.status === 'pendente') && (
                     <button
-                      onClick={() => handleEnviarDocumentos(c.id)}
-                      disabled={sendingDocs}
-                      className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium px-6 py-3 rounded-xl disabled:opacity-50"
+                      onClick={() => handleGerarDocumentos(c.id)}
+                      disabled={gerandoDocs}
+                      className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-medium px-6 py-3 rounded-xl disabled:opacity-50"
                     >
-                      {sendingDocs ? (
+                      {gerandoDocs ? (
                         <>
                           <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          Gerando e enviando...
+                          Gerando...
                         </>
                       ) : (
                         <>
-                          <Send className="w-5 h-5" />
-                          Gerar e Enviar Documentos
+                          <FileCheck className="w-5 h-5" />
+                          Gerar Documentos
                         </>
                       )}
+                    </button>
+                  )}
+
+                  {(c.status === 'documentos_gerados' || c.status === 'validado' || c.arquivos_gerados?.contrato) && (
+                    <button
+                      onClick={() => setShowEmailModal(true)}
+                      className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium px-6 py-3 rounded-xl"
+                    >
+                      <Send className="w-5 h-5" />
+                      Enviar por E-mail
                     </button>
                   )}
 
@@ -374,26 +591,38 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                     </div>
                   )}
 
-                  <a
-                    href={`${API_URL}/api/cadastros/${c.id}/download/contrato`}
-                    className="flex items-center gap-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-6 py-3 rounded-xl"
-                  >
-                    <Download className="w-5 h-5" />
-                    Baixar Contrato
-                  </a>
+                  {c.arquivos_gerados?.contrato && (
+                    <a
+                      href={`${API_URL}/api/cadastros/${c.id}/download/contrato`}
+                      className="flex items-center gap-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-6 py-3 rounded-xl"
+                    >
+                      <Download className="w-5 h-5" />
+                      Baixar Contrato
+                    </a>
+                  )}
 
-                  <a
-                    href={`${API_URL}/api/cadastros/${c.id}/download/procuracao`}
-                    className="flex items-center gap-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-6 py-3 rounded-xl"
-                  >
-                    <Download className="w-5 h-5" />
-                    Baixar Procuração
-                  </a>
+                  {c.arquivos_gerados?.procuracao && (
+                    <a
+                      href={`${API_URL}/api/cadastros/${c.id}/download/procuracao`}
+                      className="flex items-center gap-2 bg-gray-200 hover:bg-gray-300 text-gray-700 font-medium px-6 py-3 rounded-xl"
+                    >
+                      <Download className="w-5 h-5" />
+                      Baixar Procuração
+                    </a>
+                  )}
                 </div>
               </div>
             </div>
           </div>
         </div>
+
+        {showEmailModal && (
+          <EmailModal
+            cadastro={c}
+            onClose={() => setShowEmailModal(false)}
+            onSuccess={handleEmailEnviado}
+          />
+        )}
       </div>
     )
   }
@@ -424,7 +653,7 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
 
       <div className="max-w-6xl mx-auto px-4 py-6">
         {/* Stats */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
           <div className="bg-white rounded-xl p-4 shadow-sm">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center">
@@ -460,12 +689,23 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
           </div>
           <div className="bg-white rounded-xl p-4 shadow-sm">
             <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center">
+                <FileText className="w-5 h-5 text-purple-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold">{cadastros.filter(c => c.status === 'documentos_gerados').length}</p>
+                <p className="text-gray-500 text-sm">Docs Prontos</p>
+              </div>
+            </div>
+          </div>
+          <div className="bg-white rounded-xl p-4 shadow-sm">
+            <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
                 <CheckCircle className="w-5 h-5 text-green-600" />
               </div>
               <div>
                 <p className="text-2xl font-bold">{cadastros.filter(c => c.status === 'enviado').length}</p>
-                <p className="text-gray-500 text-sm">Concluídos</p>
+                <p className="text-gray-500 text-sm">Enviados</p>
               </div>
             </div>
           </div>
@@ -494,7 +734,8 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
                 <option value="todos">Todos os status</option>
                 <option value="pendente">Pendentes</option>
                 <option value="validado">Validados</option>
-                <option value="enviado">Docs Enviados</option>
+                <option value="documentos_gerados">Docs Prontos</option>
+                <option value="enviado">Enviados</option>
               </select>
             </div>
           </div>

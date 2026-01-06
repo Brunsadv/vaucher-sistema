@@ -1,6 +1,6 @@
 """
 Backend - Vaucher & Álvares Sistema de Cadastro
-FastAPI + Geração de Documentos + Envio de E-mail
+FastAPI + PostgreSQL + Geração de Documentos + Envio de E-mail
 """
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
@@ -20,6 +20,15 @@ from email.mime.base import MIMEBase
 from email import encoders
 import uuid
 import hashlib
+import logging
+
+# Configurar logging detalhado
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# PostgreSQL
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 # ============================================
 # CONFIGURAÇÃO
@@ -28,7 +37,7 @@ import hashlib
 app = FastAPI(
     title="Vaucher & Álvares - API",
     description="Sistema de cadastro de clientes e geração de documentos",
-    version="1.0.0"
+    version="2.0.0"
 )
 
 # CORS - permitir acesso dos frontends
@@ -39,9 +48,8 @@ app.add_middleware(
         "http://localhost:3001",
         "https://cadastro.vaucherealvares.com.br",
         "https://painel.vaucherealvares.com.br",
-	"https://vaucher-cliente.vercel.app",
+        "https://vaucher-cliente.vercel.app",
         "https://vaucher-admin.vercel.app",
-        # Adicione seus domínios Vercel aqui após deploy
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -53,14 +61,173 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELOS_DIR = os.path.join(BASE_DIR, "modelos")
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 GERADOS_DIR = os.path.join(BASE_DIR, "documentos_gerados")
-DATA_DIR = os.path.join(BASE_DIR, "data")
 
 # Criar diretórios se não existirem
-for dir_path in [MODELOS_DIR, UPLOADS_DIR, GERADOS_DIR, DATA_DIR]:
+for dir_path in [MODELOS_DIR, UPLOADS_DIR, GERADOS_DIR]:
     os.makedirs(dir_path, exist_ok=True)
 
-# Arquivo de dados (em produção, usar banco de dados)
-CADASTROS_FILE = os.path.join(DATA_DIR, "cadastros.json")
+# Banco de dados
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+# ============================================
+# BANCO DE DADOS
+# ============================================
+
+def get_db():
+    """Conecta ao PostgreSQL."""
+    if not DATABASE_URL:
+        logger.error("DATABASE_URL não configurada!")
+        return None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        return conn
+    except Exception as e:
+        logger.error(f"Erro ao conectar ao banco: {e}")
+        return None
+
+def init_db():
+    """Cria as tabelas se não existirem."""
+    conn = get_db()
+    if not conn:
+        logger.error("Não foi possível inicializar o banco de dados")
+        return
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS cadastros (
+                id VARCHAR(20) PRIMARY KEY,
+                data VARCHAR(20),
+                data_hora TIMESTAMP,
+                status VARCHAR(20) DEFAULT 'pendente',
+                dados JSONB,
+                documentos JSONB DEFAULT '[]',
+                arquivos_gerados JSONB DEFAULT '{}'
+            )
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info("Banco de dados inicializado com sucesso!")
+    except Exception as e:
+        logger.error(f"Erro ao criar tabelas: {e}")
+
+# Inicializar banco ao iniciar
+@app.on_event("startup")
+def startup():
+    logger.info("Iniciando aplicação...")
+    init_db()
+
+# ============================================
+# FUNÇÕES DO BANCO
+# ============================================
+
+def salvar_cadastro(cadastro: dict):
+    """Salva ou atualiza um cadastro no banco."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO cadastros (id, data, data_hora, status, dados, documentos, arquivos_gerados)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                status = EXCLUDED.status,
+                dados = EXCLUDED.dados,
+                documentos = EXCLUDED.documentos,
+                arquivos_gerados = EXCLUDED.arquivos_gerados
+        """, (
+            cadastro["id"],
+            cadastro["data"],
+            cadastro.get("data_hora", datetime.now().isoformat()),
+            cadastro["status"],
+            json.dumps(cadastro["dados"]),
+            json.dumps(cadastro.get("documentos", [])),
+            json.dumps(cadastro.get("arquivos_gerados", {}))
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao salvar cadastro: {e}")
+        return False
+
+def carregar_cadastros() -> List[dict]:
+    """Carrega todos os cadastros do banco."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM cadastros ORDER BY data_hora DESC")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        cadastros = []
+        for row in rows:
+            cadastros.append({
+                "id": row["id"],
+                "data": row["data"],
+                "data_hora": row["data_hora"].isoformat() if row["data_hora"] else "",
+                "status": row["status"],
+                "dados": row["dados"] if isinstance(row["dados"], dict) else json.loads(row["dados"]),
+                "documentos": row["documentos"] if isinstance(row["documentos"], list) else json.loads(row["documentos"] or "[]"),
+                "arquivos_gerados": row["arquivos_gerados"] if isinstance(row["arquivos_gerados"], dict) else json.loads(row["arquivos_gerados"] or "{}")
+            })
+        return cadastros
+    except Exception as e:
+        logger.error(f"Erro ao carregar cadastros: {e}")
+        return []
+
+def buscar_cadastro(cadastro_id: str) -> dict:
+    """Busca um cadastro específico."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM cadastros WHERE id = %s", (cadastro_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if row:
+            return {
+                "id": row["id"],
+                "data": row["data"],
+                "data_hora": row["data_hora"].isoformat() if row["data_hora"] else "",
+                "status": row["status"],
+                "dados": row["dados"] if isinstance(row["dados"], dict) else json.loads(row["dados"]),
+                "documentos": row["documentos"] if isinstance(row["documentos"], list) else json.loads(row["documentos"] or "[]"),
+                "arquivos_gerados": row["arquivos_gerados"] if isinstance(row["arquivos_gerados"], dict) else json.loads(row["arquivos_gerados"] or "{}")
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar cadastro: {e}")
+        return None
+
+def atualizar_status(cadastro_id: str, status: str):
+    """Atualiza o status de um cadastro."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE cadastros SET status = %s WHERE id = %s", (status, cadastro_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao atualizar status: {e}")
+        return False
 
 # ============================================
 # MODELOS DE DADOS
@@ -83,13 +250,6 @@ class DadosCliente(BaseModel):
     honorarios: Optional[str] = ""
     observacoes: Optional[str] = ""
 
-class CadastroCompleto(BaseModel):
-    id: str
-    data: str
-    status: str  # pendente, validado, enviado
-    dados: DadosCliente
-    documentos: List[str] = []
-
 class LoginRequest(BaseModel):
     email: str
     senha: str
@@ -100,21 +260,13 @@ class LoginResponse(BaseModel):
     nome: Optional[str] = None
     message: Optional[str] = None
 
+class EnviarEmailRequest(BaseModel):
+    assunto: Optional[str] = "Documentos - Vaucher & Álvares Advogados"
+    mensagem: Optional[str] = ""
+
 # ============================================
 # UTILITÁRIOS
 # ============================================
-
-def carregar_cadastros() -> List[dict]:
-    """Carrega cadastros do arquivo JSON."""
-    if os.path.exists(CADASTROS_FILE):
-        with open(CADASTROS_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    return []
-
-def salvar_cadastros(cadastros: List[dict]):
-    """Salva cadastros no arquivo JSON."""
-    with open(CADASTROS_FILE, 'w', encoding='utf-8') as f:
-        json.dump(cadastros, f, ensure_ascii=False, indent=2)
 
 def gerar_token(email: str) -> str:
     """Gera um token simples para autenticação."""
@@ -122,7 +274,7 @@ def gerar_token(email: str) -> str:
     data = f"{email}:{timestamp}:vaucher_secret_key"
     return hashlib.sha256(data.encode()).hexdigest()
 
-# Usuários do sistema (em produção, usar banco de dados)
+# Usuários do sistema
 USUARIOS = {
     "admin@vaucherealvares.com.br": {"senha": "admin123", "nome": "Administrador"},
     "bruno@vaucherealvares.com.br": {"senha": "bruno123", "nome": "Bruno Álvares"},
@@ -199,12 +351,12 @@ class GeradorDocumentos:
         
         return resultado
     
-    def _gerar_documento(self, modelo_path: str, dados: dict, nome_saida: str) -> str:
+    def _gerar_documento(self, modelo_path: str, dados: dict, nome_saida: str, cadastro_id: str) -> str:
         if not os.path.exists(modelo_path):
             raise FileNotFoundError(f"Modelo não encontrado: {modelo_path}")
         
-        # Criar pasta do cliente
-        cliente_dir = os.path.join(GERADOS_DIR, dados.get('cpf', 'temp').replace('.', '').replace('-', ''))
+        # Criar pasta do cliente usando ID do cadastro
+        cliente_dir = os.path.join(GERADOS_DIR, cadastro_id)
         os.makedirs(cliente_dir, exist_ok=True)
         
         temp_dir = os.path.join(cliente_dir, f'temp_{uuid.uuid4().hex[:8]}')
@@ -240,20 +392,20 @@ class GeradorDocumentos:
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
     
-    def gerar_contrato(self, dados: dict) -> str:
+    def gerar_contrato(self, dados: dict, cadastro_id: str) -> str:
         nome = dados.get('nome', 'Cliente').replace(' ', '_')
         nome_arquivo = f"Contrato_Honorarios_{nome}.docx"
-        return self._gerar_documento(self.modelo_contrato, dados, nome_arquivo)
+        return self._gerar_documento(self.modelo_contrato, dados, nome_arquivo, cadastro_id)
     
-    def gerar_procuracao(self, dados: dict) -> str:
+    def gerar_procuracao(self, dados: dict, cadastro_id: str) -> str:
         nome = dados.get('nome', 'Cliente').replace(' ', '_')
         nome_arquivo = f"Procuracao_{nome}.docx"
-        return self._gerar_documento(self.modelo_procuracao, dados, nome_arquivo)
+        return self._gerar_documento(self.modelo_procuracao, dados, nome_arquivo, cadastro_id)
     
-    def gerar_todos(self, dados: dict) -> dict:
+    def gerar_todos(self, dados: dict, cadastro_id: str) -> dict:
         return {
-            'contrato': self.gerar_contrato(dados),
-            'procuracao': self.gerar_procuracao(dados)
+            'contrato': self.gerar_contrato(dados, cadastro_id),
+            'procuracao': self.gerar_procuracao(dados, cadastro_id)
         }
 
 gerador = GeradorDocumentos()
@@ -264,12 +416,13 @@ gerador = GeradorDocumentos()
 
 class EmailService:
     def __init__(self):
-        # Configurar via variáveis de ambiente
         self.smtp_host = os.getenv('SMTP_HOST', 'smtp.gmail.com')
         self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
         self.smtp_user = os.getenv('SMTP_USER', '')
         self.smtp_pass = os.getenv('SMTP_PASS', '')
         self.from_email = os.getenv('FROM_EMAIL', 'atendimento@vaucherealvares.com')
+        
+        logger.info(f"EmailService configurado: host={self.smtp_host}, port={self.smtp_port}, user={self.smtp_user}")
     
     def enviar_confirmacao_cadastro(self, destinatario: str, nome: str) -> bool:
         """Envia e-mail de confirmação de cadastro."""
@@ -299,9 +452,10 @@ class EmailService:
         
         return self._enviar(destinatario, assunto, corpo_html)
     
-    def enviar_documentos(self, destinatario: str, nome: str, arquivos: List[str]) -> bool:
+    def enviar_documentos(self, destinatario: str, nome: str, arquivos: List[str], assunto: str = None, mensagem_extra: str = "") -> bool:
         """Envia documentos para o cliente."""
-        assunto = "Seus Documentos - Vaucher & Álvares Advogados"
+        if not assunto:
+            assunto = "Seus Documentos - Vaucher & Álvares Advogados"
         
         corpo_html = f"""
         <html>
@@ -309,11 +463,8 @@ class EmailService:
             <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
                 <h2 style="color: #8B1538;">Vaucher & Álvares Advogados</h2>
                 <p>Prezado(a) <strong>{nome}</strong>,</p>
-                <p>Seguem em anexo os documentos para sua análise e assinatura:</p>
-                <ul>
-                    <li>Contrato de Honorários Advocatícios</li>
-                    <li>Procuração Ad Judicia</li>
-                </ul>
+                <p>Seguem em anexo os documentos para sua análise e assinatura.</p>
+                {f'<p>{mensagem_extra}</p>' if mensagem_extra else ''}
                 <p>Por favor, leia atentamente os documentos. Após assiná-los, 
                 você pode enviá-los de volta por e-mail ou entregá-los 
                 pessoalmente em nosso escritório.</p>
@@ -333,8 +484,11 @@ class EmailService:
     
     def _enviar(self, destinatario: str, assunto: str, corpo_html: str, anexos: List[str] = None) -> bool:
         """Envia e-mail."""
+        logger.info(f"Tentando enviar e-mail para {destinatario}")
+        logger.info(f"SMTP: {self.smtp_host}:{self.smtp_port}, User: {self.smtp_user}")
+        
         if not self.smtp_user or not self.smtp_pass:
-            print("⚠️ Credenciais SMTP não configuradas. E-mail não enviado.")
+            logger.error("Credenciais SMTP não configuradas!")
             return False
         
         try:
@@ -349,6 +503,7 @@ class EmailService:
             if anexos:
                 for arquivo in anexos:
                     if os.path.exists(arquivo):
+                        logger.info(f"Anexando arquivo: {arquivo}")
                         with open(arquivo, 'rb') as f:
                             part = MIMEBase('application', 'octet-stream')
                             part.set_payload(f.read())
@@ -358,17 +513,30 @@ class EmailService:
                                 f'attachment; filename={os.path.basename(arquivo)}'
                             )
                             msg.attach(part)
+                    else:
+                        logger.warning(f"Arquivo não encontrado: {arquivo}")
             
             # Enviar
+            logger.info("Conectando ao servidor SMTP...")
             server = smtplib.SMTP(self.smtp_host, self.smtp_port)
+            server.set_debuglevel(1)  # Debug SMTP
             server.starttls()
+            logger.info("TLS iniciado, fazendo login...")
             server.login(self.smtp_user, self.smtp_pass)
+            logger.info("Login OK, enviando mensagem...")
             server.send_message(msg)
             server.quit()
             
+            logger.info(f"E-mail enviado com sucesso para {destinatario}")
             return True
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error(f"Erro de autenticação SMTP: {e}")
+            return False
+        except smtplib.SMTPException as e:
+            logger.error(f"Erro SMTP: {e}")
+            return False
         except Exception as e:
-            print(f"Erro ao enviar e-mail: {e}")
+            logger.error(f"Erro ao enviar e-mail: {e}")
             return False
 
 email_service = EmailService()
@@ -379,11 +547,11 @@ email_service = EmailService()
 
 @app.get("/")
 def root():
-    return {"message": "Vaucher & Álvares API", "status": "online"}
+    return {"message": "Vaucher & Álvares API", "status": "online", "version": "2.0"}
 
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    return {"status": "healthy", "database": "connected" if get_db() else "disconnected"}
 
 # --- AUTENTICAÇÃO ---
 
@@ -410,7 +578,7 @@ def login(request: LoginRequest):
 @app.post("/api/cadastros")
 async def criar_cadastro(dados: DadosCliente):
     """Recebe novo cadastro do cliente."""
-    cadastros = carregar_cadastros()
+    logger.info(f"Novo cadastro recebido: {dados.nome}")
     
     novo_cadastro = {
         "id": uuid.uuid4().hex[:12],
@@ -418,16 +586,22 @@ async def criar_cadastro(dados: DadosCliente):
         "data_hora": datetime.now().isoformat(),
         "status": "pendente",
         "dados": dados.dict(),
-        "documentos": []
+        "documentos": [],
+        "arquivos_gerados": {}
     }
     
-    cadastros.insert(0, novo_cadastro)
-    salvar_cadastros(cadastros)
-    
-    # Enviar e-mail de confirmação
-    email_service.enviar_confirmacao_cadastro(dados.email, dados.nome)
-    
-    return {"success": True, "id": novo_cadastro["id"]}
+    if salvar_cadastro(novo_cadastro):
+        logger.info(f"Cadastro salvo com ID: {novo_cadastro['id']}")
+        
+        # Tentar enviar e-mail de confirmação
+        try:
+            email_service.enviar_confirmacao_cadastro(dados.email, dados.nome)
+        except Exception as e:
+            logger.error(f"Erro ao enviar e-mail de confirmação: {e}")
+        
+        return {"success": True, "id": novo_cadastro["id"]}
+    else:
+        raise HTTPException(status_code=500, detail="Erro ao salvar cadastro")
 
 @app.get("/api/cadastros")
 def listar_cadastros():
@@ -437,75 +611,114 @@ def listar_cadastros():
 @app.get("/api/cadastros/{cadastro_id}")
 def obter_cadastro(cadastro_id: str):
     """Obtém detalhes de um cadastro específico."""
-    cadastros = carregar_cadastros()
-    for c in cadastros:
-        if c["id"] == cadastro_id:
-            return c
+    cadastro = buscar_cadastro(cadastro_id)
+    if cadastro:
+        return cadastro
     raise HTTPException(status_code=404, detail="Cadastro não encontrado")
 
 @app.put("/api/cadastros/{cadastro_id}/validar")
 def validar_cadastro(cadastro_id: str):
     """Marca cadastro como validado."""
-    cadastros = carregar_cadastros()
-    for c in cadastros:
-        if c["id"] == cadastro_id:
-            c["status"] = "validado"
-            salvar_cadastros(cadastros)
-            return {"success": True}
+    if atualizar_status(cadastro_id, "validado"):
+        return {"success": True}
     raise HTTPException(status_code=404, detail="Cadastro não encontrado")
 
 @app.post("/api/cadastros/{cadastro_id}/gerar-documentos")
-def gerar_e_enviar_documentos(cadastro_id: str):
-    """Gera documentos e envia para o cliente."""
-    cadastros = carregar_cadastros()
-    cadastro = None
+def gerar_documentos(cadastro_id: str):
+    """Gera documentos SEM enviar por e-mail."""
+    logger.info(f"Gerando documentos para cadastro: {cadastro_id}")
     
-    for c in cadastros:
-        if c["id"] == cadastro_id:
-            cadastro = c
-            break
-    
+    cadastro = buscar_cadastro(cadastro_id)
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
     try:
         # Gerar documentos
         dados = cadastro["dados"]
-        arquivos = gerador.gerar_todos(dados)
+        arquivos = gerador.gerar_todos(dados, cadastro_id)
+        logger.info(f"Documentos gerados: {arquivos}")
         
-        # Enviar por e-mail
-        email_service.enviar_documentos(
-            dados["email"],
-            dados["nome"],
-            [arquivos["contrato"], arquivos["procuracao"]]
-        )
-        
-        # Atualizar status
-        cadastro["status"] = "enviado"
+        # Atualizar cadastro
+        cadastro["status"] = "documentos_gerados"
         cadastro["arquivos_gerados"] = arquivos
-        salvar_cadastros(cadastros)
+        salvar_cadastro(cadastro)
         
         return {
             "success": True,
-            "arquivos": arquivos
+            "arquivos": arquivos,
+            "message": "Documentos gerados com sucesso! Use o botão 'Enviar por E-mail' para enviar ao cliente."
         }
     except Exception as e:
+        logger.error(f"Erro ao gerar documentos: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/cadastros/{cadastro_id}/enviar-email")
+async def enviar_email_documentos(
+    cadastro_id: str,
+    assunto: str = Form(default="Seus Documentos - Vaucher & Álvares Advogados"),
+    mensagem: str = Form(default=""),
+    anexos_extras: List[UploadFile] = File(default=[])
+):
+    """Envia documentos por e-mail para o cliente."""
+    logger.info(f"Enviando e-mail para cadastro: {cadastro_id}")
+    
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    dados = cadastro["dados"]
+    arquivos_para_enviar = []
+    
+    # Adicionar contrato e procuração se existirem
+    if cadastro.get("arquivos_gerados"):
+        if cadastro["arquivos_gerados"].get("contrato"):
+            arquivos_para_enviar.append(cadastro["arquivos_gerados"]["contrato"])
+        if cadastro["arquivos_gerados"].get("procuracao"):
+            arquivos_para_enviar.append(cadastro["arquivos_gerados"]["procuracao"])
+    
+    # Salvar e adicionar anexos extras
+    if anexos_extras:
+        cliente_dir = os.path.join(GERADOS_DIR, cadastro_id)
+        os.makedirs(cliente_dir, exist_ok=True)
+        
+        for anexo in anexos_extras:
+            if anexo.filename:
+                file_path = os.path.join(cliente_dir, anexo.filename)
+                with open(file_path, "wb") as f:
+                    content = await anexo.read()
+                    f.write(content)
+                arquivos_para_enviar.append(file_path)
+                logger.info(f"Anexo extra salvo: {file_path}")
+    
+    # Enviar e-mail
+    sucesso = email_service.enviar_documentos(
+        dados["email"],
+        dados["nome"],
+        arquivos_para_enviar,
+        assunto,
+        mensagem
+    )
+    
+    if sucesso:
+        cadastro["status"] = "enviado"
+        salvar_cadastro(cadastro)
+        return {"success": True, "message": f"E-mail enviado para {dados['email']}"}
+    else:
+        raise HTTPException(status_code=500, detail="Erro ao enviar e-mail. Verifique os logs.")
 
 @app.get("/api/cadastros/{cadastro_id}/download/{tipo}")
 def download_documento(cadastro_id: str, tipo: str):
     """Faz download de um documento gerado."""
-    cadastros = carregar_cadastros()
+    cadastro = buscar_cadastro(cadastro_id)
     
-    for c in cadastros:
-        if c["id"] == cadastro_id and "arquivos_gerados" in c:
-            arquivo = c["arquivos_gerados"].get(tipo)
-            if arquivo and os.path.exists(arquivo):
-                return FileResponse(
-                    arquivo,
-                    filename=os.path.basename(arquivo),
-                    media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-                )
+    if cadastro and cadastro.get("arquivos_gerados"):
+        arquivo = cadastro["arquivos_gerados"].get(tipo)
+        if arquivo and os.path.exists(arquivo):
+            return FileResponse(
+                arquivo,
+                filename=os.path.basename(arquivo),
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            )
     
     raise HTTPException(status_code=404, detail="Documento não encontrado")
 
@@ -514,27 +727,27 @@ def download_documento(cadastro_id: str, tipo: str):
 @app.post("/api/cadastros/{cadastro_id}/upload")
 async def upload_documento(cadastro_id: str, arquivo: UploadFile = File(...)):
     """Recebe upload de documento do cliente."""
-    cadastros = carregar_cadastros()
+    logger.info(f"Upload recebido para cadastro {cadastro_id}: {arquivo.filename}")
     
-    for c in cadastros:
-        if c["id"] == cadastro_id:
-            # Salvar arquivo
-            cliente_dir = os.path.join(UPLOADS_DIR, cadastro_id)
-            os.makedirs(cliente_dir, exist_ok=True)
-            
-            file_path = os.path.join(cliente_dir, arquivo.filename)
-            with open(file_path, "wb") as f:
-                content = await arquivo.read()
-                f.write(content)
-            
-            # Atualizar cadastro
-            if arquivo.filename not in c["documentos"]:
-                c["documentos"].append(arquivo.filename)
-            salvar_cadastros(cadastros)
-            
-            return {"success": True, "filename": arquivo.filename}
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
-    raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    # Salvar arquivo
+    cliente_dir = os.path.join(UPLOADS_DIR, cadastro_id)
+    os.makedirs(cliente_dir, exist_ok=True)
+    
+    file_path = os.path.join(cliente_dir, arquivo.filename)
+    with open(file_path, "wb") as f:
+        content = await arquivo.read()
+        f.write(content)
+    
+    # Atualizar cadastro
+    if arquivo.filename not in cadastro["documentos"]:
+        cadastro["documentos"].append(arquivo.filename)
+    salvar_cadastro(cadastro)
+    
+    return {"success": True, "filename": arquivo.filename}
 
 @app.get("/api/cadastros/{cadastro_id}/uploads/{filename}")
 def download_upload_cliente(cadastro_id: str, filename: str):
@@ -549,6 +762,24 @@ def download_upload_cliente(cadastro_id: str, filename: str):
         )
     
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+# --- TESTE DE E-MAIL ---
+
+@app.post("/api/teste-email")
+def teste_email(destinatario: str = Form(...)):
+    """Endpoint para testar envio de e-mail."""
+    logger.info(f"Teste de e-mail para: {destinatario}")
+    
+    sucesso = email_service._enviar(
+        destinatario,
+        "Teste - Vaucher & Álvares Sistema",
+        "<h1>Teste de E-mail</h1><p>Se você recebeu este e-mail, a configuração está funcionando!</p>"
+    )
+    
+    if sucesso:
+        return {"success": True, "message": f"E-mail de teste enviado para {destinatario}"}
+    else:
+        return {"success": False, "message": "Falha ao enviar e-mail. Verifique os logs no Railway."}
 
 # ============================================
 # INICIALIZAÇÃO
