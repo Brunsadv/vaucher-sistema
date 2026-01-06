@@ -39,6 +39,8 @@ app.add_middleware(
         "http://localhost:3001",
         "https://cadastro.vaucherealvares.com.br",
         "https://painel.vaucherealvares.com.br",
+	"https://vaucher-cliente.vercel.app",
+        "https://vaucher-admin.vercel.app",
         # Adicione seus domínios Vercel aqui após deploy
     ],
     allow_credentials=True,
