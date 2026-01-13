@@ -76,7 +76,7 @@ RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
 
 # URL da logo (será atualizada após deploy)
-LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher_e_Alvares-06.jpg"
+LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher%20e%20Alvares-06.jpg"
 
 # ============================================
 # TEMPLATE DE E-MAIL COM LOGO
