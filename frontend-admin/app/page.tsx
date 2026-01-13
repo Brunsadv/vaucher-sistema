@@ -5,18 +5,22 @@ import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, 
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-const Logo = () => (
-  <div className="flex items-center justify-center gap-1">
-    <span className="text-2xl font-bold tracking-wider text-gray-800">VAUCHER</span>
-    <svg viewBox="0 0 60 50" className="w-10 h-8">
-      <path d="M15 40 Q5 30 15 20 L25 30 Q20 35 15 40 Z" fill="#8B1538"/>
-      <path d="M25 30 L35 20 Q45 30 35 40 L25 30 Z" fill="#B91C3C"/>
-      <path d="M20 25 Q15 20 20 15 L30 25 Q25 28 20 25 Z" fill="#991B2E"/>
-      <path d="M30 25 L40 15 Q45 20 40 25 L30 25 Z" fill="#C92243"/>
-    </svg>
-    <span className="text-2xl font-bold tracking-wider text-gray-800">ÁLVARES</span>
-  </div>
-)
+const LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher%20e%20Alvares-06.jpg"
+
+const Logo = ({ size = 'normal' }: { size?: 'small' | 'normal' | 'large' }) => {
+  const sizes = {
+    small: 'h-8',
+    normal: 'h-12',
+    large: 'h-16'
+  }
+  return (
+    <img 
+      src={LOGO_URL} 
+      alt="Vaucher & Álvares Advogados" 
+      className={`${sizes[size]} w-auto`}
+    />
+  )
+}
 
 interface UserData {
   nome: string
