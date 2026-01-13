@@ -6,6 +6,7 @@ FastAPI + PostgreSQL + Geração de Documentos + Resend para E-mail
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 import os
@@ -34,7 +35,7 @@ from psycopg2.extras import RealDictCursor
 app = FastAPI(
     title="Vaucher & Álvares - API",
     description="Sistema de cadastro de clientes e geração de documentos",
-    version="2.1.0"
+    version="2.2.0"
 )
 
 # CORS - permitir acesso dos frontends
@@ -45,6 +46,8 @@ app.add_middleware(
         "http://localhost:3001",
         "https://cadastro.vaucherealvares.com.br",
         "https://painel.vaucherealvares.com.br",
+        "https://cadastro.vaucherealvares.com",
+        "https://painel.vaucherealvares.com",
         "https://vaucher-cliente.vercel.app",
         "https://vaucher-admin.vercel.app",
     ],
@@ -58,16 +61,55 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELOS_DIR = os.path.join(BASE_DIR, "modelos")
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 GERADOS_DIR = os.path.join(BASE_DIR, "documentos_gerados")
-ENVIO_DIR = os.path.join(BASE_DIR, "documentos_envio")
+STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 # Criar diretórios se não existirem
-for dir_path in [MODELOS_DIR, UPLOADS_DIR, GERADOS_DIR, ENVIO_DIR]:
+for dir_path in [MODELOS_DIR, UPLOADS_DIR, GERADOS_DIR, STATIC_DIR]:
     os.makedirs(dir_path, exist_ok=True)
+
+# Servir arquivos estáticos (logo)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 # Banco de dados e E-mail
 DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
+
+# URL da logo (será atualizada após deploy)
+LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher_e_Alvares-06.jpg"
+
+# ============================================
+# TEMPLATE DE E-MAIL COM LOGO
+# ============================================
+
+def criar_email_html(conteudo: str) -> str:
+    """Cria o HTML do e-mail com logo e rodapé padrão."""
+    return f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; color: #333; background-color: #f5f5f5; margin: 0; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+            <!-- Cabeçalho com Logo -->
+            <div style="background-color: #ffffff; padding: 30px; text-align: center; border-bottom: 3px solid #8B1538;">
+                <img src="{LOGO_URL}" alt="Vaucher & Álvares Advogados" style="max-width: 300px; height: auto;" />
+            </div>
+            
+            <!-- Conteúdo -->
+            <div style="padding: 30px;">
+                {conteudo}
+            </div>
+            
+            <!-- Rodapé -->
+            <div style="background-color: #f8f8f8; padding: 20px; text-align: center; border-top: 1px solid #eee;">
+                <p style="font-size: 12px; color: #666; margin: 0;">
+                    <strong>Vaucher & Álvares Sociedade de Advogados</strong><br>
+                    Rua Lima, nº 106, Jardim das Américas, Cuiabá-MT<br>
+                    (65) 3023-5959 | atendimento@vaucherealvares.com
+                </p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
 
 # ============================================
 # BANCO DE DADOS
@@ -416,7 +458,7 @@ async def enviar_email_resend(destinatario: str, assunto: str, corpo_html: str, 
     logger.info(f"Enviando e-mail via Resend para {destinatario}")
     
     payload = {
-        "from": FROM_EMAIL,
+        "from": f"Vaucher & Álvares <{FROM_EMAIL}>",
         "to": [destinatario],
         "subject": assunto,
         "html": corpo_html
@@ -450,26 +492,13 @@ async def enviar_email_resend(destinatario: str, assunto: str, corpo_html: str, 
         logger.error(f"Erro ao enviar e-mail: {e}")
         return False
 
-def preparar_anexo(caminho_arquivo: str) -> dict:
-    """Prepara um arquivo para ser anexado ao e-mail."""
-    if not os.path.exists(caminho_arquivo):
-        return None
-    
-    with open(caminho_arquivo, "rb") as f:
-        conteudo = base64.b64encode(f.read()).decode("utf-8")
-    
-    return {
-        "filename": os.path.basename(caminho_arquivo),
-        "content": conteudo
-    }
-
 # ============================================
 # ROTAS DA API
 # ============================================
 
 @app.get("/")
 def root():
-    return {"message": "Vaucher & Álvares API", "status": "online", "version": "2.1"}
+    return {"message": "Vaucher & Álvares API", "status": "online", "version": "2.2"}
 
 @app.get("/health")
 def health():
@@ -512,31 +541,24 @@ async def criar_cadastro(dados: DadosCliente):
     if salvar_cadastro(novo_cadastro):
         logger.info(f"Cadastro salvo com ID: {novo_cadastro['id']}")
         
-        # Enviar e-mail de confirmação
+        # Enviar e-mail de confirmação com logo
         try:
-            corpo_html = f"""
-            <html>
-            <body style="font-family: Arial, sans-serif; color: #333;">
-                <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-                    <h2 style="color: #8B1538;">Vaucher & Álvares Advogados</h2>
-                    <p>Prezado(a) <strong>{dados.nome}</strong>,</p>
-                    <p>Seu cadastro foi recebido com sucesso!</p>
-                    <p>Nossa equipe irá analisar as informações e documentos enviados. 
-                    Em breve você receberá o Contrato de Honorários e a Procuração 
-                    para assinatura.</p>
-                    <p><strong>Prazo estimado:</strong> até 2 dias úteis.</p>
-                    <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-                    <p style="font-size: 12px; color: #666;">
-                        Vaucher & Álvares Sociedade de Advogados<br>
-                        atendimento@vaucherealvares.com
-                    </p>
+            conteudo = f"""
+                <p style="font-size: 16px;">Prezado(a) <strong>{dados.nome}</strong>,</p>
+                <p>Seu cadastro foi recebido com sucesso!</p>
+                <p>Nossa equipe irá analisar as informações e documentos enviados. 
+                Em breve você receberá o Contrato de Honorários e a Procuração 
+                para assinatura.</p>
+                <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                    <p style="margin: 0;"><strong>⏱ Prazo estimado:</strong> até 2 dias úteis</p>
                 </div>
-            </body>
-            </html>
+                <p>Agradecemos a confiança em nosso escritório!</p>
             """
+            corpo_html = criar_email_html(conteudo)
+            
             await enviar_email_resend(
                 dados.email,
-                "Cadastro Recebido - Vaucher & Álvares Advogados",
+                "✅ Cadastro Recebido - Vaucher & Álvares Advogados",
                 corpo_html
             )
         except Exception as e:
@@ -624,28 +646,22 @@ async def enviar_email_documentos(
     if not anexos_email:
         raise HTTPException(status_code=400, detail="Nenhum arquivo selecionado para envio")
     
-    # Montar e-mail
-    corpo_html = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; color: #333;">
-        <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-            <h2 style="color: #8B1538;">Vaucher & Álvares Advogados</h2>
-            <p>Prezado(a) <strong>{dados['nome']}</strong>,</p>
-            <p>Seguem em anexo os documentos para sua análise e assinatura.</p>
-            {f'<p>{mensagem}</p>' if mensagem else ''}
-            <p>Por favor, leia atentamente os documentos. Após assiná-los, 
-            você pode enviá-los de volta por e-mail ou entregá-los 
-            pessoalmente em nosso escritório.</p>
-            <p><strong>Dúvidas?</strong> Entre em contato conosco.</p>
-            <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
-            <p style="font-size: 12px; color: #666;">
-                Vaucher & Álvares Sociedade de Advogados<br>
-                atendimento@vaucherealvares.com
-            </p>
+    # Montar e-mail com logo
+    mensagem_html = f"<p>{mensagem}</p>" if mensagem else ""
+    
+    conteudo = f"""
+        <p style="font-size: 16px;">Prezado(a) <strong>{dados['nome']}</strong>,</p>
+        <p>Seguem em anexo os documentos para sua análise e assinatura.</p>
+        {mensagem_html}
+        <p>Por favor, leia atentamente os documentos. Após assiná-los, 
+        você pode enviá-los de volta por e-mail ou entregá-los 
+        pessoalmente em nosso escritório.</p>
+        <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p style="margin: 0;"><strong>📎 Anexos:</strong> {len(anexos_email)} documento(s)</p>
         </div>
-    </body>
-    </html>
+        <p><strong>Dúvidas?</strong> Entre em contato conosco pelos canais abaixo.</p>
     """
+    corpo_html = criar_email_html(conteudo)
     
     sucesso = await enviar_email_resend(dados["email"], assunto, corpo_html, anexos_email)
     
