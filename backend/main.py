@@ -6,7 +6,7 @@ Com gerenciamento de usuários no banco de dados
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
@@ -21,6 +21,7 @@ import logging
 import httpx
 import base64
 import secrets
+from io import BytesIO
 
 # Configurar logging detalhado
 logging.basicConfig(level=logging.INFO)
@@ -915,6 +916,122 @@ async def enviar_email_documentos(
         return {"success": True, "message": f"E-mail enviado para {dados['email']} com {len(anexos_email)} anexo(s)"}
     else:
         raise HTTPException(status_code=500, detail="Erro ao enviar e-mail. Verifique os logs.")
+
+@app.get("/api/cadastros/exportar/excel")
+def exportar_cadastros_excel():
+    """Exporta todos os cadastros para uma planilha Excel."""
+    try:
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+    except ImportError:
+        raise HTTPException(status_code=500, detail="Biblioteca openpyxl não instalada")
+    
+    cadastros = carregar_cadastros()
+    
+    # Criar workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Cadastros"
+    
+    # Estilos
+    header_font = Font(bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="8B1538", end_color="8B1538", fill_type="solid")
+    header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    
+    # Cabeçalhos
+    headers = [
+        "ID", "Data Cadastro", "Status", "Nome", "CPF", "RG", 
+        "Data Nascimento", "Estado Civil", "Nacionalidade", "Profissão",
+        "Endereço", "E-mail", "Telefone", "Tipo de Demanda",
+        "Objeto do Contrato", "Poderes Específicos", "Observações"
+    ]
+    
+    for col, header in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col, value=header)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+    
+    # Mapeamento de tipos de demanda
+    tipos_demanda = {
+        'adicional_insalubridade': 'Adicional de Insalubridade',
+        'adicional_periculosidade': 'Adicional de Periculosidade',
+        'desvio_funcao': 'Desvio de Função',
+        'progressao_funcional': 'Progressão Funcional',
+        'revisao_aposentadoria': 'Revisão de Aposentadoria',
+        'licenca_premio': 'Licença Prêmio',
+        'ferias_nao_gozadas': 'Férias Não Gozadas',
+        'horas_extras': 'Horas Extras',
+        'reintegracao': 'Reintegração',
+        'outro': 'Outro'
+    }
+    
+    # Mapeamento de status
+    status_map = {
+        'pendente': 'Pendente',
+        'validado': 'Validado',
+        'documentos_gerados': 'Documentos Gerados',
+        'enviado': 'Enviado'
+    }
+    
+    # Dados
+    for row, cadastro in enumerate(cadastros, 2):
+        dados = cadastro.get("dados", {})
+        
+        values = [
+            cadastro.get("id", ""),
+            cadastro.get("data", ""),
+            status_map.get(cadastro.get("status", ""), cadastro.get("status", "")),
+            dados.get("nome", ""),
+            dados.get("cpf", ""),
+            dados.get("rg", ""),
+            dados.get("data_nascimento", ""),
+            dados.get("estado_civil", ""),
+            dados.get("nacionalidade", ""),
+            dados.get("profissao", ""),
+            dados.get("endereco_completo", ""),
+            dados.get("email", ""),
+            dados.get("telefone", ""),
+            tipos_demanda.get(dados.get("tipo_demanda", ""), dados.get("tipo_demanda", "")),
+            dados.get("objeto_contrato", ""),
+            dados.get("poderes_especificos", ""),
+            dados.get("observacoes", "")
+        ]
+        
+        for col, value in enumerate(values, 1):
+            cell = ws.cell(row=row, column=col, value=value)
+            cell.border = thin_border
+            cell.alignment = Alignment(vertical="top", wrap_text=True)
+    
+    # Ajustar largura das colunas
+    column_widths = [12, 12, 15, 30, 15, 15, 12, 12, 12, 20, 40, 30, 15, 25, 50, 50, 30]
+    for col, width in enumerate(column_widths, 1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    
+    # Congelar cabeçalho
+    ws.freeze_panes = "A2"
+    
+    # Salvar em memória
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    # Nome do arquivo com data
+    filename = f"cadastros_vaucher_alvares_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.document",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
 
 @app.get("/api/cadastros/{cadastro_id}/download/{tipo}")
 def download_documento(cadastro_id: str, tipo: str):

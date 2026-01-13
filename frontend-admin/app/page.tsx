@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings } from 'lucide-react'
+import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -1207,6 +1207,14 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                 <option value="enviado">Enviados</option>
               </select>
             </div>
+            <a
+              href={`${API_URL}/api/cadastros/exportar/excel`}
+              className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium px-4 py-2 rounded-lg transition-colors"
+            >
+              <FileSpreadsheet className="w-5 h-5" />
+              <span className="hidden sm:inline">Exportar Excel</span>
+              <span className="sm:hidden">Excel</span>
+            </a>
           </div>
         </div>
 
