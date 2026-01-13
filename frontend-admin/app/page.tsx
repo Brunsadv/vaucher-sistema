@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload } from 'lucide-react'
+import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -18,10 +18,20 @@ const Logo = () => (
   </div>
 )
 
-interface User {
+interface UserData {
   nome: string
   email: string
   token: string
+  is_admin: boolean
+}
+
+interface Usuario {
+  id: number
+  email: string
+  nome: string
+  is_admin: boolean
+  ativo: boolean
+  criado_em: string
 }
 
 interface Cadastro {
@@ -51,8 +61,8 @@ interface Cadastro {
   }
 }
 
-// Tela de Login
-const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
+// Tela de Login (SEM credenciais de demonstração)
+const LoginScreen = ({ onLogin }: { onLogin: (user: UserData) => void }) => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
@@ -73,7 +83,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
       const data = await response.json()
 
       if (data.success) {
-        onLogin({ nome: data.nome, email, token: data.token })
+        onLogin({ nome: data.nome, email, token: data.token, is_admin: data.is_admin })
       } else {
         setError(data.message || 'E-mail ou senha incorretos')
       }
@@ -146,14 +156,6 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
               ) : 'Entrar'}
             </button>
           </form>
-
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <p className="text-xs text-gray-500 text-center mb-2">Credenciais de demonstração:</p>
-            <div className="text-xs text-gray-600 space-y-1">
-              <p><strong>E-mail:</strong> admin@vaucherealvares.com.br</p>
-              <p><strong>Senha:</strong> admin123</p>
-            </div>
-          </div>
         </div>
 
         <p className="text-center text-gray-400 text-xs mt-6">
@@ -164,8 +166,421 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: User) => void }) => {
   )
 }
 
+// Modal de Gerenciamento de Usuários
+const UsuariosModal = ({ user, onClose }: { user: UserData, onClose: () => void }) => {
+  const [usuarios, setUsuarios] = useState<Usuario[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showForm, setShowForm] = useState(false)
+  const [editando, setEditando] = useState<Usuario | null>(null)
+  const [form, setForm] = useState({ email: '', nome: '', senha: '', is_admin: false })
+  const [erro, setErro] = useState('')
+  const [sucesso, setSucesso] = useState('')
+
+  useEffect(() => {
+    carregarUsuarios()
+  }, [])
+
+  const carregarUsuarios = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/usuarios`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setUsuarios(data)
+      }
+    } catch (err) {
+      console.error('Erro ao carregar usuários:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setErro('')
+    setSucesso('')
+
+    try {
+      if (editando) {
+        // Atualizar
+        const response = await fetch(`${API_URL}/api/usuarios/${editando.id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${user.token}`
+          },
+          body: JSON.stringify({
+            nome: form.nome,
+            senha: form.senha || undefined,
+            is_admin: form.is_admin
+          })
+        })
+        if (response.ok) {
+          setSucesso('Usuário atualizado com sucesso!')
+          carregarUsuarios()
+          setShowForm(false)
+          setEditando(null)
+          setForm({ email: '', nome: '', senha: '', is_admin: false })
+        } else {
+          const data = await response.json()
+          setErro(data.detail || 'Erro ao atualizar')
+        }
+      } else {
+        // Criar
+        const response = await fetch(`${API_URL}/api/usuarios`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${user.token}`
+          },
+          body: JSON.stringify(form)
+        })
+        if (response.ok) {
+          setSucesso('Usuário criado com sucesso!')
+          carregarUsuarios()
+          setShowForm(false)
+          setForm({ email: '', nome: '', senha: '', is_admin: false })
+        } else {
+          const data = await response.json()
+          setErro(data.detail || 'Erro ao criar usuário')
+        }
+      }
+    } catch (err) {
+      setErro('Erro de conexão')
+    }
+  }
+
+  const handleDesativar = async (id: number) => {
+    if (!confirm('Deseja desativar este usuário?')) return
+
+    try {
+      const response = await fetch(`${API_URL}/api/usuarios/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        setSucesso('Usuário desativado!')
+        carregarUsuarios()
+      } else {
+        const data = await response.json()
+        setErro(data.detail || 'Erro ao desativar')
+      }
+    } catch (err) {
+      setErro('Erro de conexão')
+    }
+  }
+
+  const handleEditar = (usuario: Usuario) => {
+    setEditando(usuario)
+    setForm({ email: usuario.email, nome: usuario.nome, senha: '', is_admin: usuario.is_admin })
+    setShowForm(true)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+        <div className="p-6 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Users className="w-6 h-6 text-red-700" />
+            <h2 className="text-xl font-bold text-gray-800">Gerenciar Usuários</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <div className="p-6 overflow-y-auto max-h-[70vh]">
+          {sucesso && (
+            <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm mb-4 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5" />
+              {sucesso}
+            </div>
+          )}
+
+          {erro && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm mb-4">
+              {erro}
+            </div>
+          )}
+
+          {!showForm ? (
+            <>
+              <button
+                onClick={() => { setShowForm(true); setEditando(null); setForm({ email: '', nome: '', senha: '', is_admin: false }); }}
+                className="flex items-center gap-2 bg-red-800 hover:bg-red-900 text-white font-medium px-4 py-2 rounded-lg mb-4"
+              >
+                <UserPlus className="w-5 h-5" />
+                Novo Usuário
+              </button>
+
+              {loading ? (
+                <div className="text-center py-8">
+                  <div className="w-8 h-8 border-2 border-red-800 border-t-transparent rounded-full animate-spin mx-auto" />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {usuarios.map((u) => (
+                    <div key={u.id} className={`border rounded-lg p-4 ${!u.ativo ? 'opacity-50 bg-gray-50' : ''}`}>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <p className="font-semibold text-gray-800">{u.nome}</p>
+                            {u.is_admin && (
+                              <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full font-medium">
+                                Admin
+                              </span>
+                            )}
+                            {!u.ativo && (
+                              <span className="px-2 py-0.5 bg-gray-200 text-gray-600 text-xs rounded-full font-medium">
+                                Inativo
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-gray-500">{u.email}</p>
+                        </div>
+                        {u.ativo && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleEditar(u)}
+                              className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                              title="Editar"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDesativar(u.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                              title="Desativar"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <h3 className="font-semibold text-gray-800 mb-4">
+                {editando ? 'Editar Usuário' : 'Novo Usuário'}
+              </h3>
+
+              {!editando && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">E-mail</label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                    required
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nome</label>
+                <input
+                  type="text"
+                  value={form.nome}
+                  onChange={(e) => setForm({ ...form, nome: e.target.value })}
+                  required
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  {editando ? 'Nova Senha (deixe em branco para manter)' : 'Senha'}
+                </label>
+                <input
+                  type="password"
+                  value={form.senha}
+                  onChange={(e) => setForm({ ...form, senha: e.target.value })}
+                  required={!editando}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="is_admin"
+                  checked={form.is_admin}
+                  onChange={(e) => setForm({ ...form, is_admin: e.target.checked })}
+                  className="w-4 h-4 text-red-800 rounded"
+                />
+                <label htmlFor="is_admin" className="text-sm text-gray-700">
+                  Administrador (pode gerenciar outros usuários)
+                </label>
+              </div>
+
+              <div className="flex gap-3 pt-4">
+                <button
+                  type="button"
+                  onClick={() => { setShowForm(false); setEditando(null); }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg"
+                >
+                  {editando ? 'Salvar' : 'Criar'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Modal de Alterar Senha
+const AlterarSenhaModal = ({ user, onClose }: { user: UserData, onClose: () => void }) => {
+  const [senhaAtual, setSenhaAtual] = useState('')
+  const [novaSenha, setNovaSenha] = useState('')
+  const [confirmarSenha, setConfirmarSenha] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [erro, setErro] = useState('')
+  const [sucesso, setSucesso] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setErro('')
+
+    if (novaSenha !== confirmarSenha) {
+      setErro('As senhas não conferem')
+      return
+    }
+
+    if (novaSenha.length < 6) {
+      setErro('A nova senha deve ter pelo menos 6 caracteres')
+      return
+    }
+
+    setLoading(true)
+
+    try {
+      const response = await fetch(`${API_URL}/api/alterar-senha`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({
+          senha_atual: senhaAtual,
+          nova_senha: novaSenha
+        })
+      })
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setSucesso(true)
+        setTimeout(onClose, 2000)
+      } else {
+        setErro(data.detail || 'Erro ao alterar senha')
+      }
+    } catch (err) {
+      setErro('Erro de conexão')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl shadow-xl max-w-md w-full">
+        <div className="p-6 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Key className="w-6 h-6 text-red-700" />
+            <h2 className="text-xl font-bold text-gray-800">Alterar Senha</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <div className="p-6">
+          {sucesso ? (
+            <div className="text-center py-8">
+              <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
+              <p className="text-lg font-semibold text-gray-800">Senha alterada com sucesso!</p>
+            </div>
+          ) : (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Senha Atual</label>
+                <input
+                  type="password"
+                  value={senhaAtual}
+                  onChange={(e) => setSenhaAtual(e.target.value)}
+                  required
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Nova Senha</label>
+                <input
+                  type="password"
+                  value={novaSenha}
+                  onChange={(e) => setNovaSenha(e.target.value)}
+                  required
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Confirmar Nova Senha</label>
+                <input
+                  type="password"
+                  value={confirmarSenha}
+                  onChange={(e) => setConfirmarSenha(e.target.value)}
+                  required
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                />
+              </div>
+
+              {erro && (
+                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                  {erro}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
+                >
+                  {loading ? 'Alterando...' : 'Alterar'}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Modal de Envio de E-mail
-const EmailModal = ({ cadastro, onClose, onSuccess }: { cadastro: Cadastro, onClose: () => void, onSuccess: () => void }) => {
+const EmailModal = ({ cadastro, user, onClose, onSuccess }: { cadastro: Cadastro, user: UserData, onClose: () => void, onSuccess: () => void }) => {
   const [assunto, setAssunto] = useState('Seus Documentos - Vaucher & Álvares Advogados')
   const [mensagem, setMensagem] = useState('')
   const [arquivosParaEnviar, setArquivosParaEnviar] = useState<File[]>([])
@@ -346,7 +761,7 @@ const EmailModal = ({ cadastro, onClose, onSuccess }: { cadastro: Cadastro, onCl
 }
 
 // Dashboard Administrativo
-const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }) => {
+const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => void }) => {
   const [cadastros, setCadastros] = useState<Cadastro[]>([])
   const [selectedCadastro, setSelectedCadastro] = useState<Cadastro | null>(null)
   const [filterStatus, setFilterStatus] = useState('todos')
@@ -354,6 +769,8 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
   const [gerandoDocs, setGerandoDocs] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showEmailModal, setShowEmailModal] = useState(false)
+  const [showUsuariosModal, setShowUsuariosModal] = useState(false)
+  const [showAlterarSenhaModal, setShowAlterarSenhaModal] = useState(false)
   const [mensagemSucesso, setMensagemSucesso] = useState('')
 
   const tiposDemanda: Record<string, string> = {
@@ -640,6 +1057,7 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
         {showEmailModal && (
           <EmailModal
             cadastro={c}
+            user={user}
             onClose={() => setShowEmailModal(false)}
             onSuccess={handleEmailEnviado}
           />
@@ -659,14 +1077,44 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
               <span className="text-gray-300">|</span>
               <span className="text-gray-600 font-medium">Painel Administrativo</span>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
               <span className="text-sm text-gray-600 hidden sm:block">
                 Olá, <strong>{user.nome}</strong>
+                {user.is_admin && <span className="text-red-600 ml-1">(Admin)</span>}
               </span>
-              <button onClick={onLogout} className="flex items-center gap-2 text-gray-500 hover:text-red-700">
-                <LogOut className="w-5 h-5" />
-                <span className="hidden sm:inline">Sair</span>
-              </button>
+              
+              {/* Menu de configurações */}
+              <div className="relative group">
+                <button className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100">
+                  <Settings className="w-5 h-5" />
+                </button>
+                <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
+                  <button
+                    onClick={() => setShowAlterarSenhaModal(true)}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                  >
+                    <Key className="w-4 h-4" />
+                    Alterar Senha
+                  </button>
+                  {user.is_admin && (
+                    <button
+                      onClick={() => setShowUsuariosModal(true)}
+                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      <Users className="w-4 h-4" />
+                      Gerenciar Usuários
+                    </button>
+                  )}
+                  <hr className="my-1" />
+                  <button
+                    onClick={onLogout}
+                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                  >
+                    <LogOut className="w-4 h-4" />
+                    Sair
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -825,20 +1273,35 @@ const AdminDashboard = ({ user, onLogout }: { user: User, onLogout: () => void }
           © {new Date().getFullYear()} Vaucher & Álvares Sociedade de Advogados — Painel Administrativo
         </p>
       </div>
+
+      {/* Modais */}
+      {showUsuariosModal && (
+        <UsuariosModal user={user} onClose={() => setShowUsuariosModal(false)} />
+      )}
+
+      {showAlterarSenhaModal && (
+        <AlterarSenhaModal user={user} onClose={() => setShowAlterarSenhaModal(false)} />
+      )}
     </div>
   )
 }
 
 // Página Principal
 export default function Home() {
-  const [user, setUser] = useState<User | null>(null)
+  const [user, setUser] = useState<UserData | null>(null)
 
-  const handleLogin = (userData: User) => {
+  const handleLogin = (userData: UserData) => {
     setUser(userData)
     localStorage.setItem('vaucher_user', JSON.stringify(userData))
   }
 
   const handleLogout = () => {
+    if (user?.token) {
+      fetch(`${API_URL}/api/logout`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+    }
     setUser(null)
     localStorage.removeItem('vaucher_user')
   }

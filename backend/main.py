@@ -1,9 +1,10 @@
 """
 Backend - Vaucher & Álvares Sistema de Cadastro
 FastAPI + PostgreSQL + Geração de Documentos + Resend para E-mail
+Com gerenciamento de usuários no banco de dados
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +20,7 @@ import hashlib
 import logging
 import httpx
 import base64
+import secrets
 
 # Configurar logging detalhado
 logging.basicConfig(level=logging.INFO)
@@ -35,7 +37,7 @@ from psycopg2.extras import RealDictCursor
 app = FastAPI(
     title="Vaucher & Álvares - API",
     description="Sistema de cadastro de clientes e geração de documentos",
-    version="2.2.0"
+    version="2.3.0"
 )
 
 # CORS - permitir acesso dos frontends
@@ -75,8 +77,50 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
 
-# URL da logo (será atualizada após deploy)
+# Senha inicial do admin (deve ser alterada após primeiro login)
+ADMIN_INICIAL_SENHA = os.getenv("ADMIN_INICIAL_SENHA", "VaucherAdmin2024!")
+
+# URL da logo
 LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher%20e%20Alvares-06.jpg"
+
+# ============================================
+# FUNÇÕES DE SEGURANÇA
+# ============================================
+
+def hash_senha(senha: str) -> str:
+    """Cria hash da senha usando SHA-256 com salt."""
+    salt = "vaucher_alvares_2024"
+    return hashlib.sha256(f"{senha}{salt}".encode()).hexdigest()
+
+def verificar_senha(senha: str, hash_armazenado: str) -> bool:
+    """Verifica se a senha corresponde ao hash."""
+    return hash_senha(senha) == hash_armazenado
+
+def gerar_token() -> str:
+    """Gera um token seguro."""
+    return secrets.token_hex(32)
+
+# Armazenar tokens ativos (em produção, usar Redis ou banco)
+tokens_ativos = {}
+
+def verificar_token(authorization: str = Header(None)) -> dict:
+    """Verifica se o token é válido e retorna o usuário."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Token não fornecido")
+    
+    token = authorization.replace("Bearer ", "")
+    
+    if token not in tokens_ativos:
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado")
+    
+    return tokens_ativos[token]
+
+def verificar_admin(authorization: str = Header(None)) -> dict:
+    """Verifica se o usuário é admin."""
+    usuario = verificar_token(authorization)
+    if not usuario.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Acesso negado. Apenas administradores.")
+    return usuario
 
 # ============================================
 # TEMPLATE DE E-MAIL COM LOGO
@@ -136,6 +180,8 @@ def init_db():
     
     try:
         cur = conn.cursor()
+        
+        # Tabela de cadastros
         cur.execute("""
             CREATE TABLE IF NOT EXISTS cadastros (
                 id VARCHAR(20) PRIMARY KEY,
@@ -147,7 +193,33 @@ def init_db():
                 arquivos_gerados JSONB DEFAULT '{}'
             )
         """)
+        
+        # Tabela de usuários
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS usuarios (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                senha_hash VARCHAR(255) NOT NULL,
+                nome VARCHAR(255) NOT NULL,
+                is_admin BOOLEAN DEFAULT FALSE,
+                ativo BOOLEAN DEFAULT TRUE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         conn.commit()
+        
+        # Criar usuário admin inicial se não existir
+        cur.execute("SELECT COUNT(*) FROM usuarios WHERE email = %s", ("admin@vaucherealvares.com.br",))
+        if cur.fetchone()[0] == 0:
+            senha_hash = hash_senha(ADMIN_INICIAL_SENHA)
+            cur.execute("""
+                INSERT INTO usuarios (email, senha_hash, nome, is_admin)
+                VALUES (%s, %s, %s, %s)
+            """, ("admin@vaucherealvares.com.br", senha_hash, "Administrador", True))
+            conn.commit()
+            logger.info("Usuário admin inicial criado!")
+        
         cur.close()
         conn.close()
         logger.info("Banco de dados inicializado com sucesso!")
@@ -162,7 +234,107 @@ def startup():
     init_db()
 
 # ============================================
-# FUNÇÕES DO BANCO
+# FUNÇÕES DO BANCO - USUÁRIOS
+# ============================================
+
+def buscar_usuario_por_email(email: str) -> dict:
+    """Busca um usuário pelo e-mail."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM usuarios WHERE email = %s AND ativo = TRUE", (email,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar usuário: {e}")
+        return None
+
+def listar_usuarios() -> List[dict]:
+    """Lista todos os usuários."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT id, email, nome, is_admin, ativo, criado_em FROM usuarios ORDER BY criado_em DESC")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar usuários: {e}")
+        return []
+
+def criar_usuario(email: str, senha: str, nome: str, is_admin: bool = False) -> bool:
+    """Cria um novo usuário."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        senha_hash = hash_senha(senha)
+        cur.execute("""
+            INSERT INTO usuarios (email, senha_hash, nome, is_admin)
+            VALUES (%s, %s, %s, %s)
+        """, (email, senha_hash, nome, is_admin))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao criar usuário: {e}")
+        return False
+
+def atualizar_usuario(user_id: int, nome: str = None, senha: str = None, is_admin: bool = None, ativo: bool = None) -> bool:
+    """Atualiza um usuário."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        
+        updates = []
+        values = []
+        
+        if nome is not None:
+            updates.append("nome = %s")
+            values.append(nome)
+        if senha is not None:
+            updates.append("senha_hash = %s")
+            values.append(hash_senha(senha))
+        if is_admin is not None:
+            updates.append("is_admin = %s")
+            values.append(is_admin)
+        if ativo is not None:
+            updates.append("ativo = %s")
+            values.append(ativo)
+        
+        if updates:
+            values.append(user_id)
+            cur.execute(f"UPDATE usuarios SET {', '.join(updates)} WHERE id = %s", values)
+            conn.commit()
+        
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao atualizar usuário: {e}")
+        return False
+
+def deletar_usuario(user_id: int) -> bool:
+    """Desativa um usuário (soft delete)."""
+    return atualizar_usuario(user_id, ativo=False)
+
+# ============================================
+# FUNÇÕES DO BANCO - CADASTROS
 # ============================================
 
 def salvar_cadastro(cadastro: dict):
@@ -301,24 +473,24 @@ class LoginResponse(BaseModel):
     success: bool
     token: Optional[str] = None
     nome: Optional[str] = None
+    is_admin: Optional[bool] = None
     message: Optional[str] = None
 
-# ============================================
-# UTILITÁRIOS
-# ============================================
+class NovoUsuario(BaseModel):
+    email: EmailStr
+    senha: str
+    nome: str
+    is_admin: bool = False
 
-def gerar_token(email: str) -> str:
-    """Gera um token simples para autenticação."""
-    timestamp = datetime.now().isoformat()
-    data = f"{email}:{timestamp}:vaucher_secret_key"
-    return hashlib.sha256(data.encode()).hexdigest()
+class AtualizarUsuario(BaseModel):
+    nome: Optional[str] = None
+    senha: Optional[str] = None
+    is_admin: Optional[bool] = None
+    ativo: Optional[bool] = None
 
-# Usuários do sistema
-USUARIOS = {
-    "admin@vaucherealvares.com.br": {"senha": "admin123", "nome": "Administrador"},
-    "bruno@vaucherealvares.com.br": {"senha": "bruno123", "nome": "Bruno Álvares"},
-    "fernanda@vaucherealvares.com.br": {"senha": "fernanda123", "nome": "Fernanda Vaucher"},
-}
+class AlterarSenha(BaseModel):
+    senha_atual: str
+    nova_senha: str
 
 # ============================================
 # GERADOR DE DOCUMENTOS
@@ -498,7 +670,7 @@ async def enviar_email_resend(destinatario: str, assunto: str, corpo_html: str, 
 
 @app.get("/")
 def root():
-    return {"message": "Vaucher & Álvares API", "status": "online", "version": "2.2"}
+    return {"message": "Vaucher & Álvares API", "status": "online", "version": "2.3"}
 
 @app.get("/health")
 def health():
@@ -513,13 +685,85 @@ def health():
 @app.post("/api/login", response_model=LoginResponse)
 def login(request: LoginRequest):
     """Autenticação do painel administrativo."""
-    user = USUARIOS.get(request.email)
+    usuario = buscar_usuario_por_email(request.email)
     
-    if user and user['senha'] == request.senha:
-        token = gerar_token(request.email)
-        return LoginResponse(success=True, token=token, nome=user['nome'])
+    if usuario and verificar_senha(request.senha, usuario['senha_hash']):
+        token = gerar_token()
+        tokens_ativos[token] = {
+            "id": usuario["id"],
+            "email": usuario["email"],
+            "nome": usuario["nome"],
+            "is_admin": usuario["is_admin"]
+        }
+        return LoginResponse(
+            success=True, 
+            token=token, 
+            nome=usuario['nome'],
+            is_admin=usuario['is_admin']
+        )
     
     return LoginResponse(success=False, message="E-mail ou senha incorretos")
+
+@app.post("/api/logout")
+def logout(authorization: str = Header(None)):
+    """Encerra a sessão do usuário."""
+    if authorization:
+        token = authorization.replace("Bearer ", "")
+        if token in tokens_ativos:
+            del tokens_ativos[token]
+    return {"success": True}
+
+# --- GERENCIAMENTO DE USUÁRIOS (APENAS ADMIN) ---
+
+@app.get("/api/usuarios")
+def listar_todos_usuarios(usuario: dict = Depends(verificar_admin)):
+    """Lista todos os usuários (apenas admin)."""
+    return listar_usuarios()
+
+@app.post("/api/usuarios")
+def criar_novo_usuario(dados: NovoUsuario, usuario: dict = Depends(verificar_admin)):
+    """Cria um novo usuário (apenas admin)."""
+    # Verificar se já existe
+    if buscar_usuario_por_email(dados.email):
+        raise HTTPException(status_code=400, detail="E-mail já cadastrado")
+    
+    if criar_usuario(dados.email, dados.senha, dados.nome, dados.is_admin):
+        return {"success": True, "message": f"Usuário {dados.nome} criado com sucesso"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao criar usuário")
+
+@app.put("/api/usuarios/{user_id}")
+def atualizar_usuario_existente(user_id: int, dados: AtualizarUsuario, usuario: dict = Depends(verificar_admin)):
+    """Atualiza um usuário (apenas admin)."""
+    if atualizar_usuario(user_id, dados.nome, dados.senha, dados.is_admin, dados.ativo):
+        return {"success": True, "message": "Usuário atualizado com sucesso"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao atualizar usuário")
+
+@app.delete("/api/usuarios/{user_id}")
+def desativar_usuario(user_id: int, usuario: dict = Depends(verificar_admin)):
+    """Desativa um usuário (apenas admin)."""
+    # Não permitir desativar a si mesmo
+    if usuario["id"] == user_id:
+        raise HTTPException(status_code=400, detail="Você não pode desativar sua própria conta")
+    
+    if deletar_usuario(user_id):
+        return {"success": True, "message": "Usuário desativado com sucesso"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao desativar usuário")
+
+@app.post("/api/alterar-senha")
+def alterar_minha_senha(dados: AlterarSenha, usuario: dict = Depends(verificar_token)):
+    """Permite ao usuário alterar sua própria senha."""
+    usuario_db = buscar_usuario_por_email(usuario["email"])
+    
+    if not usuario_db or not verificar_senha(dados.senha_atual, usuario_db["senha_hash"]):
+        raise HTTPException(status_code=400, detail="Senha atual incorreta")
+    
+    if atualizar_usuario(usuario["id"], senha=dados.nova_senha):
+        return {"success": True, "message": "Senha alterada com sucesso"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao alterar senha")
 
 # --- CADASTROS ---
 
