@@ -63,6 +63,8 @@ interface Cadastro {
     contrato?: string
     procuracao?: string
   }
+  documentos_assinados?: string[]
+  data_assinatura?: string
 }
 
 // Tela de Login (SEM credenciais de demonstração)
@@ -818,13 +820,15 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       pendente: 'bg-amber-100 text-amber-800 border-amber-200',
       validado: 'bg-blue-100 text-blue-800 border-blue-200',
       documentos_gerados: 'bg-purple-100 text-purple-800 border-purple-200',
-      enviado: 'bg-green-100 text-green-800 border-green-200'
+      enviado: 'bg-green-100 text-green-800 border-green-200',
+      assinado: 'bg-emerald-100 text-emerald-800 border-emerald-200'
     }
     const labels: Record<string, string> = {
       pendente: 'Pendente',
       validado: 'Validado',
       documentos_gerados: 'Docs Prontos',
-      enviado: 'Enviado'
+      enviado: 'Enviado',
+      assinado: '✅ Assinado'
     }
     return (
       <span className={`px-3 py-1 rounded-full text-xs font-medium border ${styles[status] || styles.pendente}`}>
@@ -1025,6 +1029,43 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                         Baixar Procuração
                       </a>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Documentos Assinados pelo Cliente */}
+              {c.documentos_assinados && c.documentos_assinados.length > 0 && (
+                <div className="bg-emerald-50 rounded-xl p-6">
+                  <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 text-emerald-600" />
+                    Documentos Assinados Recebidos
+                    <span className="text-xs bg-emerald-200 text-emerald-800 px-2 py-1 rounded-full">
+                      {c.documentos_assinados.length} arquivo(s)
+                    </span>
+                  </h3>
+                  {c.data_assinatura && (
+                    <p className="text-sm text-emerald-700 mb-4">
+                      Recebido em: {new Date(c.data_assinatura).toLocaleString('pt-BR')}
+                    </p>
+                  )}
+                  <div className="space-y-2">
+                    {c.documentos_assinados.map((doc, i) => (
+                      <div key={i} className="flex items-center justify-between bg-white border border-emerald-200 rounded-lg px-4 py-3">
+                        <div className="flex items-center gap-3">
+                          <FileCheck className="w-5 h-5 text-emerald-600" />
+                          <span className="text-sm font-medium">{doc}</span>
+                        </div>
+                        <a 
+                          href={`${API_URL}/api/cadastros/${c.id}/assinados/${encodeURIComponent(doc)}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-sm font-medium"
+                        >
+                          <Download className="w-4 h-4" />
+                          Baixar
+                        </a>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
@@ -1247,6 +1288,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                 <option value="validado">Validados</option>
                 <option value="documentos_gerados">Docs Prontos</option>
                 <option value="enviado">Enviados</option>
+                <option value="assinado">Assinados</option>
               </select>
             </div>
             <a

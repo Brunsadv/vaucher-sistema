@@ -81,6 +81,9 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
 # Senha inicial do admin (deve ser alterada após primeiro login)
 ADMIN_INICIAL_SENHA = os.getenv("ADMIN_INICIAL_SENHA", "VaucherAdmin2024!")
 
+# Chave secreta para tokens (em produção, usar variável de ambiente)
+TOKEN_SECRET = os.getenv("TOKEN_SECRET", "vaucher_alvares_secret_key_2024")
+
 # URL da logo
 LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher%20e%20Alvares-06.jpg"
 
@@ -97,12 +100,41 @@ def verificar_senha(senha: str, hash_armazenado: str) -> bool:
     """Verifica se a senha corresponde ao hash."""
     return hash_senha(senha) == hash_armazenado
 
-def gerar_token() -> str:
-    """Gera um token seguro."""
-    return secrets.token_hex(32)
+def gerar_token(user_id: int, email: str, is_admin: bool) -> str:
+    """Gera um token que contém informações do usuário."""
+    # Criar payload com dados do usuário
+    payload = f"{user_id}:{email}:{is_admin}"
+    # Criar assinatura
+    signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
+    # Codificar em base64
+    token_data = base64.b64encode(f"{payload}:{signature}".encode()).decode()
+    return token_data
 
-# Armazenar tokens ativos (em produção, usar Redis ou banco)
-tokens_ativos = {}
+def decodificar_token(token: str) -> dict:
+    """Decodifica e valida um token."""
+    try:
+        # Decodificar base64
+        decoded = base64.b64decode(token.encode()).decode()
+        parts = decoded.rsplit(":", 1)
+        if len(parts) != 2:
+            return None
+        
+        payload, signature = parts
+        
+        # Verificar assinatura
+        expected_signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
+        if signature != expected_signature:
+            return None
+        
+        # Extrair dados
+        user_id, email, is_admin = payload.split(":")
+        return {
+            "id": int(user_id),
+            "email": email,
+            "is_admin": is_admin == "True"
+        }
+    except Exception:
+        return None
 
 def verificar_token(authorization: str = Header(None)) -> dict:
     """Verifica se o token é válido e retorna o usuário."""
@@ -111,10 +143,21 @@ def verificar_token(authorization: str = Header(None)) -> dict:
     
     token = authorization.replace("Bearer ", "")
     
-    if token not in tokens_ativos:
+    usuario = decodificar_token(token)
+    if not usuario:
         raise HTTPException(status_code=401, detail="Token inválido ou expirado")
     
-    return tokens_ativos[token]
+    # Verificar se o usuário ainda existe e está ativo
+    usuario_db = buscar_usuario_por_email(usuario["email"])
+    if not usuario_db or not usuario_db.get("ativo", True):
+        raise HTTPException(status_code=401, detail="Usuário não encontrado ou inativo")
+    
+    return {
+        "id": usuario_db["id"],
+        "email": usuario_db["email"],
+        "nome": usuario_db["nome"],
+        "is_admin": usuario_db["is_admin"]
+    }
 
 def verificar_admin(authorization: str = Header(None)) -> dict:
     """Verifica se o usuário é admin."""
@@ -689,13 +732,7 @@ def login(request: LoginRequest):
     usuario = buscar_usuario_por_email(request.email)
     
     if usuario and verificar_senha(request.senha, usuario['senha_hash']):
-        token = gerar_token()
-        tokens_ativos[token] = {
-            "id": usuario["id"],
-            "email": usuario["email"],
-            "nome": usuario["nome"],
-            "is_admin": usuario["is_admin"]
-        }
+        token = gerar_token(usuario["id"], usuario["email"], usuario["is_admin"])
         return LoginResponse(
             success=True, 
             token=token, 
@@ -706,12 +743,9 @@ def login(request: LoginRequest):
     return LoginResponse(success=False, message="E-mail ou senha incorretos")
 
 @app.post("/api/logout")
-def logout(authorization: str = Header(None)):
+def logout():
     """Encerra a sessão do usuário."""
-    if authorization:
-        token = authorization.replace("Bearer ", "")
-        if token in tokens_ativos:
-            del tokens_ativos[token]
+    # Com tokens autocontidos, não precisa fazer nada no servidor
     return {"success": True}
 
 # --- GERENCIAMENTO DE USUÁRIOS (APENAS ADMIN) ---
@@ -1014,7 +1048,8 @@ def exportar_cadastros_excel():
         'pendente': 'Pendente',
         'validado': 'Validado',
         'documentos_gerados': 'Documentos Gerados',
-        'enviado': 'Enviado'
+        'enviado': 'Enviado',
+        'assinado': 'Documentos Assinados Recebidos'
     }
     
     # Dados
@@ -1113,6 +1148,118 @@ async def upload_documento(cadastro_id: str, arquivo: UploadFile = File(...)):
 def download_upload_cliente(cadastro_id: str, filename: str):
     """Faz download de um arquivo enviado pelo cliente."""
     file_path = os.path.join(UPLOADS_DIR, cadastro_id, filename)
+    
+    if os.path.exists(file_path):
+        return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
+    
+    raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+# ============================================
+# ÁREA DO CLIENTE - DEVOLUÇÃO DE DOCUMENTOS
+# ============================================
+
+ASSINADOS_DIR = os.path.join(BASE_DIR, "documentos_assinados")
+os.makedirs(ASSINADOS_DIR, exist_ok=True)
+
+@app.get("/api/cliente/{cadastro_id}")
+def cliente_ver_cadastro(cadastro_id: str):
+    """Cliente visualiza seu próprio cadastro (sem autenticação, mas limitado)."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    # Retorna apenas informações básicas (sem dados sensíveis do admin)
+    return {
+        "id": cadastro["id"],
+        "nome": cadastro["dados"].get("nome", ""),
+        "email": cadastro["dados"].get("email", ""),
+        "status": cadastro["status"],
+        "data": cadastro["data"],
+        "tipo_demanda": cadastro["dados"].get("tipo_demanda", ""),
+        "documentos_assinados": cadastro.get("documentos_assinados", [])
+    }
+
+@app.post("/api/cliente/{cadastro_id}/enviar-assinados")
+async def cliente_enviar_documentos_assinados(
+    cadastro_id: str,
+    arquivos: List[UploadFile] = File(...)
+):
+    """Cliente envia documentos assinados."""
+    logger.info(f"Cliente enviando documentos assinados para cadastro: {cadastro_id}")
+    
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    # Verificar se o status permite envio de documentos
+    if cadastro["status"] not in ["enviado", "assinado"]:
+        raise HTTPException(status_code=400, detail="Você ainda não recebeu os documentos para assinar")
+    
+    # Criar diretório para documentos assinados
+    cliente_assinados_dir = os.path.join(ASSINADOS_DIR, cadastro_id)
+    os.makedirs(cliente_assinados_dir, exist_ok=True)
+    
+    arquivos_salvos = []
+    
+    for arquivo in arquivos:
+        if arquivo.filename:
+            # Adicionar prefixo para identificar como assinado
+            nome_arquivo = f"ASSINADO_{arquivo.filename}"
+            file_path = os.path.join(cliente_assinados_dir, nome_arquivo)
+            
+            with open(file_path, "wb") as f:
+                content = await arquivo.read()
+                f.write(content)
+            
+            arquivos_salvos.append(nome_arquivo)
+            logger.info(f"Documento assinado salvo: {nome_arquivo}")
+    
+    if not arquivos_salvos:
+        raise HTTPException(status_code=400, detail="Nenhum arquivo enviado")
+    
+    # Atualizar cadastro
+    if "documentos_assinados" not in cadastro:
+        cadastro["documentos_assinados"] = []
+    
+    cadastro["documentos_assinados"].extend(arquivos_salvos)
+    cadastro["status"] = "assinado"
+    cadastro["data_assinatura"] = datetime.now().isoformat()
+    salvar_cadastro(cadastro)
+    
+    # Enviar e-mail para o escritório notificando
+    try:
+        dados = cadastro["dados"]
+        conteudo = f"""
+            <p style="font-size: 16px;"><strong>📝 Novos documentos assinados recebidos!</strong></p>
+            <p>O cliente <strong>{dados['nome']}</strong> enviou os documentos assinados.</p>
+            <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                <p style="margin: 0;"><strong>Cadastro:</strong> {cadastro_id}</p>
+                <p style="margin: 0;"><strong>E-mail:</strong> {dados['email']}</p>
+                <p style="margin: 0;"><strong>Telefone:</strong> {dados['telefone']}</p>
+                <p style="margin: 0;"><strong>Arquivos:</strong> {len(arquivos_salvos)} documento(s)</p>
+            </div>
+            <p>Acesse o painel administrativo para visualizar os documentos.</p>
+        """
+        corpo_html = criar_email_html(conteudo)
+        
+        await enviar_email_resend(
+            FROM_EMAIL,  # Envia para o próprio escritório
+            f"📝 Documentos Assinados - {dados['nome']}",
+            corpo_html
+        )
+    except Exception as e:
+        logger.error(f"Erro ao notificar escritório: {e}")
+    
+    return {
+        "success": True,
+        "message": f"{len(arquivos_salvos)} documento(s) enviado(s) com sucesso!",
+        "arquivos": arquivos_salvos
+    }
+
+@app.get("/api/cadastros/{cadastro_id}/assinados/{filename}")
+def download_documento_assinado(cadastro_id: str, filename: str):
+    """Faz download de um documento assinado pelo cliente."""
+    file_path = os.path.join(ASSINADOS_DIR, cadastro_id, filename)
     
     if os.path.exists(file_path):
         return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
