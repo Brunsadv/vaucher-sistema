@@ -9,9 +9,9 @@ const LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/mai
 
 const Logo = ({ size = 'normal' }: { size?: 'small' | 'normal' | 'large' }) => {
   const sizes = {
-    small: 'h-10',
-    normal: 'h-16',
-    large: 'h-24'
+    small: 'h-20',
+    normal: 'h-40',
+    large: 'h-56'
   }
   return (
     <img 
