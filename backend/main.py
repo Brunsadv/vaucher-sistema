@@ -826,6 +826,41 @@ def obter_cadastro(cadastro_id: str):
         return cadastro
     raise HTTPException(status_code=404, detail="Cadastro não encontrado")
 
+@app.delete("/api/cadastros/{cadastro_id}")
+def deletar_cadastro(cadastro_id: str, usuario: dict = Depends(verificar_admin)):
+    """Deleta um cadastro permanentemente (apenas admin)."""
+    logger.info(f"Deletando cadastro: {cadastro_id} por {usuario['email']}")
+    
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM cadastros WHERE id = %s", (cadastro_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        # Tentar remover arquivos do cliente (se existirem)
+        cliente_uploads = os.path.join(UPLOADS_DIR, cadastro_id)
+        cliente_gerados = os.path.join(GERADOS_DIR, cadastro_id)
+        
+        if os.path.exists(cliente_uploads):
+            shutil.rmtree(cliente_uploads)
+        if os.path.exists(cliente_gerados):
+            shutil.rmtree(cliente_gerados)
+        
+        logger.info(f"Cadastro {cadastro_id} deletado com sucesso")
+        return {"success": True, "message": "Cadastro deletado com sucesso"}
+    except Exception as e:
+        logger.error(f"Erro ao deletar cadastro: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao deletar cadastro")
+
 @app.put("/api/cadastros/{cadastro_id}/validar")
 def validar_cadastro(cadastro_id: str):
     """Marca cadastro como validado."""

@@ -875,6 +875,33 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
     }
   }
 
+  const handleDeletar = async (id: string) => {
+    if (!confirm('⚠️ ATENÇÃO: Esta ação é irreversível!\n\nDeseja realmente EXCLUIR este cadastro permanentemente?\n\nTodos os dados e documentos serão apagados.')) {
+      return
+    }
+
+    try {
+      const response = await fetch(`${API_URL}/api/cadastros/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setCadastros(prev => prev.filter(c => c.id !== id))
+        setSelectedCadastro(null)
+        setMensagemSucesso('Cadastro excluído com sucesso!')
+        setTimeout(() => setMensagemSucesso(''), 3000)
+      } else {
+        alert(data.detail || 'Erro ao excluir cadastro')
+      }
+    } catch (err) {
+      console.error('Erro ao deletar:', err)
+      alert('Erro de conexão. Tente novamente.')
+    }
+  }
+
   // Visualização de detalhes
   if (selectedCadastro) {
     const c = selectedCadastro
@@ -1051,6 +1078,17 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       <CheckCircle className="w-5 h-5" />
                       Documentos enviados para {c.dados.email}
                     </div>
+                  )}
+
+                  {/* Botão Deletar - Apenas Admin */}
+                  {user.is_admin && (
+                    <button
+                      onClick={() => handleDeletar(c.id)}
+                      className="flex items-center gap-2 bg-red-100 hover:bg-red-600 text-red-600 hover:text-white font-medium px-6 py-3 rounded-xl border border-red-200 hover:border-red-600 transition-all ml-auto"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                      Excluir Cadastro
+                    </button>
                   )}
                 </div>
               </div>
