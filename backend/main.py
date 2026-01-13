@@ -828,9 +828,17 @@ async def criar_cadastro(dados: DadosCliente):
                 <p>Nossa equipe irá analisar as informações e documentos enviados. 
                 Em breve você receberá o Contrato de Honorários e a Procuração 
                 para assinatura.</p>
-                <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0;">
+                
+                <div style="background-color: #f0f0f0; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <p style="margin: 0 0 10px 0;"><strong>📋 Seu código de protocolo:</strong></p>
+                    <p style="font-size: 20px; font-family: monospace; background: #fff; padding: 10px; border-radius: 5px; text-align: center; margin: 0; color: #8B1538; font-weight: bold;">{novo_cadastro['id']}</p>
+                    <p style="margin: 10px 0 0 0; font-size: 12px; color: #666;">Guarde este código para acompanhar seu cadastro</p>
+                </div>
+                
+                <div style="background-color: #e3f2fd; padding: 15px; border-radius: 5px; margin: 20px 0;">
                     <p style="margin: 0;"><strong>⏱ Prazo estimado:</strong> até 2 dias úteis</p>
                 </div>
+                
                 <p>Agradecemos a confiança em nosso escritório!</p>
             """
             corpo_html = criar_email_html(conteudo)
@@ -960,6 +968,10 @@ async def enviar_email_documentos(
     if not anexos_email:
         raise HTTPException(status_code=400, detail="Nenhum arquivo selecionado para envio")
     
+    # URL do portal para enviar documentos assinados
+    PORTAL_URL = os.getenv("PORTAL_URL", "https://cadastro.vaucherealvares.com")
+    link_envio = f"{PORTAL_URL}/enviar-assinados?id={cadastro_id}"
+    
     # Montar e-mail com logo
     mensagem_html = f"<p>{mensagem}</p>" if mensagem else ""
     
@@ -967,12 +979,32 @@ async def enviar_email_documentos(
         <p style="font-size: 16px;">Prezado(a) <strong>{dados['nome']}</strong>,</p>
         <p>Seguem em anexo os documentos para sua análise e assinatura.</p>
         {mensagem_html}
-        <p>Por favor, leia atentamente os documentos. Após assiná-los, 
-        você pode enviá-los de volta por e-mail ou entregá-los 
-        pessoalmente em nosso escritório.</p>
-        <div style="background-color: #f0f0f0; padding: 15px; border-radius: 5px; margin: 20px 0;">
-            <p style="margin: 0;"><strong>📎 Anexos:</strong> {len(anexos_email)} documento(s)</p>
+        <p>Por favor, leia atentamente os documentos. Após assiná-los, devolva-os por uma das opções abaixo:</p>
+        
+        <div style="background-color: #f0f0f0; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 0 0 10px 0;"><strong>📋 Seu código de protocolo:</strong></p>
+            <p style="font-size: 20px; font-family: monospace; background: #fff; padding: 10px; border-radius: 5px; text-align: center; margin: 0; color: #8B1538; font-weight: bold;">{cadastro_id}</p>
         </div>
+        
+        <div style="background-color: #e8f5e9; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 0 0 15px 0;"><strong>📤 Como devolver os documentos assinados:</strong></p>
+            
+            <p style="margin: 0 0 10px 0;"><strong>Opção 1 - Pelo nosso portal:</strong></p>
+            <p style="margin: 0 0 15px 0;">
+                <a href="{link_envio}" style="background-color: #8B1538; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; display: inline-block;">
+                    Clique aqui para enviar os documentos assinados
+                </a>
+            </p>
+            
+            <p style="margin: 0 0 10px 0;"><strong>Opção 2 - Por e-mail:</strong></p>
+            <p style="margin: 0;">Responda este e-mail com os documentos anexados ou envie para:<br>
+            <a href="mailto:atendimento@vaucherealvares.com" style="color: #8B1538; font-weight: bold;">atendimento@vaucherealvares.com</a></p>
+        </div>
+        
+        <div style="background-color: #fff3e0; padding: 15px; border-radius: 5px; margin: 20px 0;">
+            <p style="margin: 0;"><strong>📎 Anexos neste e-mail:</strong> {len(anexos_email)} documento(s)</p>
+        </div>
+        
         <p><strong>Dúvidas?</strong> Entre em contato conosco pelos canais abaixo.</p>
     """
     corpo_html = criar_email_html(conteudo)
