@@ -266,23 +266,43 @@ def init_db():
             )
         """)
         
-        # Tabela financeiro
+        # Tabela financeiro - estrutura completa
         cur.execute("""
             CREATE TABLE IF NOT EXISTS financeiro (
                 id SERIAL PRIMARY KEY,
                 cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
                 numero_processo VARCHAR(100),
                 vara_tribunal VARCHAR(255),
-                valor_bruto DECIMAL(15,2) DEFAULT 0,
-                data_recebimento DATE,
-                origem_valor VARCHAR(255),
                 percentual_honorarios DECIMAL(5,2) DEFAULT 20,
-                honorarios_sucumbencia DECIMAL(15,2) DEFAULT 0,
+                valor_credito_cliente DECIMAL(15,2) DEFAULT 0,
+                depositos JSONB DEFAULT '[]',
+                sucumbencias JSONB DEFAULT '[]',
+                retencoes JSONB DEFAULT '[]',
                 observacoes TEXT,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(cadastro_id)
             )
+        """)
+        
+        # Migrar tabela existente se necessário
+        cur.execute("""
+            DO $$ 
+            BEGIN 
+                -- Adicionar novas colunas se não existirem
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='valor_credito_cliente') THEN
+                    ALTER TABLE financeiro ADD COLUMN valor_credito_cliente DECIMAL(15,2) DEFAULT 0;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='depositos') THEN
+                    ALTER TABLE financeiro ADD COLUMN depositos JSONB DEFAULT '[]';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='sucumbencias') THEN
+                    ALTER TABLE financeiro ADD COLUMN sucumbencias JSONB DEFAULT '[]';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='retencoes') THEN
+                    ALTER TABLE financeiro ADD COLUMN retencoes JSONB DEFAULT '[]';
+                END IF;
+            END $$;
         """)
         
         conn.commit()
@@ -543,28 +563,28 @@ def salvar_financeiro(cadastro_id: str, dados: dict) -> bool:
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO financeiro (cadastro_id, numero_processo, vara_tribunal, valor_bruto, 
-                data_recebimento, origem_valor, percentual_honorarios, honorarios_sucumbencia, observacoes)
+            INSERT INTO financeiro (cadastro_id, numero_processo, vara_tribunal, 
+                percentual_honorarios, valor_credito_cliente, depositos, sucumbencias, retencoes, observacoes)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (cadastro_id) DO UPDATE SET
                 numero_processo = EXCLUDED.numero_processo,
                 vara_tribunal = EXCLUDED.vara_tribunal,
-                valor_bruto = EXCLUDED.valor_bruto,
-                data_recebimento = EXCLUDED.data_recebimento,
-                origem_valor = EXCLUDED.origem_valor,
                 percentual_honorarios = EXCLUDED.percentual_honorarios,
-                honorarios_sucumbencia = EXCLUDED.honorarios_sucumbencia,
+                valor_credito_cliente = EXCLUDED.valor_credito_cliente,
+                depositos = EXCLUDED.depositos,
+                sucumbencias = EXCLUDED.sucumbencias,
+                retencoes = EXCLUDED.retencoes,
                 observacoes = EXCLUDED.observacoes,
                 atualizado_em = CURRENT_TIMESTAMP
         """, (
             cadastro_id,
             dados.get("numero_processo", ""),
             dados.get("vara_tribunal", ""),
-            dados.get("valor_bruto", 0),
-            dados.get("data_recebimento") or None,
-            dados.get("origem_valor", ""),
             dados.get("percentual_honorarios", 20),
-            dados.get("honorarios_sucumbencia", 0),
+            dados.get("valor_credito_cliente", 0),
+            json.dumps(dados.get("depositos", [])),
+            json.dumps(dados.get("sucumbencias", [])),
+            json.dumps(dados.get("retencoes", [])),
             dados.get("observacoes", "")
         ))
         conn.commit()
@@ -589,23 +609,43 @@ def buscar_financeiro(cadastro_id: str) -> dict:
         conn.close()
         
         if row:
+            # Processar depositos
+            depositos = row.get("depositos")
+            if isinstance(depositos, str):
+                depositos = json.loads(depositos)
+            elif depositos is None:
+                depositos = []
+            
+            # Processar sucumbencias
+            sucumbencias = row.get("sucumbencias")
+            if isinstance(sucumbencias, str):
+                sucumbencias = json.loads(sucumbencias)
+            elif sucumbencias is None:
+                sucumbencias = []
+            
+            # Processar retencoes
+            retencoes = row.get("retencoes")
+            if isinstance(retencoes, str):
+                retencoes = json.loads(retencoes)
+            elif retencoes is None:
+                retencoes = []
+            
             return {
                 "id": row["id"],
                 "cadastro_id": row["cadastro_id"],
                 "numero_processo": row["numero_processo"] or "",
                 "vara_tribunal": row["vara_tribunal"] or "",
-                "valor_bruto": float(row["valor_bruto"]) if row["valor_bruto"] else 0,
-                "data_recebimento": row["data_recebimento"].strftime("%Y-%m-%d") if row["data_recebimento"] else "",
-                "origem_valor": row["origem_valor"] or "",
                 "percentual_honorarios": float(row["percentual_honorarios"]) if row["percentual_honorarios"] else 20,
-                "honorarios_sucumbencia": float(row["honorarios_sucumbencia"]) if row["honorarios_sucumbencia"] else 0,
+                "valor_credito_cliente": float(row["valor_credito_cliente"]) if row.get("valor_credito_cliente") else 0,
+                "depositos": depositos,
+                "sucumbencias": sucumbencias,
+                "retencoes": retencoes,
                 "observacoes": row["observacoes"] or ""
             }
         return None
     except Exception as e:
         logger.error(f"Erro ao buscar financeiro: {e}")
         return None
-        return False
 
 # ============================================
 # MODELOS DE DADOS
@@ -655,14 +695,27 @@ class AlterarSenha(BaseModel):
     senha_atual: str
     nova_senha: str
 
+class DepositoItem(BaseModel):
+    data: str = ""
+    origem: str = ""
+    valor: float = 0
+
+class SucumbenciaItem(BaseModel):
+    descricao: str = ""
+    valor: float = 0
+
+class RetencaoItem(BaseModel):
+    descricao: str = ""
+    valor: float = 0
+
 class FinanceiroData(BaseModel):
     numero_processo: Optional[str] = ""
     vara_tribunal: Optional[str] = ""
-    valor_bruto: Optional[float] = 0
-    data_recebimento: Optional[str] = ""
-    origem_valor: Optional[str] = ""
     percentual_honorarios: Optional[float] = 20
-    honorarios_sucumbencia: Optional[float] = 0
+    valor_credito_cliente: Optional[float] = 0
+    depositos: Optional[List[dict]] = []
+    sucumbencias: Optional[List[dict]] = []
+    retencoes: Optional[List[dict]] = []
     observacoes: Optional[str] = ""
 
 # ============================================
@@ -787,94 +840,369 @@ class GeradorDocumentos:
         """Formata valor para moeda brasileira."""
         return f"R$ {value:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
-    def _substituir_no_xml_prestacao(self, xml_content: str, dados_cliente: dict, financeiro: dict) -> str:
-        """Substitui placeholders específicos da prestação de contas."""
-        # Cálculos
-        valor_bruto = float(financeiro.get("valor_bruto", 0))
-        percentual = float(financeiro.get("percentual_honorarios", 20))
-        sucumbencia = float(financeiro.get("honorarios_sucumbencia", 0))
-        honorarios_contratuais = valor_bruto * (percentual / 100)
-        valor_liquido = valor_bruto - honorarios_contratuais - sucumbencia
-        total_geral = valor_bruto
-        
-        # Formatar data de recebimento
-        data_receb = financeiro.get("data_recebimento", "")
-        if data_receb:
-            try:
-                partes = data_receb.split("-")
-                data_formatada = f"{partes[2]}/{partes[1]}/{partes[0]}"
-            except:
-                data_formatada = data_receb
-        else:
-            data_formatada = "[Data não informada]"
-        
-        # Qualificação completa do cliente
-        qualificacao = f"{dados_cliente.get('nome', '')}, {dados_cliente.get('nacionalidade', 'brasileiro(a)')}, {dados_cliente.get('estado_civil', '')}, {dados_cliente.get('profissao', '')}, portador(a) do RG nº {dados_cliente.get('rg', '')} e inscrito(a) no CPF sob o nº {dados_cliente.get('cpf', '')}, residente e domiciliado(a) em {dados_cliente.get('endereco_completo', '')}"
-        
-        # Período (data atual)
-        hoje = datetime.now()
-        periodo = f"{hoje.strftime('%d/%m/%Y')}"
-        
-        substituicoes = {
-            '{{QUALIFICACAO_CLIENTE}}': qualificacao,
-            '{{NOME_CLIENTE}}': dados_cliente.get('nome', ''),
-            '{{NUMERO_PROCESSO}}': financeiro.get('numero_processo', '[Não informado]'),
-            '{{VARA_TRIBUNAL}}': financeiro.get('vara_tribunal', '[Não informado]'),
-            '{{DATA_RECEBIMENTO}}': data_formatada,
-            '{{ORIGEM_VALOR}}': financeiro.get('origem_valor', 'Alvará judicial'),
-            '{{PERCENTUAL}}': str(percentual),
-            '{{VALOR_BRUTO}}': self._format_money(valor_bruto),
-            '{{HONORARIOS_CONTRATUAIS}}': self._format_money(honorarios_contratuais),
-            '{{HONORARIOS_SUCUMBENCIA}}': self._format_money(sucumbencia),
-            '{{VALOR_LIQUIDO}}': self._format_money(valor_liquido),
-            '{{TOTAL_GERAL}}': self._format_money(total_geral),
-            '{{PERIODO_PRESTACAO}}': periodo,
-            '{{DATA_DOCUMENTO}}': self._data_por_extenso(),
-        }
-        
-        resultado = xml_content
-        for placeholder, valor in substituicoes.items():
-            resultado = resultado.replace(placeholder, str(valor))
-        
-        return resultado
+    def _format_data(self, data_str: str) -> str:
+        """Formata data de YYYY-MM-DD para DD/MM/YYYY."""
+        if not data_str:
+            return ""
+        try:
+            partes = data_str.split("-")
+            return f"{partes[2]}/{partes[1]}/{partes[0]}"
+        except:
+            return data_str
     
     def gerar_prestacao_contas(self, dados_cliente: dict, financeiro: dict, cadastro_id: str) -> str:
-        """Gera documento de prestação de contas."""
-        if not os.path.exists(self.modelo_prestacao):
-            raise FileNotFoundError(f"Modelo não encontrado: {self.modelo_prestacao}")
+        """Gera documento de prestação de contas completo usando python-docx."""
+        from docx import Document
+        from docx.shared import Pt, Cm, Inches, RGBColor
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.enum.table import WD_TABLE_ALIGNMENT
+        from docx.oxml.ns import qn
+        from docx.oxml import OxmlElement
         
+        # Extrair dados
+        depositos = financeiro.get("depositos", [])
+        sucumbencias = financeiro.get("sucumbencias", [])
+        retencoes = financeiro.get("retencoes", [])
+        percentual = float(financeiro.get("percentual_honorarios", 20))
+        valor_credito = float(financeiro.get("valor_credito_cliente", 0))
+        
+        # Calcular totais
+        total_depositos = sum(float(d.get("valor", 0)) for d in depositos)
+        total_sucumbencias = sum(float(s.get("valor", 0)) for s in sucumbencias)
+        total_retencoes = sum(float(r.get("valor", 0)) for r in retencoes)
+        honorarios_contratuais = valor_credito * (percentual / 100)
+        valor_liquido = valor_credito - honorarios_contratuais - total_retencoes
+        
+        # Criar documento
+        doc = Document()
+        
+        # Configurar margens
+        for section in doc.sections:
+            section.top_margin = Cm(2)
+            section.bottom_margin = Cm(2)
+            section.left_margin = Cm(2.5)
+            section.right_margin = Cm(2.5)
+        
+        # Função auxiliar para criar célula com formatação
+        def set_cell_shading(cell, color):
+            shading = OxmlElement('w:shd')
+            shading.set(qn('w:fill'), color)
+            cell._tc.get_or_add_tcPr().append(shading)
+        
+        # ========== TÍTULO ==========
+        titulo = doc.add_paragraph()
+        titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = titulo.add_run("PRESTAÇÃO DE CONTAS")
+        run.bold = True
+        run.font.size = Pt(14)
+        run.font.name = "Arial"
+        
+        subtitulo = doc.add_paragraph()
+        subtitulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run1 = subtitulo.add_run("VAUCHER E ÁLVARES SOCIEDADE DE ADVOGADOS ")
+        run1.bold = True
+        run1.font.size = Pt(11)
+        run2 = subtitulo.add_run("→ ")
+        run2.font.size = Pt(11)
+        run3 = subtitulo.add_run("Cliente")
+        run3.bold = True
+        run3.font.size = Pt(11)
+        run3.font.color.rgb = RGBColor(238, 0, 0)
+        
+        # ========== 1. IDENTIFICAÇÃO ==========
+        doc.add_paragraph()
+        h1 = doc.add_paragraph()
+        run = h1.add_run("1. Identificação das Partes")
+        run.bold = True
+        run.font.size = Pt(11)
+        
+        # Cliente
+        p = doc.add_paragraph()
+        p.add_run("Cliente: ").bold = True
+        p.add_run(dados_cliente.get('nome', '').upper())
+        
+        # Escritório
+        p = doc.add_paragraph()
+        p.add_run("Escritório de Advocacia: ").bold = True
+        p.add_run("VAUCHER E ÁLVARES SOCIEDADE DE ADVOGADOS").bold = True
+        p.add_run(", devidamente registrada na Ordem dos Advogados do Brasil Seccional de Mato Grosso sob o nº 669, inscrita no CNPJ sob o nº 21.336.697/0001-46, com sede na Rua Lima, n. 106, Bairro Jardim das Américas, em Cuiabá-MT.")
+        
+        # Processo
+        p = doc.add_paragraph()
+        p.add_run("Processo(s): ").bold = True
+        run = p.add_run(f"{financeiro.get('numero_processo', '')} / {financeiro.get('vara_tribunal', '')}")
+        run.font.color.rgb = RGBColor(238, 0, 0)
+        
+        # ========== 2. OBJETO ==========
+        doc.add_paragraph()
+        h2 = doc.add_paragraph()
+        run = h2.add_run("2. Objeto da Prestação de Contas")
+        run.bold = True
+        run.font.size = Pt(11)
+        
+        p = doc.add_paragraph()
+        p.paragraph_format.first_line_indent = Cm(1.25)
+        p.add_run("A presente prestação de contas tem por finalidade demonstrar, de forma ")
+        p.add_run("transparente, discriminada e fundamentada").bold = True
+        p.add_run(", os valores ")
+        p.add_run("totais recebidos").bold = True
+        p.add_run(" no âmbito do(s) processo(s) acima identificado(s), indicando:")
+        
+        # Lista de itens
+        items = [
+            ("valores pertencentes ao ", "cliente", ";"),
+            ("valores correspondentes aos ", "honorários advocatícios contratuais", ";"),
+            ("valores referentes aos ", "honorários advocatícios sucumbenciais", ", de titularidade do advogado;"),
+            ("valores retidos a título de ", "tributos/contribuição previdenciária (PSS)", "."),
+        ]
+        for prefix, bold_text, suffix in items:
+            p = doc.add_paragraph(style='List Bullet')
+            p.add_run(prefix)
+            p.add_run(bold_text).bold = True
+            p.add_run(suffix)
+        
+        # ========== 3. VALORES TOTAIS RECEBIDOS ==========
+        doc.add_paragraph()
+        h3 = doc.add_paragraph()
+        run = h3.add_run("3. Valores Totais Recebidos")
+        run.bold = True
+        run.font.size = Pt(11)
+        
+        # Tabela de depósitos
+        num_depositos = len(depositos) if depositos else 1
+        table = doc.add_table(rows=num_depositos + 2, cols=3)
+        table.style = 'Table Grid'
+        
+        # Cabeçalho
+        hdr = table.rows[0].cells
+        hdr[0].text = "Data do Recebimento"
+        hdr[1].text = "Origem do Valor"
+        hdr[2].text = "Valor Bruto (R$)"
+        for cell in hdr:
+            cell.paragraphs[0].runs[0].bold = True
+            set_cell_shading(cell, "D9D9D9")
+        
+        # Linhas de depósitos
+        if depositos:
+            for i, dep in enumerate(depositos):
+                row = table.rows[i + 1].cells
+                row[0].text = self._format_data(dep.get("data", ""))
+                row[1].text = dep.get("origem", "")
+                row[2].text = self._format_money(float(dep.get("valor", 0)))
+        else:
+            row = table.rows[1].cells
+            row[0].text = "[Data]"
+            row[1].text = "[Origem]"
+            row[2].text = self._format_money(0)
+        
+        # Total
+        total_row = table.rows[-1].cells
+        total_row[0].text = "TOTAL RECEBIDO"
+        total_row[0].paragraphs[0].runs[0].bold = True
+        total_row[1].text = "(Soma Global do Processo)"
+        total_row[2].text = self._format_money(total_depositos)
+        total_row[2].paragraphs[0].runs[0].bold = True
+        for cell in total_row:
+            set_cell_shading(cell, "F2F2F2")
+        
+        # ========== 4. DISCRIMINAÇÃO DOS VALORES ==========
+        doc.add_paragraph()
+        h4 = doc.add_paragraph()
+        run = h4.add_run("4. Discriminação dos Valores por Natureza Jurídica")
+        run.bold = True
+        run.font.size = Pt(11)
+        
+        # 4.1 Receita do Cliente
+        h41 = doc.add_paragraph()
+        run = h41.add_run("4.1. Receita Pertencente ao Cliente")
+        run.bold = True
+        
+        p = doc.add_paragraph()
+        p.add_run("Corresponde à parcela do valor recebido que integra o patrimônio do cliente, após a dedução dos honorários advocatícios devidos e das retenções legais.")
+        
+        # Tabela 4.1
+        table41 = doc.add_table(rows=5 + len(retencoes), cols=2)
+        table41.style = 'Table Grid'
+        
+        rows_data = [
+            ("Valor bruto total recebido (Principal + Sucumbência)", self._format_money(total_depositos), False),
+            (f"(-) Honorários contratuais ({percentual}% sobre crédito do cliente)", self._format_money(honorarios_contratuais), False),
+            (f"(-) Honorários sucumbenciais", self._format_money(total_sucumbencias), False),
+        ]
+        
+        # Adicionar retenções
+        for ret in retencoes:
+            rows_data.append((f"(-) {ret.get('descricao', 'Retenção')}", self._format_money(float(ret.get('valor', 0))), False))
+        
+        if not retencoes:
+            rows_data.append(("(-) Retenções Legais (PSS/IRRF)", self._format_money(0), False))
+        
+        rows_data.append(("Valor líquido devido ao cliente", self._format_money(valor_liquido), True))
+        
+        for i, (desc, val, is_total) in enumerate(rows_data):
+            row = table41.rows[i].cells
+            row[0].text = desc
+            row[1].text = val
+            if is_total:
+                row[0].paragraphs[0].runs[0].bold = True
+                row[1].paragraphs[0].runs[0].bold = True
+                set_cell_shading(row[0], "E2EFDA")
+                set_cell_shading(row[1], "E2EFDA")
+        
+        # 4.2 Honorários Contratuais
+        doc.add_paragraph()
+        h42 = doc.add_paragraph()
+        run = h42.add_run("4.2. Honorários Advocatícios Contratuais")
+        run.bold = True
+        
+        p = doc.add_paragraph()
+        p.add_run("Nos termos do art. 22 da Lei nº 8.906/1994, os honorários advocatícios ajustados em contrato constituem direito do advogado, possuindo natureza remuneratória pelos serviços prestados.")
+        
+        p = doc.add_paragraph()
+        p.add_run("Percentual contratado: ").bold = True
+        p.add_run(f"{percentual}%")
+        
+        p = doc.add_paragraph()
+        p.add_run("Base de cálculo: ").bold = True
+        p.add_run(f"Valor do crédito do cliente ({self._format_money(valor_credito)})")
+        
+        table42 = doc.add_table(rows=1, cols=2)
+        table42.style = 'Table Grid'
+        row = table42.rows[0].cells
+        row[0].text = f"Percentual contratual ({percentual}%) sobre {self._format_money(valor_credito)}"
+        row[1].text = self._format_money(honorarios_contratuais)
+        row[1].paragraphs[0].runs[0].bold = True
+        
+        # 4.3 Honorários Sucumbenciais
+        doc.add_paragraph()
+        h43 = doc.add_paragraph()
+        run = h43.add_run("4.3. Honorários Advocatícios Sucumbenciais")
+        run.bold = True
+        
+        p = doc.add_paragraph()
+        p.add_run("Os honorários sucumbenciais são fixados judicialmente e pertencem exclusivamente ao advogado, conforme dispõe expressamente o art. 85, §14, do CPC.")
+        
+        # Tabela de sucumbências
+        num_sucumb = len(sucumbencias) if sucumbencias else 1
+        table43 = doc.add_table(rows=num_sucumb + 1, cols=2)
+        table43.style = 'Table Grid'
+        
+        if sucumbencias:
+            for i, suc in enumerate(sucumbencias):
+                row = table43.rows[i].cells
+                row[0].text = suc.get("descricao", "")
+                row[1].text = self._format_money(float(suc.get("valor", 0)))
+        else:
+            row = table43.rows[0].cells
+            row[0].text = "Honorários sucumbenciais"
+            row[1].text = self._format_money(0)
+        
+        # Total sucumbência
+        total_suc_row = table43.rows[-1].cells
+        total_suc_row[0].text = "Total Honorários Sucumbenciais"
+        total_suc_row[0].paragraphs[0].runs[0].bold = True
+        total_suc_row[1].text = self._format_money(total_sucumbencias)
+        total_suc_row[1].paragraphs[0].runs[0].bold = True
+        
+        # Observação
+        p = doc.add_paragraph()
+        run = p.add_run("Obs.: Os honorários sucumbenciais não se confundem com o crédito do cliente, não integram sua base patrimonial e não substituem os honorários contratuais.")
+        run.italic = True
+        run.font.size = Pt(9)
+        
+        # ========== 5. RESUMO GERAL ==========
+        doc.add_paragraph()
+        h5 = doc.add_paragraph()
+        run = h5.add_run("5. Resumo Geral da Prestação de Contas")
+        run.bold = True
+        run.font.size = Pt(11)
+        
+        table5 = doc.add_table(rows=5, cols=3)
+        table5.style = 'Table Grid'
+        
+        # Cabeçalho
+        hdr5 = table5.rows[0].cells
+        hdr5[0].text = "Natureza do Valor"
+        hdr5[1].text = "Valor (R$)"
+        hdr5[2].text = "Titularidade"
+        for cell in hdr5:
+            cell.paragraphs[0].runs[0].bold = True
+            set_cell_shading(cell, "D9D9D9")
+        
+        resumo_data = [
+            ("Receita líquida do cliente", self._format_money(valor_liquido), "Cliente"),
+            ("Honorários contratuais", self._format_money(honorarios_contratuais), "Escritório"),
+            ("Honorários sucumbenciais", self._format_money(total_sucumbencias), "Escritório"),
+            ("TOTAL GERAL", self._format_money(total_depositos), ""),
+        ]
+        
+        for i, (nat, val, tit) in enumerate(resumo_data):
+            row = table5.rows[i + 1].cells
+            row[0].text = nat
+            row[1].text = val
+            row[2].text = tit
+            if i == 3:
+                row[0].paragraphs[0].runs[0].bold = True
+                row[1].paragraphs[0].runs[0].bold = True
+                set_cell_shading(row[0], "F2F2F2")
+                set_cell_shading(row[1], "F2F2F2")
+                set_cell_shading(row[2], "F2F2F2")
+        
+        # ========== 6. CONCLUSÃO ==========
+        doc.add_paragraph()
+        h6 = doc.add_paragraph()
+        run = h6.add_run("6. Conclusão")
+        run.bold = True
+        run.font.size = Pt(11)
+        
+        doc.add_paragraph("O escritório declara que:")
+        
+        conclusoes = [
+            "os valores foram corretamente recebidos e contabilizados;",
+            "a retenção dos honorários observa expressa previsão legal e contratual;",
+            "o valor líquido indicado encontra-se à disposição do cliente, após a assinatura da presente prestação de contas que também reconhece a quitação geral e irrestrita quanto as obrigações do escritório na demanda em referência."
+        ]
+        for c in conclusoes:
+            p = doc.add_paragraph(style='List Bullet')
+            p.add_run(c)
+        
+        # Data e Assinaturas
+        doc.add_paragraph()
+        doc.add_paragraph()
+        p = doc.add_paragraph(f"Cuiabá-MT, {self._data_por_extenso()}.")
+        
+        doc.add_paragraph()
+        doc.add_paragraph()
+        
+        # Assinatura escritório
+        ass1 = doc.add_paragraph("VAUCHER E ÁLVARES SOCIEDADE DE ADVOGADOS")
+        ass1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        ass1.runs[0].bold = True
+        
+        cnpj = doc.add_paragraph("CNPJ 21.336.697/0001-46")
+        cnpj.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        oab = doc.add_paragraph("OAB/MT 669")
+        oab.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        doc.add_paragraph()
+        doc.add_paragraph()
+        
+        # Assinatura cliente
+        ass2 = doc.add_paragraph(dados_cliente.get('nome', '').upper())
+        ass2.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        ass2.runs[0].bold = True
+        
+        # Salvar
         cliente_dir = os.path.join(GERADOS_DIR, cadastro_id)
         os.makedirs(cliente_dir, exist_ok=True)
         
-        temp_dir = os.path.join(cliente_dir, f'temp_{uuid.uuid4().hex[:8]}')
-        os.makedirs(temp_dir, exist_ok=True)
+        nome = dados_cliente.get('nome', 'Cliente').replace(' ', '_')
+        nome_arquivo = f"Prestacao_Contas_{nome}.docx"
+        caminho_arquivo = os.path.join(cliente_dir, nome_arquivo)
         
-        try:
-            with zipfile.ZipFile(self.modelo_prestacao, 'r') as zip_ref:
-                zip_ref.extractall(temp_dir)
-            
-            doc_xml_path = os.path.join(temp_dir, 'word', 'document.xml')
-            with open(doc_xml_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            content = self._substituir_no_xml_prestacao(content, dados_cliente, financeiro)
-            
-            with open(doc_xml_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            nome = dados_cliente.get('nome', 'Cliente').replace(' ', '_')
-            nome_arquivo = f"Prestacao_Contas_{nome}.docx"
-            saida_path = os.path.join(cliente_dir, nome_arquivo)
-            
-            with zipfile.ZipFile(saida_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk(temp_dir):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, temp_dir)
-                        zipf.write(file_path, arcname)
-            
-            return saida_path
-        finally:
+        doc.save(caminho_arquivo)
+        return caminho_arquivo
             if os.path.exists(temp_dir):
                 shutil.rmtree(temp_dir)
     
@@ -1425,11 +1753,11 @@ def obter_financeiro(cadastro_id: str):
         "cadastro_id": cadastro_id,
         "numero_processo": "",
         "vara_tribunal": "",
-        "valor_bruto": 0,
-        "data_recebimento": "",
-        "origem_valor": "",
         "percentual_honorarios": 20,
-        "honorarios_sucumbencia": 0,
+        "valor_credito_cliente": 0,
+        "depositos": [],
+        "sucumbencias": [],
+        "retencoes": [],
         "observacoes": ""
     }
 
@@ -1446,14 +1774,19 @@ def salvar_dados_financeiro(cadastro_id: str, dados: FinanceiroData):
 
 @app.get("/api/cadastros/{cadastro_id}/prestacao-contas")
 def gerar_documento_prestacao_contas(cadastro_id: str):
-    """Gera documento de prestação de contas usando modelo formatado."""
+    """Gera documento de prestação de contas."""
     cadastro = buscar_cadastro(cadastro_id)
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
     financeiro = buscar_financeiro(cadastro_id)
-    if not financeiro or not financeiro.get("valor_bruto"):
-        raise HTTPException(status_code=400, detail="Dados financeiros incompletos. Preencha o valor bruto.")
+    if not financeiro:
+        raise HTTPException(status_code=400, detail="Dados financeiros não encontrados.")
+    
+    # Verificar se há dados mínimos
+    depositos = financeiro.get("depositos", [])
+    if not depositos or len(depositos) == 0:
+        raise HTTPException(status_code=400, detail="Adicione pelo menos um depósito.")
     
     try:
         caminho_arquivo = gerador.gerar_prestacao_contas(
@@ -1469,9 +1802,6 @@ def gerar_documento_prestacao_contas(cadastro_id: str):
             filename=nome_arquivo,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-    except FileNotFoundError as e:
-        logger.error(f"Modelo não encontrado: {e}")
-        raise HTTPException(status_code=500, detail="Modelo de prestação de contas não encontrado. Contate o administrador.")
     except Exception as e:
         logger.error(f"Erro ao gerar prestação de contas: {e}")
         raise HTTPException(status_code=500, detail=str(e))

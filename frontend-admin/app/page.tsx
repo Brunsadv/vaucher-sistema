@@ -67,15 +67,31 @@ interface Cadastro {
   data_assinatura?: string
 }
 
+interface DepositoItem {
+  data: string
+  origem: string
+  valor: number
+}
+
+interface SucumbenciaItem {
+  descricao: string
+  valor: number
+}
+
+interface RetencaoItem {
+  descricao: string
+  valor: number
+}
+
 interface Financeiro {
   cadastro_id: string
   numero_processo: string
   vara_tribunal: string
-  valor_bruto: number
-  data_recebimento: string
-  origem_valor: string
   percentual_honorarios: number
-  honorarios_sucumbencia: number
+  valor_credito_cliente: number
+  depositos: DepositoItem[]
+  sucumbencias: SucumbenciaItem[]
+  retencoes: RetencaoItem[]
   observacoes: string
 }
 
@@ -797,11 +813,11 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
     cadastro_id: '',
     numero_processo: '',
     vara_tribunal: '',
-    valor_bruto: 0,
-    data_recebimento: '',
-    origem_valor: '',
     percentual_honorarios: 20,
-    honorarios_sucumbencia: 0,
+    valor_credito_cliente: 0,
+    depositos: [],
+    sucumbencias: [],
+    retencoes: [],
     observacoes: ''
   })
   const [salvandoFinanceiro, setSalvandoFinanceiro] = useState(false)
@@ -975,8 +991,8 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const handleGerarPrestacao = async () => {
     if (!selectedCadastro) return
     
-    if (!financeiro.valor_bruto || financeiro.valor_bruto <= 0) {
-      alert('Preencha o valor bruto antes de gerar a prestação de contas.')
+    if (!financeiro.depositos || financeiro.depositos.length === 0) {
+      alert('Adicione pelo menos um depósito antes de gerar a prestação de contas.')
       return
     }
     
@@ -1001,12 +1017,85 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   }
 
   // Cálculos financeiros
+  const calcularTotalDepositos = () => {
+    return financeiro.depositos.reduce((sum, d) => sum + (d.valor || 0), 0)
+  }
+
+  const calcularTotalSucumbencias = () => {
+    return financeiro.sucumbencias.reduce((sum, s) => sum + (s.valor || 0), 0)
+  }
+
+  const calcularTotalRetencoes = () => {
+    return financeiro.retencoes.reduce((sum, r) => sum + (r.valor || 0), 0)
+  }
+
   const calcularHonorariosContratuais = () => {
-    return financeiro.valor_bruto * (financeiro.percentual_honorarios / 100)
+    return financeiro.valor_credito_cliente * (financeiro.percentual_honorarios / 100)
   }
 
   const calcularValorLiquido = () => {
-    return financeiro.valor_bruto - calcularHonorariosContratuais() - financeiro.honorarios_sucumbencia
+    return financeiro.valor_credito_cliente - calcularHonorariosContratuais() - calcularTotalRetencoes()
+  }
+
+  // Funções para gerenciar listas
+  const adicionarDeposito = () => {
+    setFinanceiro({
+      ...financeiro,
+      depositos: [...financeiro.depositos, { data: '', origem: '', valor: 0 }]
+    })
+  }
+
+  const removerDeposito = (index: number) => {
+    setFinanceiro({
+      ...financeiro,
+      depositos: financeiro.depositos.filter((_, i) => i !== index)
+    })
+  }
+
+  const atualizarDeposito = (index: number, campo: string, valor: any) => {
+    const novos = [...financeiro.depositos]
+    novos[index] = { ...novos[index], [campo]: valor }
+    setFinanceiro({ ...financeiro, depositos: novos })
+  }
+
+  const adicionarSucumbencia = () => {
+    setFinanceiro({
+      ...financeiro,
+      sucumbencias: [...financeiro.sucumbencias, { descricao: '', valor: 0 }]
+    })
+  }
+
+  const removerSucumbencia = (index: number) => {
+    setFinanceiro({
+      ...financeiro,
+      sucumbencias: financeiro.sucumbencias.filter((_, i) => i !== index)
+    })
+  }
+
+  const atualizarSucumbencia = (index: number, campo: string, valor: any) => {
+    const novos = [...financeiro.sucumbencias]
+    novos[index] = { ...novos[index], [campo]: valor }
+    setFinanceiro({ ...financeiro, sucumbencias: novos })
+  }
+
+  const adicionarRetencao = () => {
+    setFinanceiro({
+      ...financeiro,
+      retencoes: [...financeiro.retencoes, { descricao: '', valor: 0 }]
+    })
+  }
+
+  const removerRetencao = (index: number) => {
+    setFinanceiro({
+      ...financeiro,
+      retencoes: financeiro.retencoes.filter((_, i) => i !== index)
+    })
+  }
+
+  const atualizarRetencao = (index: number, campo: string, valor: any) => {
+    const novos = [...financeiro.retencoes]
+    novos[index] = { ...novos[index], [campo]: valor }
+    setFinanceiro({ ...financeiro, retencoes: novos })
   }
 
   // Visualização de detalhes
@@ -1179,7 +1268,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-semibold text-gray-800 flex items-center gap-2">
                       <DollarSign className="w-5 h-5 text-amber-600" />
-                      Módulo Financeiro
+                      Módulo Financeiro - Prestação de Contas
                     </h3>
                     <button
                       onClick={() => {
@@ -1195,94 +1284,243 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                   </div>
 
                   {showFinanceiro && (
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Número do Processo</label>
-                          <input
-                            type="text"
-                            value={financeiro.numero_processo}
-                            onChange={(e) => setFinanceiro({ ...financeiro, numero_processo: e.target.value })}
-                            placeholder="0001234-56.2024.8.11.0001"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Vara / Tribunal</label>
-                          <input
-                            type="text"
-                            value={financeiro.vara_tribunal}
-                            onChange={(e) => setFinanceiro({ ...financeiro, vara_tribunal: e.target.value })}
-                            placeholder="1ª Vara Cível de Cuiabá"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                          />
+                    <div className="space-y-6">
+                      {/* Dados do Processo */}
+                      <div className="bg-white rounded-lg p-4 border border-amber-200">
+                        <h4 className="font-semibold text-gray-700 mb-3">Dados do Processo</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Número do Processo</label>
+                            <input
+                              type="text"
+                              value={financeiro.numero_processo}
+                              onChange={(e) => setFinanceiro({ ...financeiro, numero_processo: e.target.value })}
+                              placeholder="0001234-56.2024.8.11.0001"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Vara / Tribunal</label>
+                            <input
+                              type="text"
+                              value={financeiro.vara_tribunal}
+                              onChange={(e) => setFinanceiro({ ...financeiro, vara_tribunal: e.target.value })}
+                              placeholder="Juizado Especial da Fazenda Pública / TJMT"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Valor Bruto Recebido (R$)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={financeiro.valor_bruto || ''}
-                            onChange={(e) => setFinanceiro({ ...financeiro, valor_bruto: parseFloat(e.target.value) || 0 })}
-                            placeholder="0,00"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Data do Recebimento</label>
-                          <input
-                            type="date"
-                            value={financeiro.data_recebimento}
-                            onChange={(e) => setFinanceiro({ ...financeiro, data_recebimento: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Origem do Valor</label>
-                          <select
-                            value={financeiro.origem_valor}
-                            onChange={(e) => setFinanceiro({ ...financeiro, origem_valor: e.target.value })}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                      {/* Depósitos Recebidos */}
+                      <div className="bg-white rounded-lg p-4 border border-amber-200">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-semibold text-gray-700">Depósitos Recebidos</h4>
+                          <button
+                            onClick={adicionarDeposito}
+                            className="flex items-center gap-1 text-amber-600 hover:text-amber-800 text-sm font-medium"
                           >
-                            <option value="">Selecione...</option>
-                            <option value="Alvará judicial">Alvará judicial</option>
-                            <option value="Depósito judicial">Depósito judicial</option>
-                            <option value="Pagamento direto">Pagamento direto</option>
-                            <option value="Precatório">Precatório</option>
-                            <option value="RPV">RPV</option>
-                          </select>
+                            <Plus className="w-4 h-4" />
+                            Adicionar Depósito
+                          </button>
+                        </div>
+                        
+                        {financeiro.depositos.length === 0 ? (
+                          <p className="text-gray-500 text-sm italic">Nenhum depósito adicionado. Clique em "Adicionar Depósito" para começar.</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {financeiro.depositos.map((dep, index) => (
+                              <div key={index} className="flex gap-3 items-start bg-gray-50 p-3 rounded-lg">
+                                <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3">
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Data</label>
+                                    <input
+                                      type="date"
+                                      value={dep.data}
+                                      onChange={(e) => atualizarDeposito(index, 'data', e.target.value)}
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Origem</label>
+                                    <input
+                                      type="text"
+                                      value={dep.origem}
+                                      onChange={(e) => atualizarDeposito(index, 'origem', e.target.value)}
+                                      placeholder="RPV MTPREV, RPV Estado..."
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Valor (R$)</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={dep.valor || ''}
+                                      onChange={(e) => atualizarDeposito(index, 'valor', parseFloat(e.target.value) || 0)}
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
+                                    />
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => removerDeposito(index)}
+                                  className="text-red-500 hover:text-red-700 p-1"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ))}
+                            <div className="flex justify-end text-sm font-medium text-gray-700 pt-2 border-t">
+                              <span>Total Depósitos: {formatMoney(calcularTotalDepositos())}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Crédito do Cliente e Honorários */}
+                      <div className="bg-white rounded-lg p-4 border border-amber-200">
+                        <h4 className="font-semibold text-gray-700 mb-3">Crédito do Cliente e Honorários</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Valor do Crédito do Cliente (R$)</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={financeiro.valor_credito_cliente || ''}
+                              onChange={(e) => setFinanceiro({ ...financeiro, valor_credito_cliente: parseFloat(e.target.value) || 0 })}
+                              placeholder="Base de cálculo dos honorários contratuais"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">Base para cálculo dos honorários contratuais (sem sucumbência)</p>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-medium text-gray-700 mb-1">Percentual Honorários Contratuais (%)</label>
+                            <input
+                              type="number"
+                              step="0.01"
+                              value={financeiro.percentual_honorarios || ''}
+                              onChange={(e) => setFinanceiro({ ...financeiro, percentual_honorarios: parseFloat(e.target.value) || 0 })}
+                              placeholder="20"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                            />
+                          </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Percentual Honorários Contratuais (%)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={financeiro.percentual_honorarios || ''}
-                            onChange={(e) => setFinanceiro({ ...financeiro, percentual_honorarios: parseFloat(e.target.value) || 0 })}
-                            placeholder="20"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                          />
+                      {/* Honorários Sucumbenciais */}
+                      <div className="bg-white rounded-lg p-4 border border-amber-200">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-semibold text-gray-700">Honorários Sucumbenciais</h4>
+                          <button
+                            onClick={adicionarSucumbencia}
+                            className="flex items-center gap-1 text-amber-600 hover:text-amber-800 text-sm font-medium"
+                          >
+                            <Plus className="w-4 h-4" />
+                            Adicionar Sucumbência
+                          </button>
                         </div>
-                        <div>
-                          <label className="block text-sm font-medium text-gray-700 mb-1">Honorários de Sucumbência (R$)</label>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={financeiro.honorarios_sucumbencia || ''}
-                            onChange={(e) => setFinanceiro({ ...financeiro, honorarios_sucumbencia: parseFloat(e.target.value) || 0 })}
-                            placeholder="0,00"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                          />
-                        </div>
+                        
+                        {financeiro.sucumbencias.length === 0 ? (
+                          <p className="text-gray-500 text-sm italic">Nenhuma sucumbência. Clique para adicionar.</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {financeiro.sucumbencias.map((suc, index) => (
+                              <div key={index} className="flex gap-3 items-start bg-gray-50 p-3 rounded-lg">
+                                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Descrição</label>
+                                    <input
+                                      type="text"
+                                      value={suc.descricao}
+                                      onChange={(e) => atualizarSucumbencia(index, 'descricao', e.target.value)}
+                                      placeholder="Honorários sucumbenciais MTPREV"
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Valor (R$)</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={suc.valor || ''}
+                                      onChange={(e) => atualizarSucumbencia(index, 'valor', parseFloat(e.target.value) || 0)}
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
+                                    />
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => removerSucumbencia(index)}
+                                  className="text-red-500 hover:text-red-700 p-1"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ))}
+                            <div className="flex justify-end text-sm font-medium text-gray-700 pt-2 border-t">
+                              <span>Total Sucumbências: {formatMoney(calcularTotalSucumbencias())}</span>
+                            </div>
+                          </div>
+                        )}
                       </div>
 
-                      <div>
+                      {/* Retenções (PSS, IRRF) */}
+                      <div className="bg-white rounded-lg p-4 border border-amber-200">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="font-semibold text-gray-700">Retenções Legais (PSS / IRRF)</h4>
+                          <button
+                            onClick={adicionarRetencao}
+                            className="flex items-center gap-1 text-amber-600 hover:text-amber-800 text-sm font-medium"
+                          >
+                            <Plus className="w-4 h-4" />
+                            Adicionar Retenção
+                          </button>
+                        </div>
+                        
+                        {financeiro.retencoes.length === 0 ? (
+                          <p className="text-gray-500 text-sm italic">Nenhuma retenção. Clique para adicionar.</p>
+                        ) : (
+                          <div className="space-y-3">
+                            {financeiro.retencoes.map((ret, index) => (
+                              <div key={index} className="flex gap-3 items-start bg-gray-50 p-3 rounded-lg">
+                                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Descrição</label>
+                                    <input
+                                      type="text"
+                                      value={ret.descricao}
+                                      onChange={(e) => atualizarRetencao(index, 'descricao', e.target.value)}
+                                      placeholder="PSS MTPREV, IRRF Estado..."
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs text-gray-500 mb-1">Valor (R$)</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={ret.valor || ''}
+                                      onChange={(e) => atualizarRetencao(index, 'valor', parseFloat(e.target.value) || 0)}
+                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
+                                    />
+                                  </div>
+                                </div>
+                                <button
+                                  onClick={() => removerRetencao(index)}
+                                  className="text-red-500 hover:text-red-700 p-1"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ))}
+                            <div className="flex justify-end text-sm font-medium text-gray-700 pt-2 border-t">
+                              <span>Total Retenções: {formatMoney(calcularTotalRetencoes())}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Observações */}
+                      <div className="bg-white rounded-lg p-4 border border-amber-200">
                         <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
                         <textarea
                           value={financeiro.observacoes}
@@ -1294,26 +1532,34 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       </div>
 
                       {/* Resumo dos cálculos */}
-                      {financeiro.valor_bruto > 0 && (
-                        <div className="bg-white border border-amber-200 rounded-lg p-4 mt-4">
+                      {(financeiro.depositos.length > 0 || financeiro.valor_credito_cliente > 0) && (
+                        <div className="bg-white border-2 border-amber-300 rounded-lg p-4">
                           <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
                             <Calculator className="w-4 h-4" />
                             Resumo Financeiro
                           </h4>
                           <div className="space-y-2 text-sm">
                             <div className="flex justify-between">
-                              <span>Valor Bruto:</span>
-                              <span className="font-medium">{formatMoney(financeiro.valor_bruto)}</span>
+                              <span>Total Depósitos (Valor Bruto):</span>
+                              <span className="font-medium">{formatMoney(calcularTotalDepositos())}</span>
                             </div>
-                            <div className="flex justify-between text-red-600">
+                            <div className="flex justify-between">
+                              <span>Crédito do Cliente (Base honorários):</span>
+                              <span className="font-medium">{formatMoney(financeiro.valor_credito_cliente)}</span>
+                            </div>
+                            <div className="flex justify-between text-amber-700">
                               <span>(-) Honorários Contratuais ({financeiro.percentual_honorarios}%):</span>
                               <span className="font-medium">{formatMoney(calcularHonorariosContratuais())}</span>
                             </div>
-                            <div className="flex justify-between text-red-600">
-                              <span>(-) Honorários Sucumbência:</span>
-                              <span className="font-medium">{formatMoney(financeiro.honorarios_sucumbencia)}</span>
+                            <div className="flex justify-between text-amber-700">
+                              <span>(-) Honorários Sucumbenciais:</span>
+                              <span className="font-medium">{formatMoney(calcularTotalSucumbencias())}</span>
                             </div>
-                            <div className="flex justify-between border-t pt-2 text-green-700 font-bold">
+                            <div className="flex justify-between text-red-600">
+                              <span>(-) Retenções Legais (PSS/IRRF):</span>
+                              <span className="font-medium">{formatMoney(calcularTotalRetencoes())}</span>
+                            </div>
+                            <div className="flex justify-between border-t-2 pt-2 text-green-700 font-bold text-base">
                               <span>Valor Líquido do Cliente:</span>
                               <span>{formatMoney(calcularValorLiquido())}</span>
                             </div>
@@ -1322,7 +1568,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       )}
 
                       {/* Botões de ação */}
-                      <div className="flex flex-wrap gap-3 mt-4">
+                      <div className="flex flex-wrap gap-3">
                         <button
                           onClick={handleSalvarFinanceiro}
                           disabled={salvandoFinanceiro}
@@ -1343,7 +1589,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                         
                         <button
                           onClick={handleGerarPrestacao}
-                          disabled={gerandoPrestacao || !financeiro.valor_bruto}
+                          disabled={gerandoPrestacao || financeiro.depositos.length === 0}
                           className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
                         >
                           {gerandoPrestacao ? (
