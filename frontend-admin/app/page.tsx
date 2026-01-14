@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet } from 'lucide-react'
+import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -65,6 +65,18 @@ interface Cadastro {
   }
   documentos_assinados?: string[]
   data_assinatura?: string
+}
+
+interface Financeiro {
+  cadastro_id: string
+  numero_processo: string
+  vara_tribunal: string
+  valor_bruto: number
+  data_recebimento: string
+  origem_valor: string
+  percentual_honorarios: number
+  honorarios_sucumbencia: number
+  observacoes: string
 }
 
 // Tela de Login (SEM credenciais de demonstração)
@@ -778,6 +790,22 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const [showUsuariosModal, setShowUsuariosModal] = useState(false)
   const [showAlterarSenhaModal, setShowAlterarSenhaModal] = useState(false)
   const [mensagemSucesso, setMensagemSucesso] = useState('')
+  
+  // Estados do módulo financeiro
+  const [showFinanceiro, setShowFinanceiro] = useState(false)
+  const [financeiro, setFinanceiro] = useState<Financeiro>({
+    cadastro_id: '',
+    numero_processo: '',
+    vara_tribunal: '',
+    valor_bruto: 0,
+    data_recebimento: '',
+    origem_valor: '',
+    percentual_honorarios: 20,
+    honorarios_sucumbencia: 0,
+    observacoes: ''
+  })
+  const [salvandoFinanceiro, setSalvandoFinanceiro] = useState(false)
+  const [gerandoPrestacao, setGerandoPrestacao] = useState(false)
 
   const tiposDemanda: Record<string, string> = {
     'adicional_insalubridade': 'Adicional de Insalubridade',
@@ -904,6 +932,81 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       console.error('Erro ao deletar:', err)
       alert('Erro de conexão. Tente novamente.')
     }
+  }
+
+  // Funções do módulo financeiro
+  const carregarFinanceiro = async (cadastroId: string) => {
+    try {
+      const response = await fetch(`${API_URL}/api/cadastros/${cadastroId}/financeiro`)
+      const data = await response.json()
+      setFinanceiro(data)
+    } catch (err) {
+      console.error('Erro ao carregar financeiro:', err)
+    }
+  }
+
+  const handleSalvarFinanceiro = async () => {
+    if (!selectedCadastro) return
+    setSalvandoFinanceiro(true)
+
+    try {
+      const response = await fetch(`${API_URL}/api/cadastros/${selectedCadastro.id}/financeiro`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(financeiro)
+      })
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        setMensagemSucesso('Dados financeiros salvos com sucesso!')
+        setTimeout(() => setMensagemSucesso(''), 3000)
+      } else {
+        alert(data.detail || 'Erro ao salvar dados financeiros')
+      }
+    } catch (err) {
+      console.error('Erro ao salvar financeiro:', err)
+      alert('Erro de conexão. Tente novamente.')
+    } finally {
+      setSalvandoFinanceiro(false)
+    }
+  }
+
+  const handleGerarPrestacao = async () => {
+    if (!selectedCadastro) return
+    
+    if (!financeiro.valor_bruto || financeiro.valor_bruto <= 0) {
+      alert('Preencha o valor bruto antes de gerar a prestação de contas.')
+      return
+    }
+    
+    setGerandoPrestacao(true)
+
+    try {
+      // Primeiro salvar os dados
+      await handleSalvarFinanceiro()
+      
+      // Abrir o documento em nova aba
+      window.open(`${API_URL}/api/cadastros/${selectedCadastro.id}/prestacao-contas`, '_blank')
+    } catch (err) {
+      console.error('Erro ao gerar prestação:', err)
+      alert('Erro ao gerar prestação de contas.')
+    } finally {
+      setGerandoPrestacao(false)
+    }
+  }
+
+  const formatMoney = (value: number) => {
+    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  }
+
+  // Cálculos financeiros
+  const calcularHonorariosContratuais = () => {
+    return financeiro.valor_bruto * (financeiro.percentual_honorarios / 100)
+  }
+
+  const calcularValorLiquido = () => {
+    return financeiro.valor_bruto - calcularHonorariosContratuais() - financeiro.honorarios_sucumbencia
   }
 
   // Visualização de detalhes
@@ -1067,6 +1170,197 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Módulo Financeiro */}
+              {c.status === 'assinado' && (
+                <div className="bg-amber-50 rounded-xl p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                      <DollarSign className="w-5 h-5 text-amber-600" />
+                      Módulo Financeiro
+                    </h3>
+                    <button
+                      onClick={() => {
+                        setShowFinanceiro(!showFinanceiro)
+                        if (!showFinanceiro) {
+                          carregarFinanceiro(c.id)
+                        }
+                      }}
+                      className="text-amber-600 hover:text-amber-800 text-sm font-medium"
+                    >
+                      {showFinanceiro ? 'Fechar' : 'Abrir / Editar'}
+                    </button>
+                  </div>
+
+                  {showFinanceiro && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Número do Processo</label>
+                          <input
+                            type="text"
+                            value={financeiro.numero_processo}
+                            onChange={(e) => setFinanceiro({ ...financeiro, numero_processo: e.target.value })}
+                            placeholder="0001234-56.2024.8.11.0001"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Vara / Tribunal</label>
+                          <input
+                            type="text"
+                            value={financeiro.vara_tribunal}
+                            onChange={(e) => setFinanceiro({ ...financeiro, vara_tribunal: e.target.value })}
+                            placeholder="1ª Vara Cível de Cuiabá"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Valor Bruto Recebido (R$)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={financeiro.valor_bruto || ''}
+                            onChange={(e) => setFinanceiro({ ...financeiro, valor_bruto: parseFloat(e.target.value) || 0 })}
+                            placeholder="0,00"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Data do Recebimento</label>
+                          <input
+                            type="date"
+                            value={financeiro.data_recebimento}
+                            onChange={(e) => setFinanceiro({ ...financeiro, data_recebimento: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Origem do Valor</label>
+                          <select
+                            value={financeiro.origem_valor}
+                            onChange={(e) => setFinanceiro({ ...financeiro, origem_valor: e.target.value })}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                          >
+                            <option value="">Selecione...</option>
+                            <option value="Alvará judicial">Alvará judicial</option>
+                            <option value="Depósito judicial">Depósito judicial</option>
+                            <option value="Pagamento direto">Pagamento direto</option>
+                            <option value="Precatório">Precatório</option>
+                            <option value="RPV">RPV</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Percentual Honorários Contratuais (%)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={financeiro.percentual_honorarios || ''}
+                            onChange={(e) => setFinanceiro({ ...financeiro, percentual_honorarios: parseFloat(e.target.value) || 0 })}
+                            placeholder="20"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-1">Honorários de Sucumbência (R$)</label>
+                          <input
+                            type="number"
+                            step="0.01"
+                            value={financeiro.honorarios_sucumbencia || ''}
+                            onChange={(e) => setFinanceiro({ ...financeiro, honorarios_sucumbencia: parseFloat(e.target.value) || 0 })}
+                            placeholder="0,00"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
+                        <textarea
+                          value={financeiro.observacoes}
+                          onChange={(e) => setFinanceiro({ ...financeiro, observacoes: e.target.value })}
+                          placeholder="Observações adicionais..."
+                          rows={2}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+                        />
+                      </div>
+
+                      {/* Resumo dos cálculos */}
+                      {financeiro.valor_bruto > 0 && (
+                        <div className="bg-white border border-amber-200 rounded-lg p-4 mt-4">
+                          <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                            <Calculator className="w-4 h-4" />
+                            Resumo Financeiro
+                          </h4>
+                          <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                              <span>Valor Bruto:</span>
+                              <span className="font-medium">{formatMoney(financeiro.valor_bruto)}</span>
+                            </div>
+                            <div className="flex justify-between text-red-600">
+                              <span>(-) Honorários Contratuais ({financeiro.percentual_honorarios}%):</span>
+                              <span className="font-medium">{formatMoney(calcularHonorariosContratuais())}</span>
+                            </div>
+                            <div className="flex justify-between text-red-600">
+                              <span>(-) Honorários Sucumbência:</span>
+                              <span className="font-medium">{formatMoney(financeiro.honorarios_sucumbencia)}</span>
+                            </div>
+                            <div className="flex justify-between border-t pt-2 text-green-700 font-bold">
+                              <span>Valor Líquido do Cliente:</span>
+                              <span>{formatMoney(calcularValorLiquido())}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Botões de ação */}
+                      <div className="flex flex-wrap gap-3 mt-4">
+                        <button
+                          onClick={handleSalvarFinanceiro}
+                          disabled={salvandoFinanceiro}
+                          className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                        >
+                          {salvandoFinanceiro ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Salvando...
+                            </>
+                          ) : (
+                            <>
+                              <Check className="w-4 h-4" />
+                              Salvar Dados
+                            </>
+                          )}
+                        </button>
+                        
+                        <button
+                          onClick={handleGerarPrestacao}
+                          disabled={gerandoPrestacao || !financeiro.valor_bruto}
+                          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                        >
+                          {gerandoPrestacao ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              Gerando...
+                            </>
+                          ) : (
+                            <>
+                              <Receipt className="w-4 h-4" />
+                              Gerar Prestação de Contas
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
