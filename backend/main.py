@@ -1203,8 +1203,6 @@ class GeradorDocumentos:
         
         doc.save(caminho_arquivo)
         return caminho_arquivo
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
     
     def gerar_todos(self, dados: dict, cadastro_id: str) -> dict:
         return {
