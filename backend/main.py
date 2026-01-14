@@ -1190,9 +1190,6 @@ def download_upload_cliente(cadastro_id: str, filename: str):
 # ÁREA DO CLIENTE - DEVOLUÇÃO DE DOCUMENTOS
 # ============================================
 
-ASSINADOS_DIR = os.path.join(BASE_DIR, "documentos_assinados")
-os.makedirs(ASSINADOS_DIR, exist_ok=True)
-
 @app.get("/api/cliente/{cadastro_id}")
 def cliente_ver_cadastro(cadastro_id: str):
     """Cliente visualiza seu próprio cadastro (sem autenticação, mas limitado)."""
@@ -1227,8 +1224,8 @@ async def cliente_enviar_documentos_assinados(
     if cadastro["status"] not in ["enviado", "assinado"]:
         raise HTTPException(status_code=400, detail="Você ainda não recebeu os documentos para assinar")
     
-    # Criar diretório para documentos assinados
-    cliente_assinados_dir = os.path.join(ASSINADOS_DIR, cadastro_id)
+    # Salvar na pasta uploads (que tem volume persistente) com subpasta "assinados"
+    cliente_assinados_dir = os.path.join(UPLOADS_DIR, cadastro_id, "assinados")
     os.makedirs(cliente_assinados_dir, exist_ok=True)
     
     arquivos_salvos = []
@@ -1291,7 +1288,8 @@ async def cliente_enviar_documentos_assinados(
 @app.get("/api/cadastros/{cadastro_id}/assinados/{filename}")
 def download_documento_assinado(cadastro_id: str, filename: str):
     """Faz download de um documento assinado pelo cliente."""
-    file_path = os.path.join(ASSINADOS_DIR, cadastro_id, filename)
+    # Usar pasta uploads (que tem volume persistente)
+    file_path = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", filename)
     
     if os.path.exists(file_path):
         return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
