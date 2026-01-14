@@ -63,7 +63,7 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELOS_DIR = os.path.join(BASE_DIR, "modelos")
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
-GERADOS_DIR = os.path.join(BASE_DIR, "documentos_gerados")
+GERADOS_DIR = os.path.join(UPLOADS_DIR, "documentos_gerados")  # Dentro do volume persistente
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 # Criar diretórios se não existirem
