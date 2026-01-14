@@ -2,6 +2,7 @@
 Backend - Vaucher & Álvares Sistema de Cadastro
 FastAPI + PostgreSQL + Geração de Documentos + Resend para E-mail
 Com gerenciamento de usuários no banco de dados
+VERSÃO 3.0 - COM PORTAL DO CLIENTE
 """
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header
@@ -38,7 +39,7 @@ from psycopg2.extras import RealDictCursor
 app = FastAPI(
     title="Vaucher & Álvares - API",
     description="Sistema de cadastro de clientes e geração de documentos",
-    version="2.3.0"
+    version="3.0.0"
 )
 
 # CORS - permitir acesso dos frontends
@@ -47,12 +48,16 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000",
         "http://localhost:3001",
+        "http://localhost:3002",
         "https://cadastro.vaucherealvares.com.br",
         "https://painel.vaucherealvares.com.br",
+        "https://portal.vaucherealvares.com.br",
         "https://cadastro.vaucherealvares.com",
         "https://painel.vaucherealvares.com",
+        "https://portal.vaucherealvares.com",
         "https://vaucher-cliente.vercel.app",
         "https://vaucher-admin.vercel.app",
+        "https://vaucher-portal.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -63,7 +68,7 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELOS_DIR = os.path.join(BASE_DIR, "modelos")
 UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
-GERADOS_DIR = os.path.join(UPLOADS_DIR, "documentos_gerados")  # Dentro do volume persistente
+GERADOS_DIR = os.path.join(UPLOADS_DIR, "documentos_gerados")
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 # Criar diretórios se não existirem
@@ -102,18 +107,14 @@ def verificar_senha(senha: str, hash_armazenado: str) -> bool:
 
 def gerar_token(user_id: int, email: str, is_admin: bool) -> str:
     """Gera um token que contém informações do usuário."""
-    # Criar payload com dados do usuário
     payload = f"{user_id}:{email}:{is_admin}"
-    # Criar assinatura
     signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
-    # Codificar em base64
     token_data = base64.b64encode(f"{payload}:{signature}".encode()).decode()
     return token_data
 
 def decodificar_token(token: str) -> dict:
     """Decodifica e valida um token."""
     try:
-        # Decodificar base64
         decoded = base64.b64decode(token.encode()).decode()
         parts = decoded.rsplit(":", 1)
         if len(parts) != 2:
@@ -121,12 +122,10 @@ def decodificar_token(token: str) -> dict:
         
         payload, signature = parts
         
-        # Verificar assinatura
         expected_signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
         if signature != expected_signature:
             return None
         
-        # Extrair dados
         user_id, email, is_admin = payload.split(":")
         return {
             "id": int(user_id),
@@ -147,7 +146,6 @@ def verificar_token(authorization: str = Header(None)) -> dict:
     if not usuario:
         raise HTTPException(status_code=401, detail="Token inválido ou expirado")
     
-    # Verificar se o usuário ainda existe e está ativo
     usuario_db = buscar_usuario_por_email(usuario["email"])
     if not usuario_db or not usuario_db.get("ativo", True):
         raise HTTPException(status_code=401, detail="Usuário não encontrado ou inativo")
@@ -289,7 +287,6 @@ def init_db():
         cur.execute("""
             DO $$ 
             BEGIN 
-                -- Adicionar novas colunas se não existirem
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='valor_credito_cliente') THEN
                     ALTER TABLE financeiro ADD COLUMN valor_credito_cliente DECIMAL(15,2) DEFAULT 0;
                 END IF;
@@ -304,6 +301,66 @@ def init_db():
                 END IF;
             END $$;
         """)
+        
+        # ========== PORTAL DO CLIENTE - NOVAS TABELAS ==========
+        
+        # Tabela de autenticação de clientes
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS clientes_auth (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                senha_hash VARCHAR(255) NOT NULL,
+                ativo BOOLEAN DEFAULT TRUE,
+                primeiro_acesso BOOLEAN DEFAULT TRUE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ultimo_acesso TIMESTAMP,
+                UNIQUE(cadastro_id)
+            )
+        """)
+        
+        # Tabela de informações do processo
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS processo_info (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                numero_processo VARCHAR(50),
+                vara_tribunal VARCHAR(255),
+                fase VARCHAR(50) DEFAULT 'Inicial',
+                data_distribuicao DATE,
+                valor_causa DECIMAL(15,2),
+                reu TEXT,
+                observacoes TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(cadastro_id)
+            )
+        """)
+        
+        # Tabela de andamentos processuais
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS andamentos (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                data DATE NOT NULL,
+                descricao TEXT NOT NULL,
+                visivel_cliente BOOLEAN DEFAULT TRUE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Tabela de mensagens
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS mensagens (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                remetente VARCHAR(20) NOT NULL,
+                texto TEXT NOT NULL,
+                lida BOOLEAN DEFAULT FALSE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        logger.info("Tabelas do Portal do Cliente verificadas/criadas!")
         
         conn.commit()
         
@@ -609,21 +666,18 @@ def buscar_financeiro(cadastro_id: str) -> dict:
         conn.close()
         
         if row:
-            # Processar depositos
             depositos = row.get("depositos")
             if isinstance(depositos, str):
                 depositos = json.loads(depositos)
             elif depositos is None:
                 depositos = []
             
-            # Processar sucumbencias
             sucumbencias = row.get("sucumbencias")
             if isinstance(sucumbencias, str):
                 sucumbencias = json.loads(sucumbencias)
             elif sucumbencias is None:
                 sucumbencias = []
             
-            # Processar retencoes
             retencoes = row.get("retencoes")
             if isinstance(retencoes, str):
                 retencoes = json.loads(retencoes)
@@ -718,6 +772,33 @@ class FinanceiroData(BaseModel):
     retencoes: Optional[List[dict]] = []
     observacoes: Optional[str] = ""
 
+# ========== MODELS PORTAL DO CLIENTE ==========
+
+class ClienteLogin(BaseModel):
+    email: str
+    senha: str
+
+class ClienteAlterarSenha(BaseModel):
+    senha_atual: str
+    nova_senha: str
+
+class ProcessoInfoModel(BaseModel):
+    numero_processo: Optional[str] = ""
+    vara_tribunal: Optional[str] = ""
+    fase: Optional[str] = "Inicial"
+    data_distribuicao: Optional[str] = None
+    valor_causa: Optional[float] = 0
+    reu: Optional[str] = ""
+    observacoes: Optional[str] = ""
+
+class AndamentoModel(BaseModel):
+    data: str
+    descricao: str
+    visivel_cliente: Optional[bool] = True
+
+class MensagemEnvio(BaseModel):
+    texto: str
+
 # ============================================
 # GERADOR DE DOCUMENTOS
 # ============================================
@@ -764,7 +845,6 @@ class GeradorDocumentos:
         for placeholder, valor in substituicoes.items():
             resultado = resultado.replace(placeholder, valor)
         
-        # Objeto do contrato
         objeto = dados.get('objeto_contrato', '')
         if objeto:
             resultado = resultado.replace(
@@ -772,7 +852,6 @@ class GeradorDocumentos:
                 f'advocatícios para {objeto}.'
             )
         
-        # Honorários
         honorarios = dados.get('honorarios', '')
         if honorarios:
             resultado = resultado.replace(
@@ -780,7 +859,6 @@ class GeradorDocumentos:
                 f'fixar-se-ão em {honorarios}.'
             )
         
-        # Datas
         resultado = resultado.replace('sample text question answer', self._data_por_extenso())
         resultado = resultado.replace(
             'Cuiabá, ____ de ____________de________.',
@@ -859,37 +937,32 @@ class GeradorDocumentos:
         from docx.oxml.ns import qn
         from docx.oxml import OxmlElement
         
-        # Extrair dados
         depositos = financeiro.get("depositos", [])
         sucumbencias = financeiro.get("sucumbencias", [])
         retencoes = financeiro.get("retencoes", [])
         percentual = float(financeiro.get("percentual_honorarios", 20))
         valor_credito = float(financeiro.get("valor_credito_cliente", 0))
         
-        # Calcular totais
         total_depositos = sum(float(d.get("valor", 0)) for d in depositos)
         total_sucumbencias = sum(float(s.get("valor", 0)) for s in sucumbencias)
         total_retencoes = sum(float(r.get("valor", 0)) for r in retencoes)
         honorarios_contratuais = valor_credito * (percentual / 100)
         valor_liquido = valor_credito - honorarios_contratuais - total_retencoes
         
-        # Criar documento
         doc = Document()
         
-        # Configurar margens
         for section in doc.sections:
             section.top_margin = Cm(2)
             section.bottom_margin = Cm(2)
             section.left_margin = Cm(2.5)
             section.right_margin = Cm(2.5)
         
-        # Função auxiliar para criar célula com formatação
         def set_cell_shading(cell, color):
             shading = OxmlElement('w:shd')
             shading.set(qn('w:fill'), color)
             cell._tc.get_or_add_tcPr().append(shading)
         
-        # ========== TÍTULO ==========
+        # TÍTULO
         titulo = doc.add_paragraph()
         titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = titulo.add_run("PRESTAÇÃO DE CONTAS")
@@ -909,31 +982,28 @@ class GeradorDocumentos:
         run3.font.size = Pt(11)
         run3.font.color.rgb = RGBColor(238, 0, 0)
         
-        # ========== 1. IDENTIFICAÇÃO ==========
+        # 1. IDENTIFICAÇÃO
         doc.add_paragraph()
         h1 = doc.add_paragraph()
         run = h1.add_run("1. Identificação das Partes")
         run.bold = True
         run.font.size = Pt(11)
         
-        # Cliente
         p = doc.add_paragraph()
         p.add_run("Cliente: ").bold = True
         p.add_run(dados_cliente.get('nome', '').upper())
         
-        # Escritório
         p = doc.add_paragraph()
         p.add_run("Escritório de Advocacia: ").bold = True
         p.add_run("VAUCHER E ÁLVARES SOCIEDADE DE ADVOGADOS").bold = True
         p.add_run(", devidamente registrada na Ordem dos Advogados do Brasil Seccional de Mato Grosso sob o nº 669, inscrita no CNPJ sob o nº 21.336.697/0001-46, com sede na Rua Lima, n. 106, Bairro Jardim das Américas, em Cuiabá-MT.")
         
-        # Processo
         p = doc.add_paragraph()
         p.add_run("Processo(s): ").bold = True
         run = p.add_run(f"{financeiro.get('numero_processo', '')} / {financeiro.get('vara_tribunal', '')}")
         run.font.color.rgb = RGBColor(238, 0, 0)
         
-        # ========== 2. OBJETO ==========
+        # 2. OBJETO
         doc.add_paragraph()
         h2 = doc.add_paragraph()
         run = h2.add_run("2. Objeto da Prestação de Contas")
@@ -948,7 +1018,6 @@ class GeradorDocumentos:
         p.add_run("totais recebidos").bold = True
         p.add_run(" no âmbito do(s) processo(s) acima identificado(s), indicando:")
         
-        # Lista de itens
         items = [
             ("valores pertencentes ao ", "cliente", ";"),
             ("valores correspondentes aos ", "honorários advocatícios contratuais", ";"),
@@ -961,19 +1030,17 @@ class GeradorDocumentos:
             p.add_run(bold_text).bold = True
             p.add_run(suffix)
         
-        # ========== 3. VALORES TOTAIS RECEBIDOS ==========
+        # 3. VALORES TOTAIS RECEBIDOS
         doc.add_paragraph()
         h3 = doc.add_paragraph()
         run = h3.add_run("3. Valores Totais Recebidos")
         run.bold = True
         run.font.size = Pt(11)
         
-        # Tabela de depósitos
         num_depositos = len(depositos) if depositos else 1
         table = doc.add_table(rows=num_depositos + 2, cols=3)
         table.style = 'Table Grid'
         
-        # Cabeçalho
         hdr = table.rows[0].cells
         hdr[0].text = "Data do Recebimento"
         hdr[1].text = "Origem do Valor"
@@ -982,7 +1049,6 @@ class GeradorDocumentos:
             cell.paragraphs[0].runs[0].bold = True
             set_cell_shading(cell, "D9D9D9")
         
-        # Linhas de depósitos
         if depositos:
             for i, dep in enumerate(depositos):
                 row = table.rows[i + 1].cells
@@ -991,24 +1057,21 @@ class GeradorDocumentos:
                 row[2].text = self._format_money(float(dep.get("valor", 0)))
         else:
             row = table.rows[1].cells
-            row[0].text = "[Data]"
-            row[1].text = "[Origem]"
+            row[0].text = "-"
+            row[1].text = "-"
             row[2].text = self._format_money(0)
         
-        # Total
         total_row = table.rows[-1].cells
-        total_row[0].text = "TOTAL RECEBIDO"
-        total_row[0].paragraphs[0].runs[0].bold = True
-        total_row[1].text = "(Soma Global do Processo)"
+        total_row[0].text = ""
+        total_row[1].text = "TOTAL"
+        total_row[1].paragraphs[0].runs[0].bold = True
         total_row[2].text = self._format_money(total_depositos)
         total_row[2].paragraphs[0].runs[0].bold = True
-        for cell in total_row:
-            set_cell_shading(cell, "F2F2F2")
         
-        # ========== 4. DISCRIMINAÇÃO DOS VALORES ==========
+        # 4. DISCRIMINAÇÃO DOS VALORES
         doc.add_paragraph()
         h4 = doc.add_paragraph()
-        run = h4.add_run("4. Discriminação dos Valores por Natureza Jurídica")
+        run = h4.add_run("4. Discriminação dos Valores")
         run.bold = True
         run.font.size = Pt(11)
         
@@ -1020,7 +1083,6 @@ class GeradorDocumentos:
         p = doc.add_paragraph()
         p.add_run("Corresponde à parcela do valor recebido que integra o patrimônio do cliente, após a dedução dos honorários advocatícios devidos e das retenções legais.")
         
-        # Tabela 4.1
         table41 = doc.add_table(rows=5 + len(retencoes), cols=2)
         table41.style = 'Table Grid'
         
@@ -1030,7 +1092,6 @@ class GeradorDocumentos:
             (f"(-) Honorários sucumbenciais", self._format_money(total_sucumbencias), False),
         ]
         
-        # Adicionar retenções
         for ret in retencoes:
             rows_data.append((f"(-) {ret.get('descricao', 'Retenção')}", self._format_money(float(ret.get('valor', 0))), False))
         
@@ -1082,7 +1143,6 @@ class GeradorDocumentos:
         p = doc.add_paragraph()
         p.add_run("Os honorários sucumbenciais são fixados judicialmente e pertencem exclusivamente ao advogado, conforme dispõe expressamente o art. 85, §14, do CPC.")
         
-        # Tabela de sucumbências
         num_sucumb = len(sucumbencias) if sucumbencias else 1
         table43 = doc.add_table(rows=num_sucumb + 1, cols=2)
         table43.style = 'Table Grid'
@@ -1097,20 +1157,18 @@ class GeradorDocumentos:
             row[0].text = "Honorários sucumbenciais"
             row[1].text = self._format_money(0)
         
-        # Total sucumbência
         total_suc_row = table43.rows[-1].cells
         total_suc_row[0].text = "Total Honorários Sucumbenciais"
         total_suc_row[0].paragraphs[0].runs[0].bold = True
         total_suc_row[1].text = self._format_money(total_sucumbencias)
         total_suc_row[1].paragraphs[0].runs[0].bold = True
         
-        # Observação
         p = doc.add_paragraph()
         run = p.add_run("Obs.: Os honorários sucumbenciais não se confundem com o crédito do cliente, não integram sua base patrimonial e não substituem os honorários contratuais.")
         run.italic = True
         run.font.size = Pt(9)
         
-        # ========== 5. RESUMO GERAL ==========
+        # 5. RESUMO GERAL
         doc.add_paragraph()
         h5 = doc.add_paragraph()
         run = h5.add_run("5. Resumo Geral da Prestação de Contas")
@@ -1120,7 +1178,6 @@ class GeradorDocumentos:
         table5 = doc.add_table(rows=5, cols=3)
         table5.style = 'Table Grid'
         
-        # Cabeçalho
         hdr5 = table5.rows[0].cells
         hdr5[0].text = "Natureza do Valor"
         hdr5[1].text = "Valor (R$)"
@@ -1148,7 +1205,7 @@ class GeradorDocumentos:
                 set_cell_shading(row[1], "F2F2F2")
                 set_cell_shading(row[2], "F2F2F2")
         
-        # ========== 6. CONCLUSÃO ==========
+        # 6. CONCLUSÃO
         doc.add_paragraph()
         h6 = doc.add_paragraph()
         run = h6.add_run("6. Conclusão")
@@ -1166,7 +1223,6 @@ class GeradorDocumentos:
             p = doc.add_paragraph(style='List Bullet')
             p.add_run(c)
         
-        # Data e Assinaturas
         doc.add_paragraph()
         doc.add_paragraph()
         p = doc.add_paragraph(f"Cuiabá-MT, {self._data_por_extenso()}.")
@@ -1174,7 +1230,6 @@ class GeradorDocumentos:
         doc.add_paragraph()
         doc.add_paragraph()
         
-        # Assinatura escritório
         ass1 = doc.add_paragraph("VAUCHER E ÁLVARES SOCIEDADE DE ADVOGADOS")
         ass1.alignment = WD_ALIGN_PARAGRAPH.CENTER
         ass1.runs[0].bold = True
@@ -1188,12 +1243,10 @@ class GeradorDocumentos:
         doc.add_paragraph()
         doc.add_paragraph()
         
-        # Assinatura cliente
         ass2 = doc.add_paragraph(dados_cliente.get('nome', '').upper())
         ass2.alignment = WD_ALIGN_PARAGRAPH.CENTER
         ass2.runs[0].bold = True
         
-        # Salvar
         cliente_dir = os.path.join(GERADOS_DIR, cadastro_id)
         os.makedirs(cliente_dir, exist_ok=True)
         
@@ -1260,12 +1313,12 @@ async def enviar_email_resend(destinatario: str, assunto: str, corpo_html: str, 
         return False
 
 # ============================================
-# ROTAS DA API
+# ROTAS DA API - BÁSICAS
 # ============================================
 
 @app.get("/")
 def root():
-    return {"message": "Vaucher & Álvares API", "status": "online", "version": "2.3"}
+    return {"message": "Vaucher & Álvares API", "status": "online", "version": "3.0"}
 
 @app.get("/health")
 def health():
@@ -1275,7 +1328,7 @@ def health():
         "email": "resend" if RESEND_API_KEY else "not_configured"
     }
 
-# --- AUTENTICAÇÃO ---
+# --- AUTENTICAÇÃO ADMIN ---
 
 @app.post("/api/login", response_model=LoginResponse)
 def login(request: LoginRequest):
@@ -1296,7 +1349,6 @@ def login(request: LoginRequest):
 @app.post("/api/logout")
 def logout():
     """Encerra a sessão do usuário."""
-    # Com tokens autocontidos, não precisa fazer nada no servidor
     return {"success": True}
 
 # --- GERENCIAMENTO DE USUÁRIOS (APENAS ADMIN) ---
@@ -1309,7 +1361,6 @@ def listar_todos_usuarios(usuario: dict = Depends(verificar_admin)):
 @app.post("/api/usuarios")
 def criar_novo_usuario(dados: NovoUsuario, usuario: dict = Depends(verificar_admin)):
     """Cria um novo usuário (apenas admin)."""
-    # Verificar se já existe
     if buscar_usuario_por_email(dados.email):
         raise HTTPException(status_code=400, detail="E-mail já cadastrado")
     
@@ -1329,7 +1380,6 @@ def atualizar_usuario_existente(user_id: int, dados: AtualizarUsuario, usuario: 
 @app.delete("/api/usuarios/{user_id}")
 def desativar_usuario(user_id: int, usuario: dict = Depends(verificar_admin)):
     """Desativa um usuário (apenas admin)."""
-    # Não permitir desativar a si mesmo
     if usuario["id"] == user_id:
         raise HTTPException(status_code=400, detail="Você não pode desativar sua própria conta")
     
@@ -1371,7 +1421,6 @@ async def criar_cadastro(dados: DadosCliente):
     if salvar_cadastro(novo_cadastro):
         logger.info(f"Cadastro salvo com ID: {novo_cadastro['id']}")
         
-        # Enviar e-mail de confirmação com logo
         try:
             conteudo = f"""
                 <p style="font-size: 16px;">Prezado(a) <strong>{dados.nome}</strong>,</p>
@@ -1439,7 +1488,6 @@ def deletar_cadastro(cadastro_id: str, usuario: dict = Depends(verificar_admin))
         cur.close()
         conn.close()
         
-        # Tentar remover arquivos do cliente (se existirem)
         cliente_uploads = os.path.join(UPLOADS_DIR, cadastro_id)
         cliente_gerados = os.path.join(GERADOS_DIR, cadastro_id)
         
@@ -1495,7 +1543,7 @@ async def enviar_email_documentos(
     mensagem: str = Form(default=""),
     arquivos: List[UploadFile] = File(default=[])
 ):
-    """Envia documentos por e-mail - VOCÊ escolhe quais arquivos anexar."""
+    """Envia documentos por e-mail."""
     logger.info(f"Enviando e-mail para cadastro: {cadastro_id}")
     
     cadastro = buscar_cadastro(cadastro_id)
@@ -1505,7 +1553,6 @@ async def enviar_email_documentos(
     dados = cadastro["dados"]
     anexos_email = []
     
-    # Processar arquivos enviados pelo admin
     if arquivos:
         for arquivo in arquivos:
             if arquivo.filename:
@@ -1519,11 +1566,9 @@ async def enviar_email_documentos(
     if not anexos_email:
         raise HTTPException(status_code=400, detail="Nenhum arquivo selecionado para envio")
     
-    # URL do portal para enviar documentos assinados
     PORTAL_URL = os.getenv("PORTAL_URL", "https://cadastro.vaucherealvares.com")
     link_envio = f"{PORTAL_URL}/enviar-assinados?id={cadastro_id}"
     
-    # Montar e-mail com logo
     mensagem_html = f"<p>{mensagem}</p>" if mensagem else ""
     
     conteudo = f"""
@@ -1581,12 +1626,10 @@ def exportar_cadastros_excel():
     
     cadastros = carregar_cadastros()
     
-    # Criar workbook
     wb = Workbook()
     ws = wb.active
     ws.title = "Cadastros"
     
-    # Estilos
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="8B1538", end_color="8B1538", fill_type="solid")
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -1597,7 +1640,6 @@ def exportar_cadastros_excel():
         bottom=Side(style='thin')
     )
     
-    # Cabeçalhos
     headers = [
         "ID", "Data Cadastro", "Status", "Nome", "CPF", "RG", 
         "Data Nascimento", "Estado Civil", "Nacionalidade", "Profissão",
@@ -1612,7 +1654,6 @@ def exportar_cadastros_excel():
         cell.alignment = header_alignment
         cell.border = thin_border
     
-    # Mapeamento de tipos de demanda
     tipos_demanda = {
         'adicional_insalubridade': 'Adicional de Insalubridade',
         'adicional_periculosidade': 'Adicional de Periculosidade',
@@ -1626,7 +1667,6 @@ def exportar_cadastros_excel():
         'outro': 'Outro'
     }
     
-    # Mapeamento de status
     status_map = {
         'pendente': 'Pendente',
         'validado': 'Validado',
@@ -1635,7 +1675,6 @@ def exportar_cadastros_excel():
         'assinado': 'Documentos Assinados Recebidos'
     }
     
-    # Dados
     for row, cadastro in enumerate(cadastros, 2):
         dados = cadastro.get("dados", {})
         
@@ -1664,20 +1703,16 @@ def exportar_cadastros_excel():
             cell.border = thin_border
             cell.alignment = Alignment(vertical="top", wrap_text=True)
     
-    # Ajustar largura das colunas
     column_widths = [12, 12, 15, 30, 15, 15, 12, 12, 12, 20, 40, 30, 15, 25, 50, 50, 30]
     for col, width in enumerate(column_widths, 1):
         ws.column_dimensions[get_column_letter(col)].width = width
     
-    # Congelar cabeçalho
     ws.freeze_panes = "A2"
     
-    # Salvar em memória
     output = BytesIO()
     wb.save(output)
     output.seek(0)
     
-    # Nome do arquivo com data
     filename = f"cadastros_vaucher_alvares_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
     
     return StreamingResponse(
@@ -1781,7 +1816,6 @@ def gerar_documento_prestacao_contas(cadastro_id: str):
     if not financeiro:
         raise HTTPException(status_code=400, detail="Dados financeiros não encontrados.")
     
-    # Verificar se há dados mínimos
     depositos = financeiro.get("depositos", [])
     if not depositos or len(depositos) == 0:
         raise HTTPException(status_code=400, detail="Adicione pelo menos um depósito.")
@@ -1804,17 +1838,16 @@ def gerar_documento_prestacao_contas(cadastro_id: str):
         logger.error(f"Erro ao gerar prestação de contas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# ÁREA DO CLIENTE - DEVOLUÇÃO DE DOCUMENTOS
+# ÁREA DO CLIENTE - DEVOLUÇÃO DE DOCUMENTOS (EXISTENTE)
 # ============================================
 
 @app.get("/api/cliente/{cadastro_id}")
-def cliente_ver_cadastro(cadastro_id: str):
+def cliente_ver_cadastro_publico(cadastro_id: str):
     """Cliente visualiza seu próprio cadastro (sem autenticação, mas limitado)."""
     cadastro = buscar_cadastro(cadastro_id)
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
-    # Retorna apenas informações básicas (sem dados sensíveis do admin)
     return {
         "id": cadastro["id"],
         "nome": cadastro["dados"].get("nome", ""),
@@ -1837,11 +1870,9 @@ async def cliente_enviar_documentos_assinados(
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
-    # Verificar se o status permite envio de documentos
     if cadastro["status"] not in ["enviado", "assinado"]:
         raise HTTPException(status_code=400, detail="Você ainda não recebeu os documentos para assinar")
     
-    # Salvar na pasta uploads (que tem volume persistente) com subpasta "assinados"
     cliente_assinados_dir = os.path.join(UPLOADS_DIR, cadastro_id, "assinados")
     os.makedirs(cliente_assinados_dir, exist_ok=True)
     
@@ -1849,7 +1880,6 @@ async def cliente_enviar_documentos_assinados(
     
     for arquivo in arquivos:
         if arquivo.filename:
-            # Adicionar prefixo para identificar como assinado
             nome_arquivo = f"ASSINADO_{arquivo.filename}"
             file_path = os.path.join(cliente_assinados_dir, nome_arquivo)
             
@@ -1863,7 +1893,6 @@ async def cliente_enviar_documentos_assinados(
     if not arquivos_salvos:
         raise HTTPException(status_code=400, detail="Nenhum arquivo enviado")
     
-    # Atualizar cadastro
     if "documentos_assinados" not in cadastro:
         cadastro["documentos_assinados"] = []
     
@@ -1872,7 +1901,6 @@ async def cliente_enviar_documentos_assinados(
     cadastro["data_assinatura"] = datetime.now().isoformat()
     salvar_cadastro(cadastro)
     
-    # Enviar e-mail para o escritório notificando
     try:
         dados = cadastro["dados"]
         conteudo = f"""
@@ -1889,7 +1917,7 @@ async def cliente_enviar_documentos_assinados(
         corpo_html = criar_email_html(conteudo)
         
         await enviar_email_resend(
-            FROM_EMAIL,  # Envia para o próprio escritório
+            FROM_EMAIL,
             f"📝 Documentos Assinados - {dados['nome']}",
             corpo_html
         )
@@ -1905,13 +1933,820 @@ async def cliente_enviar_documentos_assinados(
 @app.get("/api/cadastros/{cadastro_id}/assinados/{filename}")
 def download_documento_assinado(cadastro_id: str, filename: str):
     """Faz download de um documento assinado pelo cliente."""
-    # Usar pasta uploads (que tem volume persistente)
     file_path = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", filename)
     
     if os.path.exists(file_path):
         return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
     
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+
+# ============================================
+# PORTAL DO CLIENTE - FUNÇÕES DO BANCO
+# ============================================
+
+def criar_cliente_auth(cadastro_id: str, senha: str) -> bool:
+    """Cria autenticação para um cliente."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        senha_hash = hash_senha(senha)
+        cur.execute("""
+            INSERT INTO clientes_auth (cadastro_id, senha_hash)
+            VALUES (%s, %s)
+            ON CONFLICT (cadastro_id) DO UPDATE SET
+                senha_hash = EXCLUDED.senha_hash,
+                primeiro_acesso = TRUE,
+                ativo = TRUE
+        """, (cadastro_id, senha_hash))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao criar auth cliente: {e}")
+        return False
+
+def buscar_cliente_auth(cadastro_id: str) -> dict:
+    """Busca autenticação de um cliente."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT ca.*, c.dados->>'email' as email, c.dados->>'nome' as nome
+            FROM clientes_auth ca
+            JOIN cadastros c ON c.id = ca.cadastro_id
+            WHERE ca.cadastro_id = %s AND ca.ativo = TRUE
+        """, (cadastro_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar auth cliente: {e}")
+        return None
+
+def buscar_cliente_por_email(email: str) -> dict:
+    """Busca cliente pelo email."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT ca.*, c.dados->>'email' as email, c.dados->>'nome' as nome, c.id as cadastro_id
+            FROM cadastros c
+            LEFT JOIN clientes_auth ca ON c.id = ca.cadastro_id
+            WHERE c.dados->>'email' = %s
+        """, (email,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar cliente por email: {e}")
+        return None
+
+def atualizar_senha_cliente(cadastro_id: str, nova_senha: str) -> bool:
+    """Atualiza a senha de um cliente."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        senha_hash = hash_senha(nova_senha)
+        cur.execute("""
+            UPDATE clientes_auth 
+            SET senha_hash = %s, primeiro_acesso = FALSE
+            WHERE cadastro_id = %s
+        """, (senha_hash, cadastro_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao atualizar senha cliente: {e}")
+        return False
+
+def registrar_acesso_cliente(cadastro_id: str):
+    """Registra o último acesso do cliente."""
+    conn = get_db()
+    if not conn:
+        return
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE clientes_auth 
+            SET ultimo_acesso = CURRENT_TIMESTAMP
+            WHERE cadastro_id = %s
+        """, (cadastro_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao registrar acesso: {e}")
+
+
+# ============================================
+# PORTAL DO CLIENTE - FUNÇÕES PROCESSO
+# ============================================
+
+def buscar_processo_info(cadastro_id: str) -> dict:
+    """Busca informações do processo de um cliente."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM processo_info WHERE cadastro_id = %s", (cadastro_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if row:
+            return {
+                "cadastro_id": row["cadastro_id"],
+                "numero_processo": row["numero_processo"] or "",
+                "vara_tribunal": row["vara_tribunal"] or "",
+                "fase": row["fase"] or "Inicial",
+                "data_distribuicao": row["data_distribuicao"].isoformat() if row["data_distribuicao"] else None,
+                "valor_causa": float(row["valor_causa"]) if row["valor_causa"] else 0,
+                "reu": row["reu"] or "",
+                "observacoes": row["observacoes"] or ""
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar processo info: {e}")
+        return None
+
+def salvar_processo_info(cadastro_id: str, dados: dict) -> bool:
+    """Salva ou atualiza informações do processo."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO processo_info (cadastro_id, numero_processo, vara_tribunal, fase, 
+                                       data_distribuicao, valor_causa, reu, observacoes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (cadastro_id) DO UPDATE SET
+                numero_processo = EXCLUDED.numero_processo,
+                vara_tribunal = EXCLUDED.vara_tribunal,
+                fase = EXCLUDED.fase,
+                data_distribuicao = EXCLUDED.data_distribuicao,
+                valor_causa = EXCLUDED.valor_causa,
+                reu = EXCLUDED.reu,
+                observacoes = EXCLUDED.observacoes,
+                atualizado_em = CURRENT_TIMESTAMP
+        """, (
+            cadastro_id,
+            dados.get("numero_processo"),
+            dados.get("vara_tribunal"),
+            dados.get("fase", "Inicial"),
+            dados.get("data_distribuicao") if dados.get("data_distribuicao") else None,
+            dados.get("valor_causa", 0),
+            dados.get("reu"),
+            dados.get("observacoes")
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao salvar processo info: {e}")
+        return False
+
+
+# ============================================
+# PORTAL DO CLIENTE - FUNÇÕES ANDAMENTOS
+# ============================================
+
+def listar_andamentos(cadastro_id: str, apenas_visiveis: bool = False) -> list:
+    """Lista andamentos de um processo."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        if apenas_visiveis:
+            cur.execute("""
+                SELECT * FROM andamentos 
+                WHERE cadastro_id = %s AND visivel_cliente = TRUE
+                ORDER BY data DESC, criado_em DESC
+            """, (cadastro_id,))
+        else:
+            cur.execute("""
+                SELECT * FROM andamentos 
+                WHERE cadastro_id = %s
+                ORDER BY data DESC, criado_em DESC
+            """, (cadastro_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        return [{
+            "id": row["id"],
+            "cadastro_id": row["cadastro_id"],
+            "data": row["data"].isoformat() if row["data"] else None,
+            "descricao": row["descricao"],
+            "visivel_cliente": row["visivel_cliente"],
+            "criado_em": row["criado_em"].isoformat() if row["criado_em"] else None
+        } for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar andamentos: {e}")
+        return []
+
+def criar_andamento(cadastro_id: str, data: str, descricao: str, visivel_cliente: bool = True) -> bool:
+    """Cria um novo andamento."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO andamentos (cadastro_id, data, descricao, visivel_cliente)
+            VALUES (%s, %s, %s, %s)
+        """, (cadastro_id, data, descricao, visivel_cliente))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao criar andamento: {e}")
+        return False
+
+def deletar_andamento(andamento_id: int) -> bool:
+    """Deleta um andamento."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM andamentos WHERE id = %s", (andamento_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar andamento: {e}")
+        return False
+
+
+# ============================================
+# PORTAL DO CLIENTE - FUNÇÕES MENSAGENS
+# ============================================
+
+def listar_mensagens(cadastro_id: str) -> list:
+    """Lista mensagens de um cliente."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT * FROM mensagens 
+            WHERE cadastro_id = %s
+            ORDER BY criado_em ASC
+        """, (cadastro_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        return [{
+            "id": row["id"],
+            "cadastro_id": row["cadastro_id"],
+            "remetente": row["remetente"],
+            "texto": row["texto"],
+            "lida": row["lida"],
+            "criado_em": row["criado_em"].isoformat() if row["criado_em"] else None
+        } for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar mensagens: {e}")
+        return []
+
+def criar_mensagem(cadastro_id: str, remetente: str, texto: str) -> int:
+    """Cria uma nova mensagem."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO mensagens (cadastro_id, remetente, texto)
+            VALUES (%s, %s, %s)
+            RETURNING id
+        """, (cadastro_id, remetente, texto))
+        msg_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return msg_id
+    except Exception as e:
+        logger.error(f"Erro ao criar mensagem: {e}")
+        return None
+
+def marcar_mensagens_lidas(cadastro_id: str, remetente: str):
+    """Marca mensagens como lidas."""
+    conn = get_db()
+    if not conn:
+        return
+    
+    try:
+        cur = conn.cursor()
+        outro_remetente = "escritorio" if remetente == "cliente" else "cliente"
+        cur.execute("""
+            UPDATE mensagens 
+            SET lida = TRUE
+            WHERE cadastro_id = %s AND remetente = %s AND lida = FALSE
+        """, (cadastro_id, outro_remetente))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao marcar mensagens lidas: {e}")
+
+def contar_mensagens_nao_lidas(cadastro_id: str = None, remetente: str = None) -> int:
+    """Conta mensagens não lidas."""
+    conn = get_db()
+    if not conn:
+        return 0
+    
+    try:
+        cur = conn.cursor()
+        if cadastro_id and remetente:
+            cur.execute("""
+                SELECT COUNT(*) FROM mensagens 
+                WHERE cadastro_id = %s AND remetente = %s AND lida = FALSE
+            """, (cadastro_id, remetente))
+        elif remetente:
+            cur.execute("""
+                SELECT COUNT(*) FROM mensagens 
+                WHERE remetente = %s AND lida = FALSE
+            """, (remetente,))
+        else:
+            return 0
+        
+        count = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        return count
+    except Exception as e:
+        logger.error(f"Erro ao contar mensagens: {e}")
+        return 0
+
+
+# ============================================
+# PORTAL DO CLIENTE - TOKENS
+# ============================================
+
+def gerar_token_cliente(cadastro_id: str, email: str) -> str:
+    """Gera um token específico para clientes."""
+    payload = f"cliente:{cadastro_id}:{email}"
+    signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
+    token_data = base64.b64encode(f"{payload}:{signature}".encode()).decode()
+    return token_data
+
+def decodificar_token_cliente(token: str) -> dict:
+    """Decodifica e valida um token de cliente."""
+    try:
+        decoded = base64.b64decode(token.encode()).decode()
+        parts = decoded.rsplit(":", 1)
+        if len(parts) != 2:
+            return None
+        
+        payload, signature = parts
+        
+        expected_signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
+        if signature != expected_signature:
+            return None
+        
+        tipo, cadastro_id, email = payload.split(":")
+        if tipo != "cliente":
+            return None
+            
+        return {
+            "cadastro_id": cadastro_id,
+            "email": email,
+            "tipo": "cliente"
+        }
+    except Exception:
+        return None
+
+def verificar_token_cliente(authorization: str = Header(None)) -> dict:
+    """Verifica se o token de cliente é válido."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Token não fornecido")
+    
+    token = authorization.replace("Bearer ", "")
+    
+    cliente = decodificar_token_cliente(token)
+    if not cliente:
+        raise HTTPException(status_code=401, detail="Token inválido ou expirado")
+    
+    auth = buscar_cliente_auth(cliente["cadastro_id"])
+    if not auth or not auth.get("ativo", True):
+        raise HTTPException(status_code=401, detail="Cliente não encontrado ou inativo")
+    
+    return {
+        "cadastro_id": cliente["cadastro_id"],
+        "email": auth["email"],
+        "nome": auth["nome"],
+        "primeiro_acesso": auth.get("primeiro_acesso", False)
+    }
+
+
+# ============================================
+# ENDPOINTS - AUTENTICAÇÃO DO CLIENTE
+# ============================================
+
+@app.post("/api/cliente/login")
+async def portal_cliente_login(dados: ClienteLogin):
+    """Login do cliente no portal."""
+    logger.info(f"Tentativa de login cliente: {dados.email}")
+    
+    cliente = buscar_cliente_por_email(dados.email)
+    if not cliente:
+        raise HTTPException(status_code=401, detail="Email não encontrado")
+    
+    if not cliente.get("senha_hash"):
+        raise HTTPException(status_code=401, detail="Acesso não habilitado. Entre em contato com o escritório.")
+    
+    if not verificar_senha(dados.senha, cliente["senha_hash"]):
+        raise HTTPException(status_code=401, detail="Senha incorreta")
+    
+    if not cliente.get("ativo", True):
+        raise HTTPException(status_code=401, detail="Acesso desativado")
+    
+    registrar_acesso_cliente(cliente["cadastro_id"])
+    token = gerar_token_cliente(cliente["cadastro_id"], cliente["email"])
+    
+    return {
+        "success": True,
+        "token": token,
+        "cadastro_id": cliente["cadastro_id"],
+        "nome": cliente["nome"],
+        "email": cliente["email"],
+        "primeiro_acesso": cliente.get("primeiro_acesso", False)
+    }
+
+@app.post("/api/cliente/alterar-senha")
+async def portal_cliente_alterar_senha(
+    dados: ClienteAlterarSenha,
+    cliente: dict = Depends(verificar_token_cliente)
+):
+    """Cliente altera sua própria senha."""
+    auth = buscar_cliente_auth(cliente["cadastro_id"])
+    if not verificar_senha(dados.senha_atual, auth["senha_hash"]):
+        raise HTTPException(status_code=400, detail="Senha atual incorreta")
+    
+    if len(dados.nova_senha) < 6:
+        raise HTTPException(status_code=400, detail="A nova senha deve ter no mínimo 6 caracteres")
+    
+    if atualizar_senha_cliente(cliente["cadastro_id"], dados.nova_senha):
+        return {"success": True, "message": "Senha alterada com sucesso"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao alterar senha")
+
+
+# ============================================
+# ENDPOINTS - PORTAL DO CLIENTE
+# ============================================
+
+@app.get("/api/cliente/meus-dados")
+async def portal_cliente_meus_dados(cliente: dict = Depends(verificar_token_cliente)):
+    """Retorna dados pessoais do cliente logado."""
+    cadastro = buscar_cadastro(cliente["cadastro_id"])
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    return {
+        "cadastro_id": cliente["cadastro_id"],
+        "nome": cadastro["dados"].get("nome", ""),
+        "email": cadastro["dados"].get("email", ""),
+        "telefone": cadastro["dados"].get("telefone", ""),
+        "cpf": cadastro["dados"].get("cpf", ""),
+        "endereco": cadastro["dados"].get("endereco_completo", ""),
+        "primeiro_acesso": cliente.get("primeiro_acesso", False)
+    }
+
+@app.get("/api/cliente/meu-processo")
+async def portal_cliente_meu_processo(cliente: dict = Depends(verificar_token_cliente)):
+    """Retorna informações do processo do cliente."""
+    processo = buscar_processo_info(cliente["cadastro_id"])
+    return processo or {
+        "cadastro_id": cliente["cadastro_id"],
+        "numero_processo": "",
+        "vara_tribunal": "",
+        "fase": "Aguardando informações",
+        "data_distribuicao": None,
+        "valor_causa": 0,
+        "reu": "",
+        "observacoes": ""
+    }
+
+@app.get("/api/cliente/andamentos")
+async def portal_cliente_andamentos(cliente: dict = Depends(verificar_token_cliente)):
+    """Lista andamentos visíveis para o cliente."""
+    andamentos = listar_andamentos(cliente["cadastro_id"], apenas_visiveis=True)
+    return {"andamentos": andamentos}
+
+@app.get("/api/cliente/documentos")
+async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_cliente)):
+    """Lista documentos disponíveis para o cliente."""
+    cadastro = buscar_cadastro(cliente["cadastro_id"])
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    documentos = []
+    
+    arquivos_gerados = cadastro.get("arquivos_gerados", {})
+    for tipo, nome in arquivos_gerados.items():
+        documentos.append({
+            "tipo": "gerado",
+            "nome": nome,
+            "categoria": tipo.replace("_", " ").title(),
+            "url": f"/api/cadastros/{cliente['cadastro_id']}/documentos/{tipo}"
+        })
+    
+    financeiro = buscar_financeiro(cliente["cadastro_id"])
+    if financeiro and len(financeiro.get("depositos", [])) > 0:
+        documentos.append({
+            "tipo": "prestacao",
+            "nome": "Prestação de Contas",
+            "categoria": "Financeiro",
+            "url": f"/api/cadastros/{cliente['cadastro_id']}/prestacao-contas"
+        })
+    
+    return {"documentos": documentos}
+
+@app.get("/api/cliente/mensagens")
+async def portal_cliente_mensagens(cliente: dict = Depends(verificar_token_cliente)):
+    """Lista mensagens do cliente."""
+    marcar_mensagens_lidas(cliente["cadastro_id"], "cliente")
+    mensagens = listar_mensagens(cliente["cadastro_id"])
+    return {"mensagens": mensagens}
+
+@app.post("/api/cliente/mensagens")
+async def portal_cliente_enviar_mensagem(
+    dados: MensagemEnvio,
+    cliente: dict = Depends(verificar_token_cliente)
+):
+    """Cliente envia mensagem para o escritório."""
+    if not dados.texto.strip():
+        raise HTTPException(status_code=400, detail="Mensagem não pode ser vazia")
+    
+    msg_id = criar_mensagem(cliente["cadastro_id"], "cliente", dados.texto.strip())
+    if msg_id:
+        return {"success": True, "message_id": msg_id}
+    
+    raise HTTPException(status_code=500, detail="Erro ao enviar mensagem")
+
+@app.get("/api/cliente/mensagens/nao-lidas")
+async def portal_cliente_mensagens_nao_lidas(cliente: dict = Depends(verificar_token_cliente)):
+    """Conta mensagens não lidas do escritório."""
+    count = contar_mensagens_nao_lidas(cliente["cadastro_id"], "escritorio")
+    return {"nao_lidas": count}
+
+
+# ============================================
+# ENDPOINTS - ADMIN GERENCIAR ACESSO CLIENTE
+# ============================================
+
+@app.post("/api/admin/clientes/{cadastro_id}/habilitar-acesso")
+async def admin_habilitar_acesso_cliente(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin habilita acesso ao portal para um cliente."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    senha_temporaria = secrets.token_urlsafe(8)
+    
+    if not criar_cliente_auth(cadastro_id, senha_temporaria):
+        raise HTTPException(status_code=500, detail="Erro ao criar acesso")
+    
+    dados = cadastro["dados"]
+    email_cliente = dados.get("email")
+    
+    if email_cliente and RESEND_API_KEY:
+        try:
+            conteudo = f"""
+                <p style="font-size: 16px;">Olá, <strong>{dados['nome']}</strong>!</p>
+                
+                <p>Seu acesso ao Portal do Cliente foi habilitado.</p>
+                
+                <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                    <p style="margin: 0;"><strong>Email:</strong> {email_cliente}</p>
+                    <p style="margin: 10px 0;"><strong>Senha temporária:</strong> <code style="background: #e0e0e0; padding: 3px 8px; border-radius: 4px; font-size: 18px;">{senha_temporaria}</code></p>
+                </div>
+                
+                <p>Acesse o portal em: <a href="https://portal.vaucherealvares.com.br" style="color: #8B1538;">portal.vaucherealvares.com.br</a></p>
+                
+                <p style="color: #666; font-size: 14px;">
+                    <strong>Importante:</strong> Recomendamos que você altere sua senha no primeiro acesso.
+                </p>
+            """
+            corpo_html = criar_email_html(conteudo)
+            
+            await enviar_email_resend(
+                email_cliente,
+                "🔐 Seu acesso ao Portal do Cliente - Vaucher & Álvares",
+                corpo_html
+            )
+            
+            return {
+                "success": True, 
+                "message": f"Acesso habilitado! Senha enviada para {email_cliente}",
+                "senha_temporaria": senha_temporaria
+            }
+        except Exception as e:
+            logger.error(f"Erro ao enviar email: {e}")
+            return {
+                "success": True,
+                "message": "Acesso habilitado, mas houve erro ao enviar email.",
+                "senha_temporaria": senha_temporaria
+            }
+    
+    return {
+        "success": True,
+        "message": "Acesso habilitado!",
+        "senha_temporaria": senha_temporaria
+    }
+
+@app.post("/api/admin/clientes/{cadastro_id}/desabilitar-acesso")
+async def admin_desabilitar_acesso_cliente(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin desabilita acesso ao portal de um cliente."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE clientes_auth SET ativo = FALSE WHERE cadastro_id = %s", (cadastro_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"success": True, "message": "Acesso desabilitado"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/admin/clientes/{cadastro_id}/acesso")
+async def admin_verificar_acesso_cliente(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Verifica se o cliente tem acesso ao portal."""
+    auth = buscar_cliente_auth(cadastro_id)
+    return {
+        "tem_acesso": bool(auth and auth.get("ativo")),
+        "primeiro_acesso": auth.get("primeiro_acesso") if auth else None,
+        "ultimo_acesso": auth.get("ultimo_acesso") if auth else None
+    }
+
+
+# ============================================
+# ENDPOINTS - ADMIN PROCESSO
+# ============================================
+
+@app.get("/api/admin/clientes/{cadastro_id}/processo")
+async def admin_obter_processo(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin obtém informações do processo."""
+    processo = buscar_processo_info(cadastro_id)
+    return processo or {
+        "cadastro_id": cadastro_id,
+        "numero_processo": "",
+        "vara_tribunal": "",
+        "fase": "Inicial",
+        "data_distribuicao": None,
+        "valor_causa": 0,
+        "reu": "",
+        "observacoes": ""
+    }
+
+@app.post("/api/admin/clientes/{cadastro_id}/processo")
+async def admin_salvar_processo(
+    cadastro_id: str,
+    dados: ProcessoInfoModel,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin salva informações do processo."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    if salvar_processo_info(cadastro_id, dados.dict()):
+        return {"success": True, "message": "Informações do processo salvas"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao salvar")
+
+
+# ============================================
+# ENDPOINTS - ADMIN ANDAMENTOS
+# ============================================
+
+@app.get("/api/admin/clientes/{cadastro_id}/andamentos")
+async def admin_listar_andamentos(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin lista todos os andamentos."""
+    andamentos = listar_andamentos(cadastro_id, apenas_visiveis=False)
+    return {"andamentos": andamentos}
+
+@app.post("/api/admin/clientes/{cadastro_id}/andamentos")
+async def admin_criar_andamento(
+    cadastro_id: str,
+    dados: AndamentoModel,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin cria novo andamento."""
+    if criar_andamento(cadastro_id, dados.data, dados.descricao, dados.visivel_cliente):
+        return {"success": True, "message": "Andamento criado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao criar andamento")
+
+@app.delete("/api/admin/andamentos/{andamento_id}")
+async def admin_deletar_andamento(
+    andamento_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin deleta um andamento."""
+    if deletar_andamento(andamento_id):
+        return {"success": True, "message": "Andamento deletado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao deletar andamento")
+
+
+# ============================================
+# ENDPOINTS - ADMIN MENSAGENS
+# ============================================
+
+@app.get("/api/admin/clientes/{cadastro_id}/mensagens")
+async def admin_listar_mensagens(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin lista mensagens de um cliente."""
+    marcar_mensagens_lidas(cadastro_id, "escritorio")
+    mensagens = listar_mensagens(cadastro_id)
+    return {"mensagens": mensagens}
+
+@app.post("/api/admin/clientes/{cadastro_id}/mensagens")
+async def admin_enviar_mensagem(
+    cadastro_id: str,
+    dados: MensagemEnvio,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin envia mensagem para o cliente."""
+    if not dados.texto.strip():
+        raise HTTPException(status_code=400, detail="Mensagem não pode ser vazia")
+    
+    msg_id = criar_mensagem(cadastro_id, "escritorio", dados.texto.strip())
+    if msg_id:
+        return {"success": True, "message_id": msg_id}
+    
+    raise HTTPException(status_code=500, detail="Erro ao enviar mensagem")
+
+@app.get("/api/admin/mensagens/nao-lidas")
+async def admin_mensagens_nao_lidas(usuario: dict = Depends(verificar_admin)):
+    """Conta total de mensagens não lidas de clientes."""
+    count = contar_mensagens_nao_lidas(remetente="cliente")
+    return {"nao_lidas": count}
+
+@app.get("/api/admin/clientes/{cadastro_id}/mensagens/nao-lidas")
+async def admin_mensagens_nao_lidas_cliente(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Conta mensagens não lidas de um cliente específico."""
+    count = contar_mensagens_nao_lidas(cadastro_id, "cliente")
+    return {"nao_lidas": count}
+
 
 # ============================================
 # INICIALIZAÇÃO
