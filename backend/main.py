@@ -234,8 +234,23 @@ def init_db():
                 status VARCHAR(20) DEFAULT 'pendente',
                 dados JSONB,
                 documentos JSONB DEFAULT '[]',
-                arquivos_gerados JSONB DEFAULT '{}'
+                arquivos_gerados JSONB DEFAULT '{}',
+                documentos_assinados JSONB DEFAULT '[]',
+                data_assinatura TIMESTAMP
             )
+        """)
+        
+        # Adicionar colunas se não existirem (para bancos existentes)
+        cur.execute("""
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cadastros' AND column_name='documentos_assinados') THEN
+                    ALTER TABLE cadastros ADD COLUMN documentos_assinados JSONB DEFAULT '[]';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cadastros' AND column_name='data_assinatura') THEN
+                    ALTER TABLE cadastros ADD COLUMN data_assinatura TIMESTAMP;
+                END IF;
+            END $$;
         """)
         
         # Tabela de usuários
@@ -390,13 +405,15 @@ def salvar_cadastro(cadastro: dict):
     try:
         cur = conn.cursor()
         cur.execute("""
-            INSERT INTO cadastros (id, data, data_hora, status, dados, documentos, arquivos_gerados)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            INSERT INTO cadastros (id, data, data_hora, status, dados, documentos, arquivos_gerados, documentos_assinados, data_assinatura)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 status = EXCLUDED.status,
                 dados = EXCLUDED.dados,
                 documentos = EXCLUDED.documentos,
-                arquivos_gerados = EXCLUDED.arquivos_gerados
+                arquivos_gerados = EXCLUDED.arquivos_gerados,
+                documentos_assinados = EXCLUDED.documentos_assinados,
+                data_assinatura = EXCLUDED.data_assinatura
         """, (
             cadastro["id"],
             cadastro["data"],
@@ -404,7 +421,9 @@ def salvar_cadastro(cadastro: dict):
             cadastro["status"],
             json.dumps(cadastro["dados"]),
             json.dumps(cadastro.get("documentos", [])),
-            json.dumps(cadastro.get("arquivos_gerados", {}))
+            json.dumps(cadastro.get("arquivos_gerados", {})),
+            json.dumps(cadastro.get("documentos_assinados", [])),
+            cadastro.get("data_assinatura")
         ))
         conn.commit()
         cur.close()
@@ -436,7 +455,9 @@ def carregar_cadastros() -> List[dict]:
                 "status": row["status"],
                 "dados": row["dados"] if isinstance(row["dados"], dict) else json.loads(row["dados"]),
                 "documentos": row["documentos"] if isinstance(row["documentos"], list) else json.loads(row["documentos"] or "[]"),
-                "arquivos_gerados": row["arquivos_gerados"] if isinstance(row["arquivos_gerados"], dict) else json.loads(row["arquivos_gerados"] or "{}")
+                "arquivos_gerados": row["arquivos_gerados"] if isinstance(row["arquivos_gerados"], dict) else json.loads(row["arquivos_gerados"] or "{}"),
+                "documentos_assinados": row.get("documentos_assinados") if isinstance(row.get("documentos_assinados"), list) else json.loads(row.get("documentos_assinados") or "[]"),
+                "data_assinatura": row.get("data_assinatura").isoformat() if row.get("data_assinatura") else None
             })
         return cadastros
     except Exception as e:
@@ -464,7 +485,9 @@ def buscar_cadastro(cadastro_id: str) -> dict:
                 "status": row["status"],
                 "dados": row["dados"] if isinstance(row["dados"], dict) else json.loads(row["dados"]),
                 "documentos": row["documentos"] if isinstance(row["documentos"], list) else json.loads(row["documentos"] or "[]"),
-                "arquivos_gerados": row["arquivos_gerados"] if isinstance(row["arquivos_gerados"], dict) else json.loads(row["arquivos_gerados"] or "{}")
+                "arquivos_gerados": row["arquivos_gerados"] if isinstance(row["arquivos_gerados"], dict) else json.loads(row["arquivos_gerados"] or "{}"),
+                "documentos_assinados": row.get("documentos_assinados") if isinstance(row.get("documentos_assinados"), list) else json.loads(row.get("documentos_assinados") or "[]"),
+                "data_assinatura": row.get("data_assinatura").isoformat() if row.get("data_assinatura") else None
             }
         return None
     except Exception as e:
