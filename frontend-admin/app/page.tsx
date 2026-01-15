@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt } from 'lucide-react'
+import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt, Scale, MessageSquare, Calendar, Gavel, CreditCard, Building, ChevronDown, ChevronUp } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -67,6 +67,67 @@ interface Cadastro {
   data_assinatura?: string
 }
 
+interface Processo {
+  id: number
+  cadastro_id: string
+  numero_processo: string
+  tipo_acao: string
+  vara_tribunal: string
+  fase: string
+  reu: string
+  valor_causa: number
+  data_distribuicao: string | null
+  status: string
+  observacoes: string
+  andamentos?: Andamento[]
+}
+
+interface Andamento {
+  id: number
+  processo_id: number
+  data: string
+  descricao: string
+  visivel_cliente: boolean
+}
+
+interface Contrato {
+  id: number
+  cadastro_id: string
+  processo_id: number | null
+  processo_numero: string
+  tipo: string
+  descricao: string
+  valor_total: number
+  num_parcelas: number
+  valor_mensal: number
+  dia_vencimento: number
+  percentual_exito: number
+  data_inicio: string | null
+  status: string
+  observacoes: string
+  parcelas: Parcela[]
+}
+
+interface Parcela {
+  id: number
+  contrato_id: number
+  numero: number
+  valor: number
+  vencimento: string
+  status: string
+  data_pagamento: string | null
+  tem_comprovante: boolean
+}
+
+interface Mensagem {
+  id: number
+  cadastro_id: string
+  remetente: string
+  texto: string
+  lida: boolean
+  criado_em: string
+}
+
 interface DepositoItem {
   data: string
   origem: string
@@ -95,7 +156,13 @@ interface Financeiro {
   observacoes: string
 }
 
-// Tela de Login (SEM credenciais de demonstração)
+interface AcessoPortal {
+  tem_acesso: boolean
+  primeiro_acesso: boolean | null
+  ultimo_acesso: string | null
+}
+
+// Tela de Login
 const LoginScreen = ({ onLogin }: { onLogin: (user: UserData) => void }) => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -237,7 +304,6 @@ const UsuariosModal = ({ user, onClose }: { user: UserData, onClose: () => void 
 
     try {
       if (editando) {
-        // Atualizar
         const response = await fetch(`${API_URL}/api/usuarios/${editando.id}`, {
           method: 'PUT',
           headers: {
@@ -261,7 +327,6 @@ const UsuariosModal = ({ user, onClose }: { user: UserData, onClose: () => void 
           setErro(data.detail || 'Erro ao atualizar')
         }
       } else {
-        // Criar
         const response = await fetch(`${API_URL}/api/usuarios`, {
           method: 'POST',
           headers: {
@@ -518,12 +583,12 @@ const AlterarSenhaModal = ({ user, onClose }: { user: UserData, onClose: () => v
 
       if (response.ok && data.success) {
         setSucesso(true)
-        setTimeout(onClose, 2000)
+        setTimeout(() => onClose(), 2000)
       } else {
         setErro(data.detail || 'Erro ao alterar senha')
       }
     } catch (err) {
-      setErro('Erro de conexão')
+      setErro('Erro de conexão. Tente novamente.')
     } finally {
       setLoading(false)
     }
@@ -544,9 +609,11 @@ const AlterarSenhaModal = ({ user, onClose }: { user: UserData, onClose: () => v
 
         <div className="p-6">
           {sucesso ? (
-            <div className="text-center py-8">
-              <CheckCircle className="w-16 h-16 text-green-500 mx-auto mb-4" />
-              <p className="text-lg font-semibold text-gray-800">Senha alterada com sucesso!</p>
+            <div className="text-center py-4">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle className="w-8 h-8 text-green-600" />
+              </div>
+              <p className="text-lg font-medium text-gray-800">Senha alterada com sucesso!</p>
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="space-y-4">
@@ -613,148 +680,211 @@ const AlterarSenhaModal = ({ user, onClose }: { user: UserData, onClose: () => v
   )
 }
 
-// Modal de Envio de E-mail
-const EmailModal = ({ cadastro, user, onClose, onSuccess }: { cadastro: Cadastro, user: UserData, onClose: () => void, onSuccess: () => void }) => {
-  const [assunto, setAssunto] = useState('Seus Documentos - Vaucher & Álvares Advogados')
-  const [mensagem, setMensagem] = useState('')
-  const [arquivosParaEnviar, setArquivosParaEnviar] = useState<File[]>([])
-  const [enviando, setEnviando] = useState(false)
+// Modal de Novo/Editar Processo
+const ProcessoModal = ({ 
+  cadastroId, 
+  processo, 
+  user, 
+  onClose, 
+  onSave 
+}: { 
+  cadastroId: string
+  processo: Processo | null
+  user: UserData
+  onClose: () => void
+  onSave: () => void 
+}) => {
+  const [form, setForm] = useState({
+    numero_processo: processo?.numero_processo || '',
+    tipo_acao: processo?.tipo_acao || '',
+    vara_tribunal: processo?.vara_tribunal || '',
+    fase: processo?.fase || 'Inicial',
+    reu: processo?.reu || '',
+    valor_causa: processo?.valor_causa || 0,
+    data_distribuicao: processo?.data_distribuicao || '',
+    status: processo?.status || 'ativo',
+    observacoes: processo?.observacoes || ''
+  })
+  const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState('')
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setArquivosParaEnviar(prev => [...prev, ...Array.from(e.target.files!)])
-    }
-  }
-
-  const removeArquivo = (index: number) => {
-    setArquivosParaEnviar(prev => prev.filter((_, i) => i !== index))
-  }
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes < 1024) return bytes + ' B'
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-  }
-
-  const handleEnviar = async () => {
-    if (arquivosParaEnviar.length === 0) {
-      setErro('Selecione pelo menos um arquivo para enviar')
-      return
-    }
-
-    setEnviando(true)
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
     setErro('')
 
     try {
-      const formData = new FormData()
-      formData.append('assunto', assunto)
-      formData.append('mensagem', mensagem)
+      const url = processo 
+        ? `${API_URL}/api/admin/processos/${processo.id}`
+        : `${API_URL}/api/admin/clientes/${cadastroId}/processos`
       
-      arquivosParaEnviar.forEach(file => {
-        formData.append('arquivos', file)
+      const response = await fetch(url, {
+        method: processo ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify(form)
       })
 
-      const response = await fetch(`${API_URL}/api/cadastros/${cadastro.id}/enviar-email`, {
-        method: 'POST',
-        body: formData
-      })
-
-      const data = await response.json()
-
-      if (response.ok && data.success) {
-        onSuccess()
+      if (response.ok) {
+        onSave()
         onClose()
       } else {
-        setErro(data.detail || data.message || 'Erro ao enviar e-mail')
+        const data = await response.json()
+        setErro(data.detail || 'Erro ao salvar processo')
       }
     } catch (err) {
-      setErro('Erro de conexão. Tente novamente.')
+      setErro('Erro de conexão')
     } finally {
-      setEnviando(false)
+      setLoading(false)
     }
   }
 
+  const tiposAcao = [
+    'Trabalhista',
+    'Cível',
+    'Previdenciário',
+    'Administrativo',
+    'Tributário',
+    'Consumidor',
+    'Família',
+    'Outro'
+  ]
+
+  const fases = [
+    'Inicial',
+    'Citação',
+    'Contestação',
+    'Instrução',
+    'Sentença',
+    'Recurso',
+    'Execução',
+    'Cumprimento de Sentença',
+    'Arquivado'
+  ]
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto">
-        <div className="p-6 border-b">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-bold text-gray-800">Enviar Documentos por E-mail</h2>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-              <X className="w-6 h-6" />
-            </button>
+      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Gavel className="w-6 h-6 text-red-700" />
+            <h2 className="text-xl font-bold text-gray-800">
+              {processo ? 'Editar Processo' : 'Novo Processo'}
+            </h2>
           </div>
-          <p className="text-gray-500 text-sm mt-1">Para: <strong>{cadastro.dados.email}</strong></p>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-6 h-6" />
+          </button>
         </div>
 
-        <div className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Número do Processo</label>
+              <input
+                type="text"
+                value={form.numero_processo}
+                onChange={(e) => setForm({ ...form, numero_processo: e.target.value })}
+                placeholder="0001234-12.2026.5.23.0001"
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Ação</label>
+              <select
+                value={form.tipo_acao}
+                onChange={(e) => setForm({ ...form, tipo_acao: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+              >
+                <option value="">Selecione...</option>
+                {tiposAcao.map(tipo => (
+                  <option key={tipo} value={tipo}>{tipo}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Assunto</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Vara / Tribunal</label>
             <input
               type="text"
-              value={assunto}
-              onChange={(e) => setAssunto(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+              value={form.vara_tribunal}
+              onChange={(e) => setForm({ ...form, vara_tribunal: e.target.value })}
+              placeholder="1ª Vara do Trabalho de Cuiabá / TRT23"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Mensagem adicional (opcional)</label>
-            <textarea
-              value={mensagem}
-              onChange={(e) => setMensagem(e.target.value)}
-              placeholder="Adicione uma mensagem personalizada..."
-              rows={3}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent resize-none"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Arquivos para enviar <span className="text-red-600">*</span>
-            </label>
-            <p className="text-xs text-gray-500 mb-3">
-              Faça o download dos documentos acima, edite se necessário, e depois anexe aqui para enviar.
-            </p>
-            
-            <input
-              type="file"
-              multiple
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              accept=".doc,.docx,.pdf,.jpg,.jpeg,.png"
-              className="hidden"
-            />
-            
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-red-400 hover:text-red-600 w-full justify-center bg-gray-50"
-            >
-              <Upload className="w-5 h-5" />
-              Selecionar arquivos para enviar
-            </button>
-
-            {arquivosParaEnviar.length > 0 && (
-              <div className="mt-3 space-y-2">
-                <p className="text-sm font-medium text-gray-700">Arquivos selecionados ({arquivosParaEnviar.length}):</p>
-                {arquivosParaEnviar.map((file, index) => (
-                  <div key={index} className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-green-600" />
-                      <div>
-                        <span className="text-sm text-green-800">{file.name}</span>
-                        <span className="text-xs text-green-600 ml-2">{formatFileSize(file.size)}</span>
-                      </div>
-                    </div>
-                    <button onClick={() => removeArquivo(index)} className="text-green-600 hover:text-red-600">
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Fase</label>
+              <select
+                value={form.fase}
+                onChange={(e) => setForm({ ...form, fase: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+              >
+                {fases.map(fase => (
+                  <option key={fase} value={fase}>{fase}</option>
                 ))}
-              </div>
-            )}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Status</label>
+              <select
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+              >
+                <option value="ativo">Ativo</option>
+                <option value="arquivado">Arquivado</option>
+                <option value="encerrado">Encerrado</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Réu / Reclamada</label>
+            <input
+              type="text"
+              value={form.reu}
+              onChange={(e) => setForm({ ...form, reu: e.target.value })}
+              placeholder="Nome do réu ou empresa"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+            />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Valor da Causa (R$)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.valor_causa || ''}
+                onChange={(e) => setForm({ ...form, valor_causa: parseFloat(e.target.value) || 0 })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Data de Distribuição</label>
+              <input
+                type="date"
+                value={form.data_distribuicao || ''}
+                onChange={(e) => setForm({ ...form, data_distribuicao: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
+            <textarea
+              value={form.observacoes}
+              onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
+              rows={3}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 resize-none"
+            />
           </div>
 
           {erro && (
@@ -762,39 +892,401 @@ const EmailModal = ({ cadastro, user, onClose, onSuccess }: { cadastro: Cadastro
               {erro}
             </div>
           )}
-        </div>
 
-        <div className="p-6 border-t bg-gray-50 flex gap-3">
-          <button
-            onClick={onClose}
-            className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleEnviar}
-            disabled={enviando || arquivosParaEnviar.length === 0}
-            className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg flex items-center justify-center gap-2 disabled:opacity-50"
-          >
-            {enviando ? (
-              <>
-                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                Enviando...
-              </>
-            ) : (
-              <>
-                <Send className="w-4 h-4" />
-                Enviar E-mail
-              </>
-            )}
-          </button>
-        </div>
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
+            >
+              {loading ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )
 }
 
-// Dashboard Administrativo
+// Modal de Novo/Editar Contrato
+const ContratoModal = ({ 
+  cadastroId, 
+  processos,
+  contrato, 
+  user, 
+  onClose, 
+  onSave 
+}: { 
+  cadastroId: string
+  processos: Processo[]
+  contrato: Contrato | null
+  user: UserData
+  onClose: () => void
+  onSave: () => void 
+}) => {
+  const [form, setForm] = useState({
+    processo_id: contrato?.processo_id || null,
+    tipo: contrato?.tipo || 'parcelado',
+    descricao: contrato?.descricao || '',
+    valor_total: contrato?.valor_total || 0,
+    num_parcelas: contrato?.num_parcelas || 1,
+    valor_mensal: contrato?.valor_mensal || 0,
+    dia_vencimento: contrato?.dia_vencimento || 10,
+    percentual_exito: contrato?.percentual_exito || 0,
+    data_inicio: contrato?.data_inicio || new Date().toISOString().split('T')[0],
+    status: contrato?.status || 'ativo',
+    observacoes: contrato?.observacoes || ''
+  })
+  const [loading, setLoading] = useState(false)
+  const [erro, setErro] = useState('')
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setLoading(true)
+    setErro('')
+
+    try {
+      const url = contrato 
+        ? `${API_URL}/api/admin/contratos/${contrato.id}`
+        : `${API_URL}/api/admin/clientes/${cadastroId}/contratos`
+      
+      const response = await fetch(url, {
+        method: contrato ? 'PUT' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify(form)
+      })
+
+      if (response.ok) {
+        onSave()
+        onClose()
+      } else {
+        const data = await response.json()
+        setErro(data.detail || 'Erro ao salvar contrato')
+      }
+    } catch (err) {
+      setErro('Erro de conexão')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <CreditCard className="w-6 h-6 text-red-700" />
+            <h2 className="text-xl font-bold text-gray-800">
+              {contrato ? 'Editar Contrato' : 'Novo Contrato de Honorários'}
+            </h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Processo Vinculado (opcional)</label>
+            <select
+              value={form.processo_id || ''}
+              onChange={(e) => setForm({ ...form, processo_id: e.target.value ? parseInt(e.target.value) : null })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+            >
+              <option value="">Nenhum (Assessoria Geral)</option>
+              {processos.map(p => (
+                <option key={p.id} value={p.id}>
+                  {p.numero_processo || 'Sem número'} - {p.tipo_acao}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Tipo de Contrato</label>
+            <select
+              value={form.tipo}
+              onChange={(e) => setForm({ ...form, tipo: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+            >
+              <option value="fixo">Fixo (À Vista)</option>
+              <option value="parcelado">Parcelado</option>
+              <option value="mensal">Mensal (Assessoria)</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+            <input
+              type="text"
+              value={form.descricao}
+              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+              placeholder="Ex: Honorários Processo Trabalhista"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+            />
+          </div>
+
+          {(form.tipo === 'fixo' || form.tipo === 'parcelado') && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Valor Total (R$)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={form.valor_total || ''}
+                  onChange={(e) => setForm({ ...form, valor_total: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+                />
+              </div>
+              {form.tipo === 'parcelado' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Número de Parcelas</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={form.num_parcelas}
+                    onChange={(e) => setForm({ ...form, num_parcelas: parseInt(e.target.value) || 1 })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
+          {form.tipo === 'mensal' && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Valor Mensal (R$)</label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.valor_mensal || ''}
+                onChange={(e) => setForm({ ...form, valor_mensal: parseFloat(e.target.value) || 0 })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Dia de Vencimento</label>
+              <input
+                type="number"
+                min="1"
+                max="31"
+                value={form.dia_vencimento}
+                onChange={(e) => setForm({ ...form, dia_vencimento: parseInt(e.target.value) || 10 })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Data de Início</label>
+              <input
+                type="date"
+                value={form.data_inicio || ''}
+                onChange={(e) => setForm({ ...form, data_inicio: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+              />
+            </div>
+          </div>
+
+          <div className="bg-amber-50 rounded-lg p-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Percentual de Êxito (%) - Opcional
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              value={form.percentual_exito || ''}
+              onChange={(e) => setForm({ ...form, percentual_exito: parseFloat(e.target.value) || 0 })}
+              placeholder="Ex: 20"
+              className="w-full px-3 py-2 border border-amber-300 rounded-lg focus:ring-2 focus:ring-amber-500"
+            />
+            <p className="text-xs text-amber-700 mt-1">
+              Percentual sobre o resultado do processo, se houver
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
+            <textarea
+              value={form.observacoes}
+              onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
+              rows={2}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 resize-none"
+            />
+          </div>
+
+          {erro && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+              {erro}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
+            >
+              {loading ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// Modal de Andamento
+const AndamentoModal = ({ 
+  processoId, 
+  user, 
+  onClose, 
+  onSave 
+}: { 
+  processoId: number
+  user: UserData
+  onClose: () => void
+  onSave: () => void 
+}) => {
+  const [form, setForm] = useState({
+    data: new Date().toISOString().split('T')[0],
+    descricao: '',
+    visivel_cliente: true
+  })
+  const [loading, setLoading] = useState(false)
+  const [erro, setErro] = useState('')
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.descricao.trim()) {
+      setErro('Descrição é obrigatória')
+      return
+    }
+
+    setLoading(true)
+    setErro('')
+
+    try {
+      const response = await fetch(`${API_URL}/api/admin/processos/${processoId}/andamentos`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify(form)
+      })
+
+      if (response.ok) {
+        onSave()
+        onClose()
+      } else {
+        const data = await response.json()
+        setErro(data.detail || 'Erro ao salvar andamento')
+      }
+    } catch (err) {
+      setErro('Erro de conexão')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full">
+        <div className="p-6 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Calendar className="w-6 h-6 text-red-700" />
+            <h2 className="text-xl font-bold text-gray-800">Novo Andamento</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
+            <input
+              type="date"
+              value={form.data}
+              onChange={(e) => setForm({ ...form, data: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+            <textarea
+              value={form.descricao}
+              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+              rows={4}
+              placeholder="Descreva o andamento processual..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 resize-none"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="visivel_cliente"
+              checked={form.visivel_cliente}
+              onChange={(e) => setForm({ ...form, visivel_cliente: e.target.checked })}
+              className="w-4 h-4 text-red-800 rounded"
+            />
+            <label htmlFor="visivel_cliente" className="text-sm text-gray-700">
+              Visível para o cliente no Portal
+            </label>
+          </div>
+
+          {erro && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+              {erro}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
+            >
+              {loading ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+// Dashboard Administrativo Principal
 const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => void }) => {
   const [cadastros, setCadastros] = useState<Cadastro[]>([])
   const [selectedCadastro, setSelectedCadastro] = useState<Cadastro | null>(null)
@@ -802,26 +1294,32 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const [searchTerm, setSearchTerm] = useState('')
   const [gerandoDocs, setGerandoDocs] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [showEmailModal, setShowEmailModal] = useState(false)
   const [showUsuariosModal, setShowUsuariosModal] = useState(false)
   const [showAlterarSenhaModal, setShowAlterarSenhaModal] = useState(false)
   const [mensagemSucesso, setMensagemSucesso] = useState('')
   
-  // Estados do módulo financeiro
-  const [showFinanceiro, setShowFinanceiro] = useState(false)
-  const [financeiro, setFinanceiro] = useState<Financeiro>({
-    cadastro_id: '',
-    numero_processo: '',
-    vara_tribunal: '',
-    percentual_honorarios: 20,
-    valor_credito_cliente: 0,
-    depositos: [],
-    sucumbencias: [],
-    retencoes: [],
-    observacoes: ''
-  })
-  const [salvandoFinanceiro, setSalvandoFinanceiro] = useState(false)
-  const [gerandoPrestacao, setGerandoPrestacao] = useState(false)
+  // Estados do Portal do Cliente
+  const [activeTab, setActiveTab] = useState<'dados' | 'processos' | 'contratos' | 'documentos' | 'mensagens'>('dados')
+  const [acessoPortal, setAcessoPortal] = useState<AcessoPortal | null>(null)
+  const [habilitandoAcesso, setHabilitandoAcesso] = useState(false)
+  
+  // Estados de Processos
+  const [processos, setProcessos] = useState<Processo[]>([])
+  const [showProcessoModal, setShowProcessoModal] = useState(false)
+  const [processoSelecionado, setProcessoSelecionado] = useState<Processo | null>(null)
+  const [processoExpandido, setProcessoExpandido] = useState<number | null>(null)
+  const [showAndamentoModal, setShowAndamentoModal] = useState(false)
+  const [processoParaAndamento, setProcessoParaAndamento] = useState<number | null>(null)
+  
+  // Estados de Contratos
+  const [contratos, setContratos] = useState<Contrato[]>([])
+  const [showContratoModal, setShowContratoModal] = useState(false)
+  const [contratoSelecionado, setContratoSelecionado] = useState<Contrato | null>(null)
+  
+  // Estados de Mensagens
+  const [mensagens, setMensagens] = useState<Mensagem[]>([])
+  const [novaMensagem, setNovaMensagem] = useState('')
+  const [enviandoMensagem, setEnviandoMensagem] = useState(false)
 
   const tiposDemanda: Record<string, string> = {
     'adicional_insalubridade': 'Adicional de Insalubridade',
@@ -840,6 +1338,12 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
     carregarCadastros()
   }, [])
 
+  useEffect(() => {
+    if (selectedCadastro) {
+      carregarDadosCliente(selectedCadastro.id)
+    }
+  }, [selectedCadastro])
+
   const carregarCadastros = async () => {
     try {
       const response = await fetch(`${API_URL}/api/cadastros`)
@@ -849,6 +1353,234 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       console.error('Erro ao carregar cadastros:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const carregarDadosCliente = async (cadastroId: string) => {
+    // Carregar acesso portal
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${cadastroId}/acesso`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setAcessoPortal(data)
+      }
+    } catch (err) {
+      console.error('Erro ao carregar acesso:', err)
+    }
+
+    // Carregar processos
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${cadastroId}/processos`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setProcessos(data.processos || [])
+      }
+    } catch (err) {
+      console.error('Erro ao carregar processos:', err)
+    }
+
+    // Carregar contratos
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${cadastroId}/contratos`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setContratos(data.contratos || [])
+      }
+    } catch (err) {
+      console.error('Erro ao carregar contratos:', err)
+    }
+
+    // Carregar mensagens
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${cadastroId}/mensagens`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setMensagens(data.mensagens || [])
+      }
+    } catch (err) {
+      console.error('Erro ao carregar mensagens:', err)
+    }
+  }
+
+  const carregarAndamentos = async (processoId: number) => {
+    try {
+      const response = await fetch(`${API_URL}/api/admin/processos/${processoId}/andamentos`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setProcessos(prev => prev.map(p => 
+          p.id === processoId ? { ...p, andamentos: data.andamentos || [] } : p
+        ))
+      }
+    } catch (err) {
+      console.error('Erro ao carregar andamentos:', err)
+    }
+  }
+
+  const handleHabilitarAcesso = async () => {
+    if (!selectedCadastro) return
+    setHabilitandoAcesso(true)
+
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${selectedCadastro.id}/habilitar-acesso`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        setAcessoPortal({ tem_acesso: true, primeiro_acesso: true, ultimo_acesso: null })
+        setMensagemSucesso(`Acesso habilitado! Senha: ${data.senha_temporaria}`)
+        setTimeout(() => setMensagemSucesso(''), 10000)
+      }
+    } catch (err) {
+      console.error('Erro ao habilitar acesso:', err)
+    } finally {
+      setHabilitandoAcesso(false)
+    }
+  }
+
+  const handleDesabilitarAcesso = async () => {
+    if (!selectedCadastro) return
+    if (!confirm('Deseja desabilitar o acesso do cliente ao portal?')) return
+
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${selectedCadastro.id}/desabilitar-acesso`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      
+      if (response.ok) {
+        setAcessoPortal({ tem_acesso: false, primeiro_acesso: null, ultimo_acesso: null })
+        setMensagemSucesso('Acesso desabilitado!')
+        setTimeout(() => setMensagemSucesso(''), 3000)
+      }
+    } catch (err) {
+      console.error('Erro ao desabilitar acesso:', err)
+    }
+  }
+
+  const handleEnviarMensagem = async () => {
+    if (!selectedCadastro || !novaMensagem.trim()) return
+    setEnviandoMensagem(true)
+
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${selectedCadastro.id}/mensagens`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.token}`
+        },
+        body: JSON.stringify({ texto: novaMensagem.trim() })
+      })
+
+      if (response.ok) {
+        setNovaMensagem('')
+        // Recarregar mensagens
+        const msgResponse = await fetch(`${API_URL}/api/admin/clientes/${selectedCadastro.id}/mensagens`, {
+          headers: { 'Authorization': `Bearer ${user.token}` }
+        })
+        if (msgResponse.ok) {
+          const data = await msgResponse.json()
+          setMensagens(data.mensagens || [])
+        }
+      }
+    } catch (err) {
+      console.error('Erro ao enviar mensagem:', err)
+    } finally {
+      setEnviandoMensagem(false)
+    }
+  }
+
+  const handleMarcarParcela = async (parcelaId: number) => {
+    try {
+      const response = await fetch(`${API_URL}/api/admin/parcelas/${parcelaId}/marcar-pago`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+
+      if (response.ok) {
+        // Recarregar contratos
+        if (selectedCadastro) {
+          const contratosResponse = await fetch(`${API_URL}/api/admin/clientes/${selectedCadastro.id}/contratos`, {
+            headers: { 'Authorization': `Bearer ${user.token}` }
+          })
+          if (contratosResponse.ok) {
+            const data = await contratosResponse.json()
+            setContratos(data.contratos || [])
+          }
+        }
+        setMensagemSucesso('Parcela marcada como paga!')
+        setTimeout(() => setMensagemSucesso(''), 3000)
+      }
+    } catch (err) {
+      console.error('Erro ao marcar parcela:', err)
+    }
+  }
+
+  const handleDeletarProcesso = async (processoId: number) => {
+    if (!confirm('Deseja excluir este processo? Esta ação não pode ser desfeita.')) return
+
+    try {
+      const response = await fetch(`${API_URL}/api/admin/processos/${processoId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+
+      if (response.ok) {
+        setProcessos(prev => prev.filter(p => p.id !== processoId))
+        setMensagemSucesso('Processo excluído!')
+        setTimeout(() => setMensagemSucesso(''), 3000)
+      }
+    } catch (err) {
+      console.error('Erro ao excluir processo:', err)
+    }
+  }
+
+  const handleDeletarContrato = async (contratoId: number) => {
+    if (!confirm('Deseja excluir este contrato? Todas as parcelas serão excluídas também.')) return
+
+    try {
+      const response = await fetch(`${API_URL}/api/admin/contratos/${contratoId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+
+      if (response.ok) {
+        setContratos(prev => prev.filter(c => c.id !== contratoId))
+        setMensagemSucesso('Contrato excluído!')
+        setTimeout(() => setMensagemSucesso(''), 3000)
+      }
+    } catch (err) {
+      console.error('Erro ao excluir contrato:', err)
+    }
+  }
+
+  const handleDeletarAndamento = async (andamentoId: number, processoId: number) => {
+    if (!confirm('Deseja excluir este andamento?')) return
+
+    try {
+      const response = await fetch(`${API_URL}/api/admin/processo-andamentos/${andamentoId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+
+      if (response.ok) {
+        carregarAndamentos(processoId)
+        setMensagemSucesso('Andamento excluído!')
+        setTimeout(() => setMensagemSucesso(''), 3000)
+      }
+    } catch (err) {
+      console.error('Erro ao excluir andamento:', err)
     }
   }
 
@@ -881,6 +1613,16 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
     )
   }
 
+  const formatMoney = (value: number) => {
+    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  }
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return '-'
+    const date = new Date(dateStr)
+    return date.toLocaleDateString('pt-BR')
+  }
+
   const handleValidar = async (id: string) => {
     try {
       await fetch(`${API_URL}/api/cadastros/${id}/validar`, { method: 'PUT' })
@@ -904,7 +1646,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
         if (selectedCadastro?.id === id) {
           setSelectedCadastro(prev => prev ? { ...prev, status: 'documentos_gerados', arquivos_gerados: data.arquivos } : null)
         }
-        setMensagemSucesso('Documentos gerados com sucesso! Faça o download, edite se necessário, e envie por e-mail.')
+        setMensagemSucesso('Documentos gerados com sucesso!')
         setTimeout(() => setMensagemSucesso(''), 5000)
       }
     } catch (err) {
@@ -914,17 +1656,8 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
     }
   }
 
-  const handleEmailEnviado = () => {
-    if (selectedCadastro) {
-      setCadastros(prev => prev.map(c => c.id === selectedCadastro.id ? { ...c, status: 'enviado' } : c))
-      setSelectedCadastro(prev => prev ? { ...prev, status: 'enviado' } : null)
-      setMensagemSucesso('E-mail enviado com sucesso!')
-      setTimeout(() => setMensagemSucesso(''), 3000)
-    }
-  }
-
   const handleDeletar = async (id: string) => {
-    if (!confirm('⚠️ ATENÇÃO: Esta ação é irreversível!\n\nDeseja realmente EXCLUIR este cadastro permanentemente?\n\nTodos os dados e documentos serão apagados.')) {
+    if (!confirm('⚠️ ATENÇÃO: Esta ação é irreversível!\n\nDeseja realmente EXCLUIR este cadastro permanentemente?')) {
       return
     }
 
@@ -950,162 +1683,20 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
     }
   }
 
-  // Funções do módulo financeiro
-  const carregarFinanceiro = async (cadastroId: string) => {
-    try {
-      const response = await fetch(`${API_URL}/api/cadastros/${cadastroId}/financeiro`)
-      const data = await response.json()
-      setFinanceiro(data)
-    } catch (err) {
-      console.error('Erro ao carregar financeiro:', err)
-    }
-  }
-
-  const handleSalvarFinanceiro = async () => {
-    if (!selectedCadastro) return
-    setSalvandoFinanceiro(true)
-
-    try {
-      const response = await fetch(`${API_URL}/api/cadastros/${selectedCadastro.id}/financeiro`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(financeiro)
-      })
-
-      const data = await response.json()
-
-      if (response.ok && data.success) {
-        setMensagemSucesso('Dados financeiros salvos com sucesso!')
-        setTimeout(() => setMensagemSucesso(''), 3000)
-      } else {
-        alert(data.detail || 'Erro ao salvar dados financeiros')
-      }
-    } catch (err) {
-      console.error('Erro ao salvar financeiro:', err)
-      alert('Erro de conexão. Tente novamente.')
-    } finally {
-      setSalvandoFinanceiro(false)
-    }
-  }
-
-  const handleGerarPrestacao = async () => {
-    if (!selectedCadastro) return
-    
-    if (!financeiro.depositos || financeiro.depositos.length === 0) {
-      alert('Adicione pelo menos um depósito antes de gerar a prestação de contas.')
-      return
-    }
-    
-    setGerandoPrestacao(true)
-
-    try {
-      // Primeiro salvar os dados
-      await handleSalvarFinanceiro()
-      
-      // Abrir o documento em nova aba
-      window.open(`${API_URL}/api/cadastros/${selectedCadastro.id}/prestacao-contas`, '_blank')
-    } catch (err) {
-      console.error('Erro ao gerar prestação:', err)
-      alert('Erro ao gerar prestação de contas.')
-    } finally {
-      setGerandoPrestacao(false)
-    }
-  }
-
-  const formatMoney = (value: number) => {
-    return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-  }
-
-  // Cálculos financeiros
-  const calcularTotalDepositos = () => {
-    return financeiro.depositos.reduce((sum, d) => sum + (d.valor || 0), 0)
-  }
-
-  const calcularTotalSucumbencias = () => {
-    return financeiro.sucumbencias.reduce((sum, s) => sum + (s.valor || 0), 0)
-  }
-
-  const calcularTotalRetencoes = () => {
-    return financeiro.retencoes.reduce((sum, r) => sum + (r.valor || 0), 0)
-  }
-
-  const calcularHonorariosContratuais = () => {
-    return financeiro.valor_credito_cliente * (financeiro.percentual_honorarios / 100)
-  }
-
-  const calcularValorLiquido = () => {
-    return financeiro.valor_credito_cliente - calcularHonorariosContratuais() - calcularTotalRetencoes()
-  }
-
-  // Funções para gerenciar listas
-  const adicionarDeposito = () => {
-    setFinanceiro({
-      ...financeiro,
-      depositos: [...financeiro.depositos, { data: '', origem: '', valor: 0 }]
-    })
-  }
-
-  const removerDeposito = (index: number) => {
-    setFinanceiro({
-      ...financeiro,
-      depositos: financeiro.depositos.filter((_, i) => i !== index)
-    })
-  }
-
-  const atualizarDeposito = (index: number, campo: string, valor: any) => {
-    const novos = [...financeiro.depositos]
-    novos[index] = { ...novos[index], [campo]: valor }
-    setFinanceiro({ ...financeiro, depositos: novos })
-  }
-
-  const adicionarSucumbencia = () => {
-    setFinanceiro({
-      ...financeiro,
-      sucumbencias: [...financeiro.sucumbencias, { descricao: '', valor: 0 }]
-    })
-  }
-
-  const removerSucumbencia = (index: number) => {
-    setFinanceiro({
-      ...financeiro,
-      sucumbencias: financeiro.sucumbencias.filter((_, i) => i !== index)
-    })
-  }
-
-  const atualizarSucumbencia = (index: number, campo: string, valor: any) => {
-    const novos = [...financeiro.sucumbencias]
-    novos[index] = { ...novos[index], [campo]: valor }
-    setFinanceiro({ ...financeiro, sucumbencias: novos })
-  }
-
-  const adicionarRetencao = () => {
-    setFinanceiro({
-      ...financeiro,
-      retencoes: [...financeiro.retencoes, { descricao: '', valor: 0 }]
-    })
-  }
-
-  const removerRetencao = (index: number) => {
-    setFinanceiro({
-      ...financeiro,
-      retencoes: financeiro.retencoes.filter((_, i) => i !== index)
-    })
-  }
-
-  const atualizarRetencao = (index: number, campo: string, valor: any) => {
-    const novos = [...financeiro.retencoes]
-    novos[index] = { ...novos[index], [campo]: valor }
-    setFinanceiro({ ...financeiro, retencoes: novos })
-  }
-
-  // Visualização de detalhes
+  // Visualização de detalhes do cliente
   if (selectedCadastro) {
     const c = selectedCadastro
     return (
       <div className="min-h-screen bg-gray-100 py-6 px-4">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-5xl mx-auto">
           <button 
-            onClick={() => setSelectedCadastro(null)}
+            onClick={() => {
+              setSelectedCadastro(null)
+              setActiveTab('dados')
+              setProcessos([])
+              setContratos([])
+              setMensagens([])
+            }}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-6"
           >
             <ArrowLeft className="w-5 h-5" />
@@ -1120,569 +1711,582 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
           )}
 
           <div className="bg-white rounded-2xl shadow-lg overflow-hidden">
+            {/* Header */}
             <div className="bg-gradient-to-r from-gray-800 to-gray-900 text-white p-6">
               <div className="flex justify-between items-start">
                 <div>
                   <h1 className="text-2xl font-bold">{c.dados.nome}</h1>
                   <p className="text-gray-300 mt-1">{c.dados.email}</p>
                 </div>
-                {getStatusBadge(c.status)}
+                <div className="flex items-center gap-3">
+                  {getStatusBadge(c.status)}
+                  {acessoPortal?.tem_acesso ? (
+                    <button
+                      onClick={handleDesabilitarAcesso}
+                      className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs rounded-full flex items-center gap-1"
+                    >
+                      <CheckCircle className="w-3 h-3" />
+                      Portal Ativo
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleHabilitarAcesso}
+                      disabled={habilitandoAcesso}
+                      className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded-full flex items-center gap-1 disabled:opacity-50"
+                    >
+                      <Key className="w-3 h-3" />
+                      {habilitandoAcesso ? 'Habilitando...' : 'Habilitar Portal'}
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
-            <div className="p-6 space-y-6">
-              {/* Dados Pessoais */}
-              <div className="bg-gray-50 rounded-xl p-6">
-                <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                  <User className="w-5 h-5 text-gray-600" />
-                  Dados Pessoais
-                </h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                  <div><p className="text-gray-500">CPF</p><p className="font-medium">{c.dados.cpf}</p></div>
-                  <div><p className="text-gray-500">RG</p><p className="font-medium">{c.dados.rg}</p></div>
-                  <div><p className="text-gray-500">Nascimento</p><p className="font-medium">{c.dados.data_nascimento}</p></div>
-                  <div><p className="text-gray-500">Telefone</p><p className="font-medium">{c.dados.telefone}</p></div>
-                  <div><p className="text-gray-500">Estado Civil</p><p className="font-medium capitalize">{c.dados.estado_civil}</p></div>
-                  <div><p className="text-gray-500">Profissão</p><p className="font-medium">{c.dados.profissao}</p></div>
-                  <div className="md:col-span-3"><p className="text-gray-500">Endereço</p><p className="font-medium">{c.dados.endereco_completo}</p></div>
-                </div>
-              </div>
-
-              {/* Demanda */}
-              <div className="bg-gray-50 rounded-xl p-6">
-                <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                  <Briefcase className="w-5 h-5 text-gray-600" />
-                  Demanda
-                </h3>
-                <div className="space-y-4 text-sm">
-                  <div><p className="text-gray-500">Tipo</p><p className="font-medium">{tiposDemanda[c.dados.tipo_demanda]}</p></div>
-                  <div><p className="text-gray-500">Objeto do Contrato / Poderes</p><p className="font-medium mt-1">{c.dados.objeto_contrato || c.dados.poderes_especificos}</p></div>
-                  {c.dados.observacoes && <div><p className="text-gray-500">Observações</p><p className="font-medium mt-1">{c.dados.observacoes}</p></div>}
-                </div>
-              </div>
-
-              {/* Documentos do Cliente */}
-              <div className="bg-gray-50 rounded-xl p-6">
-                <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                  <FolderOpen className="w-5 h-5 text-gray-600" />
-                  Documentos do Cliente ({c.documentos.length})
-                </h3>
-                {c.documentos.length > 0 ? (
-                  <div className="space-y-2">
-                    {c.documentos.map((doc, i) => (
-                      <div key={i} className="flex items-center justify-between bg-white border rounded-lg px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <FileText className="w-5 h-5 text-red-600" />
-                          <span className="text-sm font-medium">{doc}</span>
-                        </div>
-                        <a 
-                          href={`${API_URL}/api/cadastros/${c.id}/uploads/${encodeURIComponent(doc)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm font-medium"
-                        >
-                          <Download className="w-4 h-4" />
-                          Baixar
-                        </a>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-gray-500 text-sm">Nenhum documento enviado pelo cliente</p>
-                )}
-              </div>
-
-              {/* Documentos Gerados */}
-              {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao) && (
-                <div className="bg-purple-50 rounded-xl p-6">
-                  <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                    <FileCheck className="w-5 h-5 text-purple-600" />
-                    Documentos Gerados
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-4">
-                    Baixe os documentos, edite no Word se necessário, e depois envie por e-mail.
-                  </p>
-                  <div className="flex flex-wrap gap-3">
-                    {c.arquivos_gerados.contrato && (
-                      <a
-                        href={`${API_URL}/api/cadastros/${c.id}/download/contrato`}
-                        className="flex items-center gap-2 bg-white border border-purple-200 text-purple-700 font-medium px-4 py-2 rounded-lg hover:bg-purple-100"
-                      >
-                        <Download className="w-4 h-4" />
-                        Baixar Contrato
-                      </a>
+            {/* Tabs */}
+            <div className="border-b bg-gray-50">
+              <div className="flex overflow-x-auto">
+                {[
+                  { id: 'dados', label: 'Dados', icon: User },
+                  { id: 'processos', label: 'Processos', icon: Gavel, count: processos.length },
+                  { id: 'contratos', label: 'Honorários', icon: CreditCard, count: contratos.length },
+                  { id: 'documentos', label: 'Documentos', icon: FolderOpen },
+                  { id: 'mensagens', label: 'Mensagens', icon: MessageSquare, count: mensagens.filter(m => m.remetente === 'cliente' && !m.lida).length }
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`flex items-center gap-2 px-6 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                      activeTab === tab.id 
+                        ? 'border-red-800 text-red-800 bg-white' 
+                        : 'border-transparent text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    <tab.icon className="w-4 h-4" />
+                    {tab.label}
+                    {tab.count !== undefined && tab.count > 0 && (
+                      <span className={`px-2 py-0.5 text-xs rounded-full ${
+                        activeTab === tab.id ? 'bg-red-100 text-red-800' : 'bg-gray-200 text-gray-600'
+                      }`}>
+                        {tab.count}
+                      </span>
                     )}
-                    {c.arquivos_gerados.procuracao && (
-                      <a
-                        href={`${API_URL}/api/cadastros/${c.id}/download/procuracao`}
-                        className="flex items-center gap-2 bg-white border border-purple-200 text-purple-700 font-medium px-4 py-2 rounded-lg hover:bg-purple-100"
-                      >
-                        <Download className="w-4 h-4" />
-                        Baixar Procuração
-                      </a>
-                    )}
-                  </div>
-                </div>
-              )}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-              {/* Documentos Assinados pelo Cliente */}
-              {c.documentos_assinados && c.documentos_assinados.length > 0 && (
-                <div className="bg-emerald-50 rounded-xl p-6">
-                  <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                    <CheckCircle className="w-5 h-5 text-emerald-600" />
-                    Documentos Assinados Recebidos
-                    <span className="text-xs bg-emerald-200 text-emerald-800 px-2 py-1 rounded-full">
-                      {c.documentos_assinados.length} arquivo(s)
-                    </span>
-                  </h3>
-                  {c.data_assinatura && (
-                    <p className="text-sm text-emerald-700 mb-4">
-                      Recebido em: {new Date(c.data_assinatura).toLocaleString('pt-BR')}
-                    </p>
-                  )}
-                  <div className="space-y-2">
-                    {c.documentos_assinados.map((doc, i) => (
-                      <div key={i} className="flex items-center justify-between bg-white border border-emerald-200 rounded-lg px-4 py-3">
-                        <div className="flex items-center gap-3">
-                          <FileCheck className="w-5 h-5 text-emerald-600" />
-                          <span className="text-sm font-medium">{doc}</span>
-                        </div>
-                        <a 
-                          href={`${API_URL}/api/cadastros/${c.id}/assinados/${encodeURIComponent(doc)}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-sm font-medium"
-                        >
-                          <Download className="w-4 h-4" />
-                          Baixar
-                        </a>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Módulo Financeiro */}
-              {c.status === 'assinado' && (
-                <div className="bg-amber-50 rounded-xl p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="font-semibold text-gray-800 flex items-center gap-2">
-                      <DollarSign className="w-5 h-5 text-amber-600" />
-                      Módulo Financeiro - Prestação de Contas
+            <div className="p-6">
+              {/* Tab: Dados Pessoais */}
+              {activeTab === 'dados' && (
+                <div className="space-y-6">
+                  <div className="bg-gray-50 rounded-xl p-6">
+                    <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <User className="w-5 h-5 text-gray-600" />
+                      Dados Pessoais
                     </h3>
-                    <button
-                      onClick={() => {
-                        setShowFinanceiro(!showFinanceiro)
-                        if (!showFinanceiro) {
-                          carregarFinanceiro(c.id)
-                        }
-                      }}
-                      className="text-amber-600 hover:text-amber-800 text-sm font-medium"
-                    >
-                      {showFinanceiro ? 'Fechar' : 'Abrir / Editar'}
-                    </button>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                      <div><p className="text-gray-500">CPF</p><p className="font-medium">{c.dados.cpf}</p></div>
+                      <div><p className="text-gray-500">RG</p><p className="font-medium">{c.dados.rg}</p></div>
+                      <div><p className="text-gray-500">Nascimento</p><p className="font-medium">{c.dados.data_nascimento}</p></div>
+                      <div><p className="text-gray-500">Telefone</p><p className="font-medium">{c.dados.telefone}</p></div>
+                      <div><p className="text-gray-500">Estado Civil</p><p className="font-medium capitalize">{c.dados.estado_civil}</p></div>
+                      <div><p className="text-gray-500">Profissão</p><p className="font-medium">{c.dados.profissao}</p></div>
+                      <div className="md:col-span-3"><p className="text-gray-500">Endereço</p><p className="font-medium">{c.dados.endereco_completo}</p></div>
+                    </div>
                   </div>
 
-                  {showFinanceiro && (
-                    <div className="space-y-6">
-                      {/* Dados do Processo */}
-                      <div className="bg-white rounded-lg p-4 border border-amber-200">
-                        <h4 className="font-semibold text-gray-700 mb-3">Dados do Processo</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Número do Processo</label>
-                            <input
-                              type="text"
-                              value={financeiro.numero_processo}
-                              onChange={(e) => setFinanceiro({ ...financeiro, numero_processo: e.target.value })}
-                              placeholder="0001234-56.2024.8.11.0001"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Vara / Tribunal</label>
-                            <input
-                              type="text"
-                              value={financeiro.vara_tribunal}
-                              onChange={(e) => setFinanceiro({ ...financeiro, vara_tribunal: e.target.value })}
-                              placeholder="Juizado Especial da Fazenda Pública / TJMT"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Depósitos Recebidos */}
-                      <div className="bg-white rounded-lg p-4 border border-amber-200">
-                        <div className="flex items-center justify-between mb-3">
-                          <h4 className="font-semibold text-gray-700">Depósitos Recebidos</h4>
-                          <button
-                            onClick={adicionarDeposito}
-                            className="flex items-center gap-1 text-amber-600 hover:text-amber-800 text-sm font-medium"
-                          >
-                            <Plus className="w-4 h-4" />
-                            Adicionar Depósito
-                          </button>
-                        </div>
-                        
-                        {financeiro.depositos.length === 0 ? (
-                          <p className="text-gray-500 text-sm italic">Nenhum depósito adicionado. Clique em "Adicionar Depósito" para começar.</p>
-                        ) : (
-                          <div className="space-y-3">
-                            {financeiro.depositos.map((dep, index) => (
-                              <div key={index} className="flex gap-3 items-start bg-gray-50 p-3 rounded-lg">
-                                <div className="flex-1 grid grid-cols-1 md:grid-cols-3 gap-3">
-                                  <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Data</label>
-                                    <input
-                                      type="date"
-                                      value={dep.data}
-                                      onChange={(e) => atualizarDeposito(index, 'data', e.target.value)}
-                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Origem</label>
-                                    <input
-                                      type="text"
-                                      value={dep.origem}
-                                      onChange={(e) => atualizarDeposito(index, 'origem', e.target.value)}
-                                      placeholder="RPV MTPREV, RPV Estado..."
-                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Valor (R$)</label>
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      value={dep.valor || ''}
-                                      onChange={(e) => atualizarDeposito(index, 'valor', parseFloat(e.target.value) || 0)}
-                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
-                                    />
-                                  </div>
-                                </div>
-                                <button
-                                  onClick={() => removerDeposito(index)}
-                                  className="text-red-500 hover:text-red-700 p-1"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            ))}
-                            <div className="flex justify-end text-sm font-medium text-gray-700 pt-2 border-t">
-                              <span>Total Depósitos: {formatMoney(calcularTotalDepositos())}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Crédito do Cliente e Honorários */}
-                      <div className="bg-white rounded-lg p-4 border border-amber-200">
-                        <h4 className="font-semibold text-gray-700 mb-3">Crédito do Cliente e Honorários</h4>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Valor do Crédito do Cliente (R$)</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={financeiro.valor_credito_cliente || ''}
-                              onChange={(e) => setFinanceiro({ ...financeiro, valor_credito_cliente: parseFloat(e.target.value) || 0 })}
-                              placeholder="Base de cálculo dos honorários contratuais"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                            />
-                            <p className="text-xs text-gray-500 mt-1">Base para cálculo dos honorários contratuais (sem sucumbência)</p>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-gray-700 mb-1">Percentual Honorários Contratuais (%)</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={financeiro.percentual_honorarios || ''}
-                              onChange={(e) => setFinanceiro({ ...financeiro, percentual_honorarios: parseFloat(e.target.value) || 0 })}
-                              placeholder="20"
-                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Honorários Sucumbenciais */}
-                      <div className="bg-white rounded-lg p-4 border border-amber-200">
-                        <div className="flex items-center justify-between mb-3">
-                          <h4 className="font-semibold text-gray-700">Honorários Sucumbenciais</h4>
-                          <button
-                            onClick={adicionarSucumbencia}
-                            className="flex items-center gap-1 text-amber-600 hover:text-amber-800 text-sm font-medium"
-                          >
-                            <Plus className="w-4 h-4" />
-                            Adicionar Sucumbência
-                          </button>
-                        </div>
-                        
-                        {financeiro.sucumbencias.length === 0 ? (
-                          <p className="text-gray-500 text-sm italic">Nenhuma sucumbência. Clique para adicionar.</p>
-                        ) : (
-                          <div className="space-y-3">
-                            {financeiro.sucumbencias.map((suc, index) => (
-                              <div key={index} className="flex gap-3 items-start bg-gray-50 p-3 rounded-lg">
-                                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Descrição</label>
-                                    <input
-                                      type="text"
-                                      value={suc.descricao}
-                                      onChange={(e) => atualizarSucumbencia(index, 'descricao', e.target.value)}
-                                      placeholder="Honorários sucumbenciais MTPREV"
-                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Valor (R$)</label>
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      value={suc.valor || ''}
-                                      onChange={(e) => atualizarSucumbencia(index, 'valor', parseFloat(e.target.value) || 0)}
-                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
-                                    />
-                                  </div>
-                                </div>
-                                <button
-                                  onClick={() => removerSucumbencia(index)}
-                                  className="text-red-500 hover:text-red-700 p-1"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            ))}
-                            <div className="flex justify-end text-sm font-medium text-gray-700 pt-2 border-t">
-                              <span>Total Sucumbências: {formatMoney(calcularTotalSucumbencias())}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Retenções (PSS, IRRF) */}
-                      <div className="bg-white rounded-lg p-4 border border-amber-200">
-                        <div className="flex items-center justify-between mb-3">
-                          <h4 className="font-semibold text-gray-700">Retenções Legais (PSS / IRRF)</h4>
-                          <button
-                            onClick={adicionarRetencao}
-                            className="flex items-center gap-1 text-amber-600 hover:text-amber-800 text-sm font-medium"
-                          >
-                            <Plus className="w-4 h-4" />
-                            Adicionar Retenção
-                          </button>
-                        </div>
-                        
-                        {financeiro.retencoes.length === 0 ? (
-                          <p className="text-gray-500 text-sm italic">Nenhuma retenção. Clique para adicionar.</p>
-                        ) : (
-                          <div className="space-y-3">
-                            {financeiro.retencoes.map((ret, index) => (
-                              <div key={index} className="flex gap-3 items-start bg-gray-50 p-3 rounded-lg">
-                                <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-3">
-                                  <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Descrição</label>
-                                    <input
-                                      type="text"
-                                      value={ret.descricao}
-                                      onChange={(e) => atualizarRetencao(index, 'descricao', e.target.value)}
-                                      placeholder="PSS MTPREV, IRRF Estado..."
-                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
-                                    />
-                                  </div>
-                                  <div>
-                                    <label className="block text-xs text-gray-500 mb-1">Valor (R$)</label>
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      value={ret.valor || ''}
-                                      onChange={(e) => atualizarRetencao(index, 'valor', parseFloat(e.target.value) || 0)}
-                                      className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-amber-500"
-                                    />
-                                  </div>
-                                </div>
-                                <button
-                                  onClick={() => removerRetencao(index)}
-                                  className="text-red-500 hover:text-red-700 p-1"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            ))}
-                            <div className="flex justify-end text-sm font-medium text-gray-700 pt-2 border-t">
-                              <span>Total Retenções: {formatMoney(calcularTotalRetencoes())}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Observações */}
-                      <div className="bg-white rounded-lg p-4 border border-amber-200">
-                        <label className="block text-sm font-medium text-gray-700 mb-1">Observações</label>
-                        <textarea
-                          value={financeiro.observacoes}
-                          onChange={(e) => setFinanceiro({ ...financeiro, observacoes: e.target.value })}
-                          placeholder="Observações adicionais..."
-                          rows={2}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-amber-500"
-                        />
-                      </div>
-
-                      {/* Resumo dos cálculos */}
-                      {(financeiro.depositos.length > 0 || financeiro.valor_credito_cliente > 0) && (
-                        <div className="bg-white border-2 border-amber-300 rounded-lg p-4">
-                          <h4 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
-                            <Calculator className="w-4 h-4" />
-                            Resumo Financeiro
-                          </h4>
-                          <div className="space-y-2 text-sm">
-                            <div className="flex justify-between">
-                              <span>Total Depósitos (Valor Bruto):</span>
-                              <span className="font-medium">{formatMoney(calcularTotalDepositos())}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>Crédito do Cliente (Base honorários):</span>
-                              <span className="font-medium">{formatMoney(financeiro.valor_credito_cliente)}</span>
-                            </div>
-                            <div className="flex justify-between text-amber-700">
-                              <span>(-) Honorários Contratuais ({financeiro.percentual_honorarios}%):</span>
-                              <span className="font-medium">{formatMoney(calcularHonorariosContratuais())}</span>
-                            </div>
-                            <div className="flex justify-between text-amber-700">
-                              <span>(-) Honorários Sucumbenciais:</span>
-                              <span className="font-medium">{formatMoney(calcularTotalSucumbencias())}</span>
-                            </div>
-                            <div className="flex justify-between text-red-600">
-                              <span>(-) Retenções Legais (PSS/IRRF):</span>
-                              <span className="font-medium">{formatMoney(calcularTotalRetencoes())}</span>
-                            </div>
-                            <div className="flex justify-between border-t-2 pt-2 text-green-700 font-bold text-base">
-                              <span>Valor Líquido do Cliente:</span>
-                              <span>{formatMoney(calcularValorLiquido())}</span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Botões de ação */}
-                      <div className="flex flex-wrap gap-3">
-                        <button
-                          onClick={handleSalvarFinanceiro}
-                          disabled={salvandoFinanceiro}
-                          className="flex items-center gap-2 bg-amber-600 hover:bg-amber-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
-                        >
-                          {salvandoFinanceiro ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              Salvando...
-                            </>
-                          ) : (
-                            <>
-                              <Check className="w-4 h-4" />
-                              Salvar Dados
-                            </>
-                          )}
-                        </button>
-                        
-                        <button
-                          onClick={handleGerarPrestacao}
-                          disabled={gerandoPrestacao || financeiro.depositos.length === 0}
-                          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
-                        >
-                          {gerandoPrestacao ? (
-                            <>
-                              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                              Gerando...
-                            </>
-                          ) : (
-                            <>
-                              <Receipt className="w-4 h-4" />
-                              Gerar Prestação de Contas
-                            </>
-                          )}
-                        </button>
-                      </div>
+                  <div className="bg-gray-50 rounded-xl p-6">
+                    <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <Briefcase className="w-5 h-5 text-gray-600" />
+                      Demanda Original
+                    </h3>
+                    <div className="space-y-4 text-sm">
+                      <div><p className="text-gray-500">Tipo</p><p className="font-medium">{tiposDemanda[c.dados.tipo_demanda]}</p></div>
+                      <div><p className="text-gray-500">Objeto do Contrato</p><p className="font-medium mt-1">{c.dados.objeto_contrato || c.dados.poderes_especificos}</p></div>
+                      {c.dados.observacoes && <div><p className="text-gray-500">Observações</p><p className="font-medium mt-1">{c.dados.observacoes}</p></div>}
                     </div>
-                  )}
-                </div>
-              )}
+                  </div>
 
-              {/* Ações */}
-              <div className="border-t pt-6">
-                <h3 className="font-semibold text-gray-800 mb-4">Ações</h3>
-                <div className="flex flex-wrap gap-3">
-                  {c.status === 'pendente' && (
-                    <button
-                      onClick={() => handleValidar(c.id)}
-                      className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-6 py-3 rounded-xl"
-                    >
-                      <CheckCircle className="w-5 h-5" />
-                      Validar Cadastro
-                    </button>
-                  )}
-                  
-                  {(c.status === 'validado' || c.status === 'pendente') && !c.arquivos_gerados?.contrato && (
-                    <button
-                      onClick={() => handleGerarDocumentos(c.id)}
-                      disabled={gerandoDocs}
-                      className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-medium px-6 py-3 rounded-xl disabled:opacity-50"
-                    >
-                      {gerandoDocs ? (
-                        <>
-                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                          Gerando...
-                        </>
-                      ) : (
-                        <>
-                          <FileCheck className="w-5 h-5" />
-                          Gerar Documentos
-                        </>
-                      )}
-                    </button>
-                  )}
-
-                  {c.status !== 'pendente' && (
-                    <button
-                      onClick={() => setShowEmailModal(true)}
-                      className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium px-6 py-3 rounded-xl"
-                    >
-                      <Send className="w-5 h-5" />
-                      Enviar por E-mail
-                    </button>
-                  )}
-
-                  {c.status === 'enviado' && (
-                    <div className="flex items-center gap-2 bg-green-100 text-green-800 px-6 py-3 rounded-xl">
-                      <CheckCircle className="w-5 h-5" />
-                      Documentos enviados para {c.dados.email}
-                    </div>
-                  )}
-
-                  {/* Botão Deletar - Apenas Admin */}
-                  {user.is_admin && (
+                  {/* Ações */}
+                  <div className="flex flex-wrap gap-3">
+                    {c.status === 'pendente' && (
+                      <button
+                        onClick={() => handleValidar(c.id)}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg"
+                      >
+                        <Check className="w-4 h-4" />
+                        Validar Cadastro
+                      </button>
+                    )}
+                    {(c.status === 'validado' || c.status === 'pendente') && (
+                      <button
+                        onClick={() => handleGerarDocumentos(c.id)}
+                        disabled={gerandoDocs}
+                        className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                      >
+                        {gerandoDocs ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            Gerando...
+                          </>
+                        ) : (
+                          <>
+                            <FileText className="w-4 h-4" />
+                            Gerar Documentos
+                          </>
+                        )}
+                      </button>
+                    )}
                     <button
                       onClick={() => handleDeletar(c.id)}
-                      className="flex items-center gap-2 bg-red-100 hover:bg-red-600 text-red-600 hover:text-white font-medium px-6 py-3 rounded-xl border border-red-200 hover:border-red-600 transition-all ml-auto"
+                      className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-4 py-2 rounded-lg"
                     >
-                      <Trash2 className="w-5 h-5" />
+                      <Trash2 className="w-4 h-4" />
                       Excluir Cadastro
                     </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Tab: Processos */}
+              {activeTab === 'processos' && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-semibold text-gray-800">Processos do Cliente</h3>
+                    <button
+                      onClick={() => { setProcessoSelecionado(null); setShowProcessoModal(true); }}
+                      className="flex items-center gap-2 bg-red-800 hover:bg-red-900 text-white font-medium px-4 py-2 rounded-lg"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Novo Processo
+                    </button>
+                  </div>
+
+                  {processos.length === 0 ? (
+                    <div className="text-center py-12 bg-gray-50 rounded-xl">
+                      <Gavel className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                      <p className="text-gray-500">Nenhum processo cadastrado</p>
+                      <p className="text-gray-400 text-sm mt-1">Clique em "Novo Processo" para adicionar</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {processos.map((processo) => (
+                        <div key={processo.id} className="border rounded-xl overflow-hidden">
+                          <div 
+                            className="bg-gray-50 p-4 cursor-pointer hover:bg-gray-100"
+                            onClick={() => {
+                              if (processoExpandido === processo.id) {
+                                setProcessoExpandido(null)
+                              } else {
+                                setProcessoExpandido(processo.id)
+                                if (!processo.andamentos) {
+                                  carregarAndamentos(processo.id)
+                                }
+                              }
+                            }}
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex-1">
+                                <div className="flex items-center gap-3">
+                                  <span className="font-mono text-sm bg-white px-2 py-1 rounded border">
+                                    {processo.numero_processo || 'Sem número'}
+                                  </span>
+                                  <span className={`px-2 py-1 text-xs rounded-full ${
+                                    processo.status === 'ativo' ? 'bg-green-100 text-green-800' :
+                                    processo.status === 'arquivado' ? 'bg-gray-100 text-gray-800' :
+                                    'bg-red-100 text-red-800'
+                                  }`}>
+                                    {processo.status}
+                                  </span>
+                                </div>
+                                <div className="mt-2 text-sm text-gray-600">
+                                  <span className="font-medium">{processo.tipo_acao}</span>
+                                  {processo.vara_tribunal && <span> • {processo.vara_tribunal}</span>}
+                                </div>
+                                <div className="mt-1 text-sm text-gray-500">
+                                  Fase: <span className="font-medium">{processo.fase}</span>
+                                  {processo.valor_causa > 0 && (
+                                    <span> • Valor: <span className="font-medium">{formatMoney(processo.valor_causa)}</span></span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setProcessoSelecionado(processo); setShowProcessoModal(true); }}
+                                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                                  title="Editar"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); handleDeletarProcesso(processo.id); }}
+                                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                                  title="Excluir"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                                {processoExpandido === processo.id ? (
+                                  <ChevronUp className="w-5 h-5 text-gray-400" />
+                                ) : (
+                                  <ChevronDown className="w-5 h-5 text-gray-400" />
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {processoExpandido === processo.id && (
+                            <div className="p-4 border-t bg-white">
+                              <div className="flex justify-between items-center mb-4">
+                                <h4 className="font-medium text-gray-700">Andamentos</h4>
+                                <button
+                                  onClick={() => { setProcessoParaAndamento(processo.id); setShowAndamentoModal(true); }}
+                                  className="flex items-center gap-1 text-sm text-red-700 hover:text-red-800"
+                                >
+                                  <Plus className="w-4 h-4" />
+                                  Novo Andamento
+                                </button>
+                              </div>
+
+                              {processo.andamentos && processo.andamentos.length > 0 ? (
+                                <div className="space-y-3">
+                                  {processo.andamentos.map((and) => (
+                                    <div key={and.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                                      <div className="flex-shrink-0 w-20 text-sm text-gray-500">
+                                        {formatDate(and.data)}
+                                      </div>
+                                      <div className="flex-1">
+                                        <p className="text-sm text-gray-700">{and.descricao}</p>
+                                        {!and.visivel_cliente && (
+                                          <span className="text-xs text-amber-600 mt-1 inline-block">
+                                            (Oculto para o cliente)
+                                          </span>
+                                        )}
+                                      </div>
+                                      <button
+                                        onClick={() => handleDeletarAndamento(and.id, processo.id)}
+                                        className="p-1 text-gray-400 hover:text-red-600"
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-gray-500 text-sm text-center py-4">Nenhum andamento registrado</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </div>
-              </div>
+              )}
+
+              {/* Tab: Contratos */}
+              {activeTab === 'contratos' && (
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="font-semibold text-gray-800">Contratos de Honorários</h3>
+                    <button
+                      onClick={() => { setContratoSelecionado(null); setShowContratoModal(true); }}
+                      className="flex items-center gap-2 bg-red-800 hover:bg-red-900 text-white font-medium px-4 py-2 rounded-lg"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Novo Contrato
+                    </button>
+                  </div>
+
+                  {contratos.length === 0 ? (
+                    <div className="text-center py-12 bg-gray-50 rounded-xl">
+                      <CreditCard className="w-12 h-12 text-gray-300 mx-auto mb-4" />
+                      <p className="text-gray-500">Nenhum contrato cadastrado</p>
+                      <p className="text-gray-400 text-sm mt-1">Clique em "Novo Contrato" para adicionar</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {contratos.map((contrato) => (
+                        <div key={contrato.id} className="border rounded-xl overflow-hidden">
+                          <div className="bg-gray-50 p-4">
+                            <div className="flex items-start justify-between">
+                              <div>
+                                <div className="flex items-center gap-2">
+                                  <h4 className="font-medium text-gray-800">{contrato.descricao || 'Contrato de Honorários'}</h4>
+                                  <span className={`px-2 py-0.5 text-xs rounded-full ${
+                                    contrato.tipo === 'fixo' ? 'bg-blue-100 text-blue-800' :
+                                    contrato.tipo === 'parcelado' ? 'bg-purple-100 text-purple-800' :
+                                    'bg-green-100 text-green-800'
+                                  }`}>
+                                    {contrato.tipo === 'fixo' ? 'À Vista' : contrato.tipo === 'parcelado' ? 'Parcelado' : 'Mensal'}
+                                  </span>
+                                </div>
+                                {contrato.processo_numero && (
+                                  <p className="text-sm text-gray-500 mt-1">
+                                    Processo: {contrato.processo_numero}
+                                  </p>
+                                )}
+                                <div className="flex items-center gap-4 mt-2 text-sm">
+                                  {contrato.tipo === 'mensal' ? (
+                                    <span className="font-medium text-gray-700">
+                                      {formatMoney(contrato.valor_mensal)}/mês
+                                    </span>
+                                  ) : (
+                                    <span className="font-medium text-gray-700">
+                                      {formatMoney(contrato.valor_total)}
+                                      {contrato.tipo === 'parcelado' && ` em ${contrato.num_parcelas}x`}
+                                    </span>
+                                  )}
+                                  {contrato.percentual_exito > 0 && (
+                                    <span className="text-amber-700">
+                                      + {contrato.percentual_exito}% êxito
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => { setContratoSelecionado(contrato); setShowContratoModal(true); }}
+                                  className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg"
+                                  title="Editar"
+                                >
+                                  <Edit className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeletarContrato(contrato.id)}
+                                  className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                                  title="Excluir"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Parcelas */}
+                          {contrato.parcelas && contrato.parcelas.length > 0 && (
+                            <div className="p-4 border-t">
+                              <h5 className="text-sm font-medium text-gray-700 mb-3">Parcelas</h5>
+                              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                                {contrato.parcelas.map((parcela) => (
+                                  <div 
+                                    key={parcela.id} 
+                                    className={`flex items-center justify-between p-3 rounded-lg border ${
+                                      parcela.status === 'pago' ? 'bg-green-50 border-green-200' :
+                                      new Date(parcela.vencimento) < new Date() ? 'bg-red-50 border-red-200' :
+                                      'bg-gray-50 border-gray-200'
+                                    }`}
+                                  >
+                                    <div>
+                                      <div className="flex items-center gap-2">
+                                        <span className="text-sm font-medium">Parcela {parcela.numero}</span>
+                                        {parcela.status === 'pago' && <CheckCircle className="w-4 h-4 text-green-600" />}
+                                      </div>
+                                      <p className="text-xs text-gray-500">
+                                        {formatDate(parcela.vencimento)} • {formatMoney(parcela.valor)}
+                                      </p>
+                                    </div>
+                                    {parcela.status !== 'pago' && (
+                                      <button
+                                        onClick={() => handleMarcarParcela(parcela.id)}
+                                        className="text-xs text-green-700 hover:text-green-800 font-medium"
+                                      >
+                                        Marcar Pago
+                                      </button>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab: Documentos */}
+              {activeTab === 'documentos' && (
+                <div className="space-y-6">
+                  {/* Documentos do Cliente */}
+                  <div className="bg-gray-50 rounded-xl p-6">
+                    <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <FolderOpen className="w-5 h-5 text-gray-600" />
+                      Documentos Enviados pelo Cliente ({c.documentos.length})
+                    </h3>
+                    {c.documentos.length > 0 ? (
+                      <div className="space-y-2">
+                        {c.documentos.map((doc, i) => (
+                          <div key={i} className="flex items-center justify-between bg-white border rounded-lg px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <FileText className="w-5 h-5 text-red-600" />
+                              <span className="text-sm font-medium">{doc}</span>
+                            </div>
+                            <a 
+                              href={`${API_URL}/api/cadastros/${c.id}/uploads/${encodeURIComponent(doc)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                            >
+                              <Download className="w-4 h-4" />
+                              Baixar
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-gray-500 text-sm">Nenhum documento enviado pelo cliente</p>
+                    )}
+                  </div>
+
+                  {/* Documentos Gerados */}
+                  {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao) && (
+                    <div className="bg-purple-50 rounded-xl p-6">
+                      <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <FileCheck className="w-5 h-5 text-purple-600" />
+                        Documentos Gerados
+                      </h3>
+                      <div className="flex flex-wrap gap-3">
+                        {c.arquivos_gerados.contrato && (
+                          <a
+                            href={`${API_URL}/api/cadastros/${c.id}/download/contrato`}
+                            className="flex items-center gap-2 bg-white border border-purple-200 text-purple-700 font-medium px-4 py-2 rounded-lg hover:bg-purple-100"
+                          >
+                            <Download className="w-4 h-4" />
+                            Baixar Contrato
+                          </a>
+                        )}
+                        {c.arquivos_gerados.procuracao && (
+                          <a
+                            href={`${API_URL}/api/cadastros/${c.id}/download/procuracao`}
+                            className="flex items-center gap-2 bg-white border border-purple-200 text-purple-700 font-medium px-4 py-2 rounded-lg hover:bg-purple-100"
+                          >
+                            <Download className="w-4 h-4" />
+                            Baixar Procuração
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Documentos Assinados */}
+                  {c.documentos_assinados && c.documentos_assinados.length > 0 && (
+                    <div className="bg-emerald-50 rounded-xl p-6">
+                      <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <CheckCircle className="w-5 h-5 text-emerald-600" />
+                        Documentos Assinados Recebidos
+                      </h3>
+                      <div className="space-y-2">
+                        {c.documentos_assinados.map((doc, i) => (
+                          <div key={i} className="flex items-center justify-between bg-white border border-emerald-200 rounded-lg px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <FileCheck className="w-5 h-5 text-emerald-600" />
+                              <span className="text-sm font-medium">{doc}</span>
+                            </div>
+                            <a 
+                              href={`${API_URL}/api/cadastros/${c.id}/assinados/${encodeURIComponent(doc)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-sm font-medium"
+                            >
+                              <Download className="w-4 h-4" />
+                              Baixar
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Tab: Mensagens */}
+              {activeTab === 'mensagens' && (
+                <div className="space-y-4">
+                  <h3 className="font-semibold text-gray-800">Mensagens com o Cliente</h3>
+                  
+                  <div className="bg-gray-50 rounded-xl p-4 h-96 overflow-y-auto">
+                    {mensagens.length === 0 ? (
+                      <div className="flex items-center justify-center h-full text-gray-500">
+                        Nenhuma mensagem ainda
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {mensagens.map((msg) => (
+                          <div 
+                            key={msg.id} 
+                            className={`flex ${msg.remetente === 'escritorio' ? 'justify-end' : 'justify-start'}`}
+                          >
+                            <div className={`max-w-[80%] rounded-lg p-3 ${
+                              msg.remetente === 'escritorio' 
+                                ? 'bg-red-800 text-white' 
+                                : 'bg-white border'
+                            }`}>
+                              <p className="text-sm">{msg.texto}</p>
+                              <p className={`text-xs mt-1 ${
+                                msg.remetente === 'escritorio' ? 'text-red-200' : 'text-gray-400'
+                              }`}>
+                                {new Date(msg.criado_em).toLocaleString('pt-BR')}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      value={novaMensagem}
+                      onChange={(e) => setNovaMensagem(e.target.value)}
+                      placeholder="Digite sua mensagem..."
+                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+                      onKeyPress={(e) => e.key === 'Enter' && handleEnviarMensagem()}
+                    />
+                    <button
+                      onClick={handleEnviarMensagem}
+                      disabled={enviandoMensagem || !novaMensagem.trim()}
+                      className="bg-red-800 hover:bg-red-900 text-white font-medium px-6 py-2 rounded-lg disabled:opacity-50 flex items-center gap-2"
+                    >
+                      <Send className="w-4 h-4" />
+                      Enviar
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {showEmailModal && (
-          <EmailModal
-            cadastro={c}
+        {/* Modais */}
+        {showProcessoModal && (
+          <ProcessoModal
+            cadastroId={c.id}
+            processo={processoSelecionado}
             user={user}
-            onClose={() => setShowEmailModal(false)}
-            onSuccess={handleEmailEnviado}
+            onClose={() => { setShowProcessoModal(false); setProcessoSelecionado(null); }}
+            onSave={() => carregarDadosCliente(c.id)}
+          />
+        )}
+
+        {showContratoModal && (
+          <ContratoModal
+            cadastroId={c.id}
+            processos={processos}
+            contrato={contratoSelecionado}
+            user={user}
+            onClose={() => { setShowContratoModal(false); setContratoSelecionado(null); }}
+            onSave={() => carregarDadosCliente(c.id)}
+          />
+        )}
+
+        {showAndamentoModal && processoParaAndamento && (
+          <AndamentoModal
+            processoId={processoParaAndamento}
+            user={user}
+            onClose={() => { setShowAndamentoModal(false); setProcessoParaAndamento(null); }}
+            onSave={() => carregarAndamentos(processoParaAndamento)}
           />
         )}
       </div>
@@ -1692,51 +2296,46 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   // Lista de cadastros
   return (
     <div className="min-h-screen bg-gray-100">
-      <div className="bg-white border-b shadow-sm">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-gray-800 to-gray-900 text-white shadow-lg">
         <div className="max-w-6xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
-              <Logo />
-              <span className="text-gray-300">|</span>
-              <span className="text-gray-600 font-medium">Painel Administrativo</span>
+              <Logo size="small" />
+              <div className="hidden md:block">
+                <h1 className="text-xl font-bold">Painel Administrativo</h1>
+                <p className="text-gray-300 text-sm">Gestão de Clientes</p>
+              </div>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600 hidden sm:block">
-                Olá, <strong>{user.nome}</strong>
-                {user.is_admin && <span className="text-red-600 ml-1">(Admin)</span>}
-              </span>
-              
-              {/* Menu de configurações */}
-              <div className="relative group">
-                <button className="p-2 text-gray-500 hover:text-gray-700 rounded-lg hover:bg-gray-100">
-                  <Settings className="w-5 h-5" />
+            <div className="flex items-center gap-4">
+              <div className="text-right hidden sm:block">
+                <p className="font-semibold">{user.nome}</p>
+                <p className="text-gray-300 text-sm">{user.email}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                {user.is_admin && (
+                  <button
+                    onClick={() => setShowUsuariosModal(true)}
+                    className="p-2 bg-white/10 hover:bg-white/20 rounded-lg"
+                    title="Gerenciar Usuários"
+                  >
+                    <Users className="w-5 h-5" />
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowAlterarSenhaModal(true)}
+                  className="p-2 bg-white/10 hover:bg-white/20 rounded-lg"
+                  title="Alterar Senha"
+                >
+                  <Key className="w-5 h-5" />
                 </button>
-                <div className="absolute right-0 top-full mt-1 w-48 bg-white rounded-lg shadow-lg border opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50">
-                  <button
-                    onClick={() => setShowAlterarSenhaModal(true)}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                  >
-                    <Key className="w-4 h-4" />
-                    Alterar Senha
-                  </button>
-                  {user.is_admin && (
-                    <button
-                      onClick={() => setShowUsuariosModal(true)}
-                      className="w-full flex items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
-                    >
-                      <Users className="w-4 h-4" />
-                      Gerenciar Usuários
-                    </button>
-                  )}
-                  <hr className="my-1" />
-                  <button
-                    onClick={onLogout}
-                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50"
-                  >
-                    <LogOut className="w-4 h-4" />
-                    Sair
-                  </button>
-                </div>
+                <button
+                  onClick={onLogout}
+                  className="p-2 bg-white/10 hover:bg-white/20 rounded-lg"
+                  title="Sair"
+                >
+                  <LogOut className="w-5 h-5" />
+                </button>
               </div>
             </div>
           </div>
@@ -1796,8 +2395,8 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                 <CheckCircle className="w-5 h-5 text-green-600" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{cadastros.filter(c => c.status === 'enviado').length}</p>
-                <p className="text-gray-500 text-sm">Enviados</p>
+                <p className="text-2xl font-bold">{cadastros.filter(c => c.status === 'enviado' || c.status === 'assinado').length}</p>
+                <p className="text-gray-500 text-sm">Concluídos</p>
               </div>
             </div>
           </div>
