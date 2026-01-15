@@ -3255,6 +3255,186 @@ async def portal_cliente_meus_dados(cliente: dict = Depends(verificar_token_clie
         logger.error(f"Erro em meus-dados: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/cliente/meus-processos")
+async def portal_cliente_meus_processos(cliente: dict = Depends(verificar_token_cliente)):
+    """Retorna todos os processos do cliente logado."""
+    logger.info(f"MEUS-PROCESSOS: cadastro_id={cliente['cadastro_id']}")
+    
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, cadastro_id, numero_processo, tipo_acao, vara_tribunal,
+                   fase, reu, valor_causa, data_distribuicao, status, observacoes
+            FROM processos
+            WHERE cadastro_id = %s
+            ORDER BY criado_em DESC
+        """, (cliente["cadastro_id"],))
+        
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        processos = []
+        for row in rows:
+            processos.append({
+                "id": row["id"],
+                "cadastro_id": row["cadastro_id"],
+                "numero_processo": row["numero_processo"],
+                "tipo_acao": row["tipo_acao"],
+                "vara_tribunal": row["vara_tribunal"],
+                "fase": row["fase"],
+                "reu": row["reu"],
+                "valor_causa": float(row["valor_causa"]) if row["valor_causa"] else 0,
+                "data_distribuicao": row["data_distribuicao"].isoformat() if row["data_distribuicao"] else None,
+                "status": row["status"],
+                "observacoes": row["observacoes"]
+            })
+        
+        logger.info(f"MEUS-PROCESSOS: encontrados {len(processos)} processos")
+        return {"processos": processos}
+    
+    except Exception as e:
+        logger.error(f"Erro ao buscar processos: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar processos")
+
+
+@app.get("/api/cliente/processo/{processo_id}/andamentos")
+async def portal_cliente_andamentos_processo(processo_id: int, cliente: dict = Depends(verificar_token_cliente)):
+    """Retorna andamentos de um processo (apenas visíveis ao cliente)."""
+    logger.info(f"ANDAMENTOS: processo_id={processo_id}, cadastro_id={cliente['cadastro_id']}")
+    
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Verificar se o processo pertence ao cliente
+        cur.execute("""
+            SELECT id FROM processos 
+            WHERE id = %s AND cadastro_id = %s
+        """, (processo_id, cliente["cadastro_id"]))
+        
+        if not cur.fetchone():
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Processo não encontrado")
+        
+        # Buscar andamentos visíveis ao cliente
+        cur.execute("""
+            SELECT id, processo_id, data, descricao
+            FROM processo_andamentos
+            WHERE processo_id = %s AND visivel_cliente = true
+            ORDER BY data DESC, criado_em DESC
+        """, (processo_id,))
+        
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        andamentos = []
+        for row in rows:
+            andamentos.append({
+                "id": row["id"],
+                "processo_id": row["processo_id"],
+                "data": row["data"].isoformat() if row["data"] else None,
+                "descricao": row["descricao"]
+            })
+        
+        logger.info(f"ANDAMENTOS: encontrados {len(andamentos)} andamentos")
+        return {"andamentos": andamentos}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar andamentos: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar andamentos")
+
+
+@app.get("/api/cliente/meus-contratos")
+async def portal_cliente_meus_contratos(cliente: dict = Depends(verificar_token_cliente)):
+    """Retorna todos os contratos de honorários do cliente."""
+    logger.info(f"MEUS-CONTRATOS: cadastro_id={cliente['cadastro_id']}")
+    
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Buscar contratos
+        cur.execute("""
+            SELECT c.id, c.cadastro_id, c.processo_id, c.tipo, c.descricao,
+                   c.valor_total, c.num_parcelas, c.valor_mensal, c.dia_vencimento,
+                   c.percentual_exito, c.data_inicio, c.status, c.observacoes,
+                   p.numero_processo
+            FROM contratos_honorarios c
+            LEFT JOIN processos p ON c.processo_id = p.id
+            WHERE c.cadastro_id = %s
+            ORDER BY c.criado_em DESC
+        """, (cliente["cadastro_id"],))
+        
+        rows = cur.fetchall()
+        
+        contratos = []
+        for row in rows:
+            contrato_id = row["id"]
+            
+            # Buscar parcelas do contrato
+            cur.execute("""
+                SELECT id, contrato_id, numero, valor, vencimento, status, data_pagamento
+                FROM parcelas
+                WHERE contrato_id = %s
+                ORDER BY numero
+            """, (contrato_id,))
+            
+            parcelas_rows = cur.fetchall()
+            parcelas = []
+            for p in parcelas_rows:
+                parcelas.append({
+                    "id": p["id"],
+                    "contrato_id": p["contrato_id"],
+                    "numero": p["numero"],
+                    "valor": float(p["valor"]) if p["valor"] else 0,
+                    "vencimento": p["vencimento"].isoformat() if p["vencimento"] else None,
+                    "status": p["status"],
+                    "data_pagamento": p["data_pagamento"].isoformat() if p["data_pagamento"] else None
+                })
+            
+            contratos.append({
+                "id": contrato_id,
+                "cadastro_id": row["cadastro_id"],
+                "processo_id": row["processo_id"],
+                "tipo": row["tipo"],
+                "descricao": row["descricao"],
+                "valor_total": float(row["valor_total"]) if row["valor_total"] else 0,
+                "num_parcelas": row["num_parcelas"] or 1,
+                "valor_mensal": float(row["valor_mensal"]) if row["valor_mensal"] else 0,
+                "dia_vencimento": row["dia_vencimento"],
+                "percentual_exito": float(row["percentual_exito"]) if row["percentual_exito"] else 0,
+                "data_inicio": row["data_inicio"].isoformat() if row["data_inicio"] else None,
+                "status": row["status"],
+                "observacoes": row["observacoes"],
+                "processo_numero": row["numero_processo"],
+                "parcelas": parcelas
+            })
+        
+        cur.close()
+        conn.close()
+        
+        logger.info(f"MEUS-CONTRATOS: encontrados {len(contratos)} contratos")
+        return {"contratos": contratos}
+    
+    except Exception as e:
+        logger.error(f"Erro ao buscar contratos: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar contratos")        
+
 @app.get("/api/cliente/andamentos")
 async def portal_cliente_andamentos(cliente: dict = Depends(verificar_token_cliente)):
     """Lista andamentos visíveis para o cliente."""
