@@ -23,6 +23,7 @@ import httpx
 import base64
 import secrets
 from io import BytesIO
+from dateutil.relativedelta import relativedelta
 
 # Configurar logging detalhado
 logging.basicConfig(level=logging.INFO)
@@ -350,7 +351,7 @@ def init_db():
             )
         """)
         
-        # Tabela de mensagens
+# Tabela de mensagens
         cur.execute("""
             CREATE TABLE IF NOT EXISTS mensagens (
                 id SERIAL PRIMARY KEY,
@@ -359,6 +360,89 @@ def init_db():
                 texto TEXT NOT NULL,
                 lida BOOLEAN DEFAULT FALSE,
                 criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # ========== MÚLTIPLOS PROCESSOS E HONORÁRIOS ==========
+        
+        # Tabela de processos (múltiplos por cliente)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS processos (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                numero_processo VARCHAR(50),
+                tipo_acao VARCHAR(100),
+                vara_tribunal VARCHAR(255),
+                fase VARCHAR(100) DEFAULT 'Inicial',
+                reu TEXT,
+                valor_causa DECIMAL(15,2),
+                data_distribuicao DATE,
+                status VARCHAR(20) DEFAULT 'ativo',
+                observacoes TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Tabela de andamentos (vinculado a processo específico)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS processo_andamentos (
+                id SERIAL PRIMARY KEY,
+                processo_id INTEGER REFERENCES processos(id) ON DELETE CASCADE,
+                data DATE NOT NULL,
+                descricao TEXT NOT NULL,
+                visivel_cliente BOOLEAN DEFAULT TRUE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Tabela de contratos de honorários
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS contratos_honorarios (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                processo_id INTEGER REFERENCES processos(id) ON DELETE SET NULL,
+                tipo VARCHAR(20) NOT NULL,
+                descricao VARCHAR(255),
+                valor_total DECIMAL(15,2),
+                num_parcelas INTEGER DEFAULT 1,
+                valor_mensal DECIMAL(15,2),
+                dia_vencimento INTEGER DEFAULT 10,
+                percentual_exito DECIMAL(5,2),
+                data_inicio DATE,
+                status VARCHAR(20) DEFAULT 'ativo',
+                observacoes TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Tabela de parcelas
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS parcelas (
+                id SERIAL PRIMARY KEY,
+                contrato_id INTEGER REFERENCES contratos_honorarios(id) ON DELETE CASCADE,
+                numero INTEGER NOT NULL,
+                valor DECIMAL(15,2) NOT NULL,
+                vencimento DATE NOT NULL,
+                status VARCHAR(20) DEFAULT 'pendente',
+                data_pagamento DATE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Tabela de comprovantes
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS comprovantes (
+                id SERIAL PRIMARY KEY,
+                parcela_id INTEGER REFERENCES parcelas(id) ON DELETE CASCADE,
+                arquivo_nome VARCHAR(255),
+                arquivo_path VARCHAR(500),
+                enviado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                status VARCHAR(20) DEFAULT 'pendente',
+                verificado_em TIMESTAMP,
+                verificado_por VARCHAR(255),
+                observacoes TEXT
             )
         """)
         
@@ -2061,6 +2145,706 @@ def registrar_acesso_cliente(cadastro_id: str):
 # ============================================
 # PORTAL DO CLIENTE - FUNÇÕES PROCESSO
 # ============================================
+# ============================================
+# FUNÇÕES CRUD - PROCESSOS (MÚLTIPLOS)
+# ============================================
+
+def criar_processo(cadastro_id: str, dados: dict) -> int:
+    """Cria um novo processo para o cliente."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO processos (cadastro_id, numero_processo, tipo_acao, vara_tribunal, 
+                                   fase, reu, valor_causa, data_distribuicao, observacoes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            cadastro_id,
+            dados.get("numero_processo"),
+            dados.get("tipo_acao"),
+            dados.get("vara_tribunal"),
+            dados.get("fase", "Inicial"),
+            dados.get("reu"),
+            dados.get("valor_causa"),
+            dados.get("data_distribuicao") if dados.get("data_distribuicao") else None,
+            dados.get("observacoes")
+        ))
+        processo_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return processo_id
+    except Exception as e:
+        logger.error(f"Erro ao criar processo: {e}")
+        return None
+
+def listar_processos(cadastro_id: str) -> list:
+    """Lista todos os processos de um cliente."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT * FROM processos 
+            WHERE cadastro_id = %s 
+            ORDER BY criado_em DESC
+        """, (cadastro_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        processos = []
+        for row in rows:
+            processos.append({
+                "id": row["id"],
+                "cadastro_id": row["cadastro_id"],
+                "numero_processo": row["numero_processo"] or "",
+                "tipo_acao": row["tipo_acao"] or "",
+                "vara_tribunal": row["vara_tribunal"] or "",
+                "fase": row["fase"] or "Inicial",
+                "reu": row["reu"] or "",
+                "valor_causa": float(row["valor_causa"]) if row["valor_causa"] else 0,
+                "data_distribuicao": row["data_distribuicao"].isoformat() if row["data_distribuicao"] else None,
+                "status": row["status"] or "ativo",
+                "observacoes": row["observacoes"] or ""
+            })
+        return processos
+    except Exception as e:
+        logger.error(f"Erro ao listar processos: {e}")
+        return []
+
+def buscar_processo(processo_id: int) -> dict:
+    """Busca um processo específico."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM processos WHERE id = %s", (processo_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if row:
+            return {
+                "id": row["id"],
+                "cadastro_id": row["cadastro_id"],
+                "numero_processo": row["numero_processo"] or "",
+                "tipo_acao": row["tipo_acao"] or "",
+                "vara_tribunal": row["vara_tribunal"] or "",
+                "fase": row["fase"] or "Inicial",
+                "reu": row["reu"] or "",
+                "valor_causa": float(row["valor_causa"]) if row["valor_causa"] else 0,
+                "data_distribuicao": row["data_distribuicao"].isoformat() if row["data_distribuicao"] else None,
+                "status": row["status"] or "ativo",
+                "observacoes": row["observacoes"] or ""
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar processo: {e}")
+        return None
+
+def atualizar_processo(processo_id: int, dados: dict) -> bool:
+    """Atualiza um processo existente."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE processos SET
+                numero_processo = %s,
+                tipo_acao = %s,
+                vara_tribunal = %s,
+                fase = %s,
+                reu = %s,
+                valor_causa = %s,
+                data_distribuicao = %s,
+                status = %s,
+                observacoes = %s,
+                atualizado_em = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (
+            dados.get("numero_processo"),
+            dados.get("tipo_acao"),
+            dados.get("vara_tribunal"),
+            dados.get("fase"),
+            dados.get("reu"),
+            dados.get("valor_causa"),
+            dados.get("data_distribuicao") if dados.get("data_distribuicao") else None,
+            dados.get("status", "ativo"),
+            dados.get("observacoes"),
+            processo_id
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao atualizar processo: {e}")
+        return False
+
+def deletar_processo(processo_id: int) -> bool:
+    """Deleta um processo."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM processos WHERE id = %s", (processo_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar processo: {e}")
+        return False
+
+# ============================================
+# FUNÇÕES CRUD - ANDAMENTOS DE PROCESSO
+# ============================================
+
+def criar_andamento_processo(processo_id: int, data: str, descricao: str, visivel: bool = True) -> int:
+    """Cria um andamento para um processo."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO processo_andamentos (processo_id, data, descricao, visivel_cliente)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id
+        """, (processo_id, data, descricao, visivel))
+        andamento_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return andamento_id
+    except Exception as e:
+        logger.error(f"Erro ao criar andamento processo: {e}")
+        return None
+
+def listar_andamentos_processo(processo_id: int, apenas_visiveis: bool = False) -> list:
+    """Lista andamentos de um processo."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        if apenas_visiveis:
+            cur.execute("""
+                SELECT * FROM processo_andamentos 
+                WHERE processo_id = %s AND visivel_cliente = TRUE
+                ORDER BY data DESC, criado_em DESC
+            """, (processo_id,))
+        else:
+            cur.execute("""
+                SELECT * FROM processo_andamentos 
+                WHERE processo_id = %s 
+                ORDER BY data DESC, criado_em DESC
+            """, (processo_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        return [{
+            "id": row["id"],
+            "processo_id": row["processo_id"],
+            "data": row["data"].isoformat() if row["data"] else None,
+            "descricao": row["descricao"],
+            "visivel_cliente": row["visivel_cliente"]
+        } for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar andamentos processo: {e}")
+        return []
+
+def deletar_andamento_processo(andamento_id: int) -> bool:
+    """Deleta um andamento de processo."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM processo_andamentos WHERE id = %s", (andamento_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar andamento processo: {e}")
+        return False
+
+# ============================================
+# FUNÇÕES CRUD - CONTRATOS DE HONORÁRIOS
+# ============================================
+
+def criar_contrato_honorarios(cadastro_id: str, dados: dict) -> int:
+    """Cria um contrato de honorários."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO contratos_honorarios (
+                cadastro_id, processo_id, tipo, descricao, valor_total, 
+                num_parcelas, valor_mensal, dia_vencimento, percentual_exito,
+                data_inicio, observacoes
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            cadastro_id,
+            dados.get("processo_id"),
+            dados.get("tipo"),
+            dados.get("descricao"),
+            dados.get("valor_total"),
+            dados.get("num_parcelas", 1),
+            dados.get("valor_mensal"),
+            dados.get("dia_vencimento", 10),
+            dados.get("percentual_exito"),
+            dados.get("data_inicio") if dados.get("data_inicio") else None,
+            dados.get("observacoes")
+        ))
+        contrato_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        # Gerar parcelas automaticamente se for fixo ou parcelado
+        if dados.get("tipo") in ["fixo", "parcelado"]:
+            gerar_parcelas_contrato(contrato_id, dados)
+        
+        return contrato_id
+    except Exception as e:
+        logger.error(f"Erro ao criar contrato: {e}")
+        return None
+
+def gerar_parcelas_contrato(contrato_id: int, dados: dict):
+    """Gera parcelas para um contrato."""
+    from datetime import date
+    from dateutil.relativedelta import relativedelta
+    
+    conn = get_db()
+    if not conn:
+        return
+    
+    try:
+        cur = conn.cursor()
+        
+        valor_total = float(dados.get("valor_total", 0))
+        num_parcelas = int(dados.get("num_parcelas", 1))
+        valor_parcela = valor_total / num_parcelas
+        dia_vencimento = int(dados.get("dia_vencimento", 10))
+        
+        data_inicio = dados.get("data_inicio")
+        if data_inicio:
+            if isinstance(data_inicio, str):
+                data_base = date.fromisoformat(data_inicio)
+            else:
+                data_base = data_inicio
+        else:
+            data_base = date.today()
+        
+        for i in range(num_parcelas):
+            vencimento = data_base + relativedelta(months=i)
+            try:
+                vencimento = vencimento.replace(day=dia_vencimento)
+            except ValueError:
+                # Se o dia não existe no mês, usa o último dia
+                next_month = vencimento + relativedelta(months=1, day=1)
+                vencimento = next_month - relativedelta(days=1)
+            
+            cur.execute("""
+                INSERT INTO parcelas (contrato_id, numero, valor, vencimento)
+                VALUES (%s, %s, %s, %s)
+            """, (contrato_id, i + 1, valor_parcela, vencimento))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao gerar parcelas: {e}")
+
+def listar_contratos(cadastro_id: str) -> list:
+    """Lista contratos de um cliente."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT c.*, p.numero_processo as processo_numero
+            FROM contratos_honorarios c
+            LEFT JOIN processos p ON c.processo_id = p.id
+            WHERE c.cadastro_id = %s
+            ORDER BY c.criado_em DESC
+        """, (cadastro_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        contratos = []
+        for row in rows:
+            contrato = {
+                "id": row["id"],
+                "cadastro_id": row["cadastro_id"],
+                "processo_id": row["processo_id"],
+                "processo_numero": row["processo_numero"] or "",
+                "tipo": row["tipo"],
+                "descricao": row["descricao"] or "",
+                "valor_total": float(row["valor_total"]) if row["valor_total"] else 0,
+                "num_parcelas": row["num_parcelas"] or 1,
+                "valor_mensal": float(row["valor_mensal"]) if row["valor_mensal"] else 0,
+                "dia_vencimento": row["dia_vencimento"] or 10,
+                "percentual_exito": float(row["percentual_exito"]) if row["percentual_exito"] else 0,
+                "data_inicio": row["data_inicio"].isoformat() if row["data_inicio"] else None,
+                "status": row["status"] or "ativo",
+                "observacoes": row["observacoes"] or ""
+            }
+            # Buscar parcelas
+            contrato["parcelas"] = listar_parcelas(row["id"])
+            contratos.append(contrato)
+        
+        return contratos
+    except Exception as e:
+        logger.error(f"Erro ao listar contratos: {e}")
+        return []
+
+def buscar_contrato(contrato_id: int) -> dict:
+    """Busca um contrato específico."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT c.*, p.numero_processo as processo_numero
+            FROM contratos_honorarios c
+            LEFT JOIN processos p ON c.processo_id = p.id
+            WHERE c.id = %s
+        """, (contrato_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if row:
+            contrato = {
+                "id": row["id"],
+                "cadastro_id": row["cadastro_id"],
+                "processo_id": row["processo_id"],
+                "processo_numero": row["processo_numero"] or "",
+                "tipo": row["tipo"],
+                "descricao": row["descricao"] or "",
+                "valor_total": float(row["valor_total"]) if row["valor_total"] else 0,
+                "num_parcelas": row["num_parcelas"] or 1,
+                "valor_mensal": float(row["valor_mensal"]) if row["valor_mensal"] else 0,
+                "dia_vencimento": row["dia_vencimento"] or 10,
+                "percentual_exito": float(row["percentual_exito"]) if row["percentual_exito"] else 0,
+                "data_inicio": row["data_inicio"].isoformat() if row["data_inicio"] else None,
+                "status": row["status"] or "ativo",
+                "observacoes": row["observacoes"] or ""
+            }
+            contrato["parcelas"] = listar_parcelas(row["id"])
+            return contrato
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar contrato: {e}")
+        return None
+
+def atualizar_contrato(contrato_id: int, dados: dict) -> bool:
+    """Atualiza um contrato."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE contratos_honorarios SET
+                processo_id = %s,
+                tipo = %s,
+                descricao = %s,
+                valor_total = %s,
+                num_parcelas = %s,
+                valor_mensal = %s,
+                dia_vencimento = %s,
+                percentual_exito = %s,
+                data_inicio = %s,
+                status = %s,
+                observacoes = %s,
+                atualizado_em = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (
+            dados.get("processo_id"),
+            dados.get("tipo"),
+            dados.get("descricao"),
+            dados.get("valor_total"),
+            dados.get("num_parcelas", 1),
+            dados.get("valor_mensal"),
+            dados.get("dia_vencimento", 10),
+            dados.get("percentual_exito"),
+            dados.get("data_inicio") if dados.get("data_inicio") else None,
+            dados.get("status", "ativo"),
+            dados.get("observacoes"),
+            contrato_id
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao atualizar contrato: {e}")
+        return False
+
+def deletar_contrato(contrato_id: int) -> bool:
+    """Deleta um contrato e suas parcelas."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM contratos_honorarios WHERE id = %s", (contrato_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar contrato: {e}")
+        return False
+
+# ============================================
+# FUNÇÕES CRUD - PARCELAS
+# ============================================
+
+def listar_parcelas(contrato_id: int) -> list:
+    """Lista parcelas de um contrato."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT p.*, 
+                   (SELECT COUNT(*) FROM comprovantes WHERE parcela_id = p.id) as tem_comprovante
+            FROM parcelas p
+            WHERE p.contrato_id = %s
+            ORDER BY p.numero
+        """, (contrato_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        return [{
+            "id": row["id"],
+            "contrato_id": row["contrato_id"],
+            "numero": row["numero"],
+            "valor": float(row["valor"]) if row["valor"] else 0,
+            "vencimento": row["vencimento"].isoformat() if row["vencimento"] else None,
+            "status": row["status"] or "pendente",
+            "data_pagamento": row["data_pagamento"].isoformat() if row["data_pagamento"] else None,
+            "tem_comprovante": row["tem_comprovante"] > 0
+        } for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar parcelas: {e}")
+        return []
+
+def atualizar_parcela(parcela_id: int, dados: dict) -> bool:
+    """Atualiza uma parcela."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE parcelas SET
+                valor = %s,
+                vencimento = %s,
+                status = %s,
+                data_pagamento = %s
+            WHERE id = %s
+        """, (
+            dados.get("valor"),
+            dados.get("vencimento"),
+            dados.get("status"),
+            dados.get("data_pagamento") if dados.get("data_pagamento") else None,
+            parcela_id
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao atualizar parcela: {e}")
+        return False
+
+def marcar_parcela_paga(parcela_id: int) -> bool:
+    """Marca uma parcela como paga."""
+    from datetime import date
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE parcelas SET status = 'pago', data_pagamento = %s WHERE id = %s
+        """, (date.today(), parcela_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao marcar parcela paga: {e}")
+        return False
+
+# ============================================
+# FUNÇÕES CRUD - COMPROVANTES
+# ============================================
+
+def criar_comprovante(parcela_id: int, arquivo_nome: str, arquivo_path: str) -> int:
+    """Cria um registro de comprovante."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO comprovantes (parcela_id, arquivo_nome, arquivo_path)
+            VALUES (%s, %s, %s)
+            RETURNING id
+        """, (parcela_id, arquivo_nome, arquivo_path))
+        comprovante_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return comprovante_id
+    except Exception as e:
+        logger.error(f"Erro ao criar comprovante: {e}")
+        return None
+
+def listar_comprovantes_pendentes() -> list:
+    """Lista todos os comprovantes pendentes de verificação."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT cp.*, p.numero, p.valor, p.vencimento,
+                   c.descricao as contrato_descricao, c.cadastro_id,
+                   ca.dados->>'nome' as cliente_nome
+            FROM comprovantes cp
+            JOIN parcelas p ON cp.parcela_id = p.id
+            JOIN contratos_honorarios c ON p.contrato_id = c.id
+            JOIN cadastros ca ON c.cadastro_id = ca.id
+            WHERE cp.status = 'pendente'
+            ORDER BY cp.enviado_em DESC
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        return [{
+            "id": row["id"],
+            "parcela_id": row["parcela_id"],
+            "arquivo_nome": row["arquivo_nome"],
+            "arquivo_path": row["arquivo_path"],
+            "enviado_em": row["enviado_em"].isoformat() if row["enviado_em"] else None,
+            "parcela_numero": row["numero"],
+            "parcela_valor": float(row["valor"]) if row["valor"] else 0,
+            "parcela_vencimento": row["vencimento"].isoformat() if row["vencimento"] else None,
+            "contrato_descricao": row["contrato_descricao"],
+            "cadastro_id": row["cadastro_id"],
+            "cliente_nome": row["cliente_nome"]
+        } for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar comprovantes: {e}")
+        return []
+
+def aprovar_comprovante(comprovante_id: int, admin_email: str) -> bool:
+    """Aprova um comprovante e marca a parcela como paga."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        
+        # Buscar parcela_id
+        cur.execute("SELECT parcela_id FROM comprovantes WHERE id = %s", (comprovante_id,))
+        row = cur.fetchone()
+        if not row:
+            return False
+        
+        parcela_id = row[0]
+        
+        # Atualizar comprovante
+        cur.execute("""
+            UPDATE comprovantes SET 
+                status = 'aprovado', 
+                verificado_em = CURRENT_TIMESTAMP,
+                verificado_por = %s
+            WHERE id = %s
+        """, (admin_email, comprovante_id))
+        
+        # Marcar parcela como paga
+        cur.execute("""
+            UPDATE parcelas SET status = 'pago', data_pagamento = CURRENT_DATE WHERE id = %s
+        """, (parcela_id,))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao aprovar comprovante: {e}")
+        return False
+
+def rejeitar_comprovante(comprovante_id: int, admin_email: str, motivo: str = None) -> bool:
+    """Rejeita um comprovante."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE comprovantes SET 
+                status = 'rejeitado', 
+                verificado_em = CURRENT_TIMESTAMP,
+                verificado_por = %s,
+                observacoes = %s
+            WHERE id = %s
+        """, (admin_email, motivo, comprovante_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao rejeitar comprovante: {e}")
+        return False
+
 
 def buscar_processo_info(cadastro_id: str) -> dict:
     """Busca informações do processo de um cliente."""
@@ -2756,6 +3540,369 @@ async def admin_mensagens_nao_lidas_cliente(
     """Conta mensagens não lidas de um cliente específico."""
     count = contar_mensagens_nao_lidas(cadastro_id, "cliente")
     return {"nao_lidas": count}
+
+# ============================================
+# ENDPOINTS - ADMIN PROCESSOS (MÚLTIPLOS)
+# ============================================
+
+@app.get("/api/admin/clientes/{cadastro_id}/processos")
+async def admin_listar_processos(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin lista todos os processos de um cliente."""
+    processos = listar_processos(cadastro_id)
+    return {"processos": processos}
+
+@app.post("/api/admin/clientes/{cadastro_id}/processos")
+async def admin_criar_processo(
+    cadastro_id: str,
+    dados: dict,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin cria novo processo para o cliente."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    processo_id = criar_processo(cadastro_id, dados)
+    if processo_id:
+        return {"success": True, "processo_id": processo_id}
+    
+    raise HTTPException(status_code=500, detail="Erro ao criar processo")
+
+@app.get("/api/admin/processos/{processo_id}")
+async def admin_obter_processo_por_id(
+    processo_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin obtém um processo específico."""
+    processo = buscar_processo(processo_id)
+    if not processo:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    return processo
+
+@app.put("/api/admin/processos/{processo_id}")
+async def admin_atualizar_processo(
+    processo_id: int,
+    dados: dict,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin atualiza um processo."""
+    if atualizar_processo(processo_id, dados):
+        return {"success": True, "message": "Processo atualizado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao atualizar processo")
+
+@app.delete("/api/admin/processos/{processo_id}")
+async def admin_deletar_processo(
+    processo_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin deleta um processo."""
+    if deletar_processo(processo_id):
+        return {"success": True, "message": "Processo deletado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao deletar processo")
+
+
+# ============================================
+# ENDPOINTS - ADMIN ANDAMENTOS DE PROCESSO
+# ============================================
+
+@app.get("/api/admin/processos/{processo_id}/andamentos")
+async def admin_listar_andamentos_processo(
+    processo_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin lista andamentos de um processo."""
+    andamentos = listar_andamentos_processo(processo_id, apenas_visiveis=False)
+    return {"andamentos": andamentos}
+
+@app.post("/api/admin/processos/{processo_id}/andamentos")
+async def admin_criar_andamento_processo(
+    processo_id: int,
+    dados: dict,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin cria andamento para um processo."""
+    andamento_id = criar_andamento_processo(
+        processo_id,
+        dados.get("data"),
+        dados.get("descricao"),
+        dados.get("visivel_cliente", True)
+    )
+    if andamento_id:
+        return {"success": True, "andamento_id": andamento_id}
+    
+    raise HTTPException(status_code=500, detail="Erro ao criar andamento")
+
+@app.delete("/api/admin/processo-andamentos/{andamento_id}")
+async def admin_deletar_andamento_processo(
+    andamento_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin deleta um andamento de processo."""
+    if deletar_andamento_processo(andamento_id):
+        return {"success": True, "message": "Andamento deletado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao deletar andamento")
+
+
+# ============================================
+# ENDPOINTS - ADMIN CONTRATOS DE HONORÁRIOS
+# ============================================
+
+@app.get("/api/admin/clientes/{cadastro_id}/contratos")
+async def admin_listar_contratos(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin lista contratos de um cliente."""
+    contratos = listar_contratos(cadastro_id)
+    return {"contratos": contratos}
+
+@app.post("/api/admin/clientes/{cadastro_id}/contratos")
+async def admin_criar_contrato(
+    cadastro_id: str,
+    dados: dict,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin cria novo contrato de honorários."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    contrato_id = criar_contrato_honorarios(cadastro_id, dados)
+    if contrato_id:
+        return {"success": True, "contrato_id": contrato_id}
+    
+    raise HTTPException(status_code=500, detail="Erro ao criar contrato")
+
+@app.get("/api/admin/contratos/{contrato_id}")
+async def admin_obter_contrato(
+    contrato_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin obtém um contrato específico."""
+    contrato = buscar_contrato(contrato_id)
+    if not contrato:
+        raise HTTPException(status_code=404, detail="Contrato não encontrado")
+    return contrato
+
+@app.put("/api/admin/contratos/{contrato_id}")
+async def admin_atualizar_contrato(
+    contrato_id: int,
+    dados: dict,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin atualiza um contrato."""
+    if atualizar_contrato(contrato_id, dados):
+        return {"success": True, "message": "Contrato atualizado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao atualizar contrato")
+
+@app.delete("/api/admin/contratos/{contrato_id}")
+async def admin_deletar_contrato(
+    contrato_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin deleta um contrato."""
+    if deletar_contrato(contrato_id):
+        return {"success": True, "message": "Contrato deletado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao deletar contrato")
+
+
+# ============================================
+# ENDPOINTS - ADMIN PARCELAS
+# ============================================
+
+@app.put("/api/admin/parcelas/{parcela_id}")
+async def admin_atualizar_parcela(
+    parcela_id: int,
+    dados: dict,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin atualiza uma parcela."""
+    if atualizar_parcela(parcela_id, dados):
+        return {"success": True, "message": "Parcela atualizada"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao atualizar parcela")
+
+@app.post("/api/admin/parcelas/{parcela_id}/marcar-pago")
+async def admin_marcar_parcela_paga(
+    parcela_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin marca uma parcela como paga."""
+    if marcar_parcela_paga(parcela_id):
+        return {"success": True, "message": "Parcela marcada como paga"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao marcar parcela")
+
+
+# ============================================
+# ENDPOINTS - ADMIN COMPROVANTES
+# ============================================
+
+@app.get("/api/admin/comprovantes/pendentes")
+async def admin_listar_comprovantes_pendentes(
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin lista comprovantes pendentes de verificação."""
+    comprovantes = listar_comprovantes_pendentes()
+    return {"comprovantes": comprovantes}
+
+@app.post("/api/admin/comprovantes/{comprovante_id}/aprovar")
+async def admin_aprovar_comprovante(
+    comprovante_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin aprova um comprovante e marca parcela como paga."""
+    if aprovar_comprovante(comprovante_id, usuario["email"]):
+        return {"success": True, "message": "Comprovante aprovado e parcela marcada como paga"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao aprovar comprovante")
+
+@app.post("/api/admin/comprovantes/{comprovante_id}/rejeitar")
+async def admin_rejeitar_comprovante(
+    comprovante_id: int,
+    dados: dict,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin rejeita um comprovante."""
+    if rejeitar_comprovante(comprovante_id, usuario["email"], dados.get("motivo")):
+        return {"success": True, "message": "Comprovante rejeitado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao rejeitar comprovante")
+
+@app.get("/api/admin/comprovantes/{comprovante_id}/download")
+async def admin_download_comprovante(
+    comprovante_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin baixa um comprovante."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT arquivo_nome, arquivo_path FROM comprovantes WHERE id = %s", (comprovante_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Comprovante não encontrado")
+        
+        if not os.path.exists(row["arquivo_path"]):
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+        
+        return FileResponse(
+            row["arquivo_path"],
+            filename=row["arquivo_nome"],
+            media_type="application/octet-stream"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# ENDPOINTS - PORTAL CLIENTE (PROCESSOS E HONORÁRIOS)
+# ============================================
+
+@app.get("/api/cliente/meus-processos")
+async def portal_cliente_meus_processos(cliente: dict = Depends(verificar_token_cliente)):
+    """Cliente lista seus processos."""
+    processos = listar_processos(cliente["cadastro_id"])
+    
+    # Para cada processo, buscar andamentos visíveis
+    for processo in processos:
+        processo["andamentos"] = listar_andamentos_processo(processo["id"], apenas_visiveis=True)
+    
+    return {"processos": processos}
+
+@app.get("/api/cliente/processo/{processo_id}/andamentos")
+async def portal_cliente_andamentos_processo(
+    processo_id: int,
+    cliente: dict = Depends(verificar_token_cliente)
+):
+    """Cliente visualiza andamentos de um processo."""
+    processo = buscar_processo(processo_id)
+    if not processo or processo["cadastro_id"] != cliente["cadastro_id"]:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    andamentos = listar_andamentos_processo(processo_id, apenas_visiveis=True)
+    return {"andamentos": andamentos}
+
+@app.get("/api/cliente/meus-contratos")
+async def portal_cliente_meus_contratos(cliente: dict = Depends(verificar_token_cliente)):
+    """Cliente lista seus contratos e parcelas."""
+    contratos = listar_contratos(cliente["cadastro_id"])
+    return {"contratos": contratos}
+
+@app.post("/api/cliente/parcelas/{parcela_id}/comprovante")
+async def portal_cliente_enviar_comprovante(
+    parcela_id: int,
+    arquivo: UploadFile = File(...),
+    cliente: dict = Depends(verificar_token_cliente)
+):
+    """Cliente envia comprovante de pagamento."""
+    # Verificar se a parcela pertence ao cliente
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT p.*, c.cadastro_id 
+            FROM parcelas p
+            JOIN contratos_honorarios c ON p.contrato_id = c.id
+            WHERE p.id = %s
+        """, (parcela_id,))
+        parcela = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not parcela or parcela["cadastro_id"] != cliente["cadastro_id"]:
+            raise HTTPException(status_code=404, detail="Parcela não encontrada")
+        
+        if parcela["status"] == "pago":
+            raise HTTPException(status_code=400, detail="Parcela já está paga")
+        
+        # Salvar arquivo
+        comprovantes_dir = os.path.join(UPLOADS_DIR, "comprovantes", cliente["cadastro_id"])
+        os.makedirs(comprovantes_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        nome_arquivo = f"parcela_{parcela_id}_{timestamp}_{arquivo.filename}"
+        caminho_arquivo = os.path.join(comprovantes_dir, nome_arquivo)
+        
+        with open(caminho_arquivo, "wb") as f:
+            conteudo = await arquivo.read()
+            f.write(conteudo)
+        
+        # Criar registro do comprovante
+        comprovante_id = criar_comprovante(parcela_id, arquivo.filename, caminho_arquivo)
+        
+        if comprovante_id:
+            return {
+                "success": True,
+                "message": "Comprovante enviado! Aguarde verificação do escritório.",
+                "comprovante_id": comprovante_id
+            }
+        
+        raise HTTPException(status_code=500, detail="Erro ao salvar comprovante")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao enviar comprovante: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================
