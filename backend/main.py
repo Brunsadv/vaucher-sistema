@@ -4422,6 +4422,58 @@ async def admin_download_comprovante(
 # ENDPOINTS - ADMIN DOCUMENTOS (PARA CLIENTE)
 # ============================================
 
+@app.post("/api/admin/clientes/{cadastro_id}/enviar-documentos")
+async def admin_enviar_documentos(
+    cadastro_id: str,
+    arquivos: List[UploadFile] = File(...),
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin envia documentos para o cliente."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    # Criar diretório para documentos do admin
+    docs_dir = os.path.join(UPLOADS_DIR, "documentos_admin", cadastro_id)
+    os.makedirs(docs_dir, exist_ok=True)
+    
+    arquivos_salvos = []
+    
+    for arquivo in arquivos:
+        # Salvar arquivo
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        nome_arquivo = f"{timestamp}_{arquivo.filename}"
+        caminho_arquivo = os.path.join(docs_dir, nome_arquivo)
+        
+        with open(caminho_arquivo, "wb") as f:
+            conteudo = await arquivo.read()
+            f.write(conteudo)
+        
+        # Criar registro no banco
+        doc_id = criar_documento_admin(
+            cadastro_id=cadastro_id,
+            nome_arquivo=nome_arquivo,
+            nome_original=arquivo.filename,
+            arquivo_path=caminho_arquivo,
+            descricao="",
+            admin_email=usuario["email"]
+        )
+        
+        if doc_id:
+            arquivos_salvos.append({
+                "id": doc_id,
+                "nome": arquivo.filename
+            })
+    
+    if arquivos_salvos:
+        return {
+            "success": True,
+            "message": f"{len(arquivos_salvos)} documento(s) enviado(s)",
+            "arquivos": arquivos_salvos
+        }
+    
+    raise HTTPException(status_code=500, detail="Erro ao salvar documentos")
+
 @app.post("/api/admin/clientes/{cadastro_id}/documentos")
 async def admin_upload_documento(
     cadastro_id: str,
@@ -4429,7 +4481,7 @@ async def admin_upload_documento(
     descricao: str = Form(""),
     usuario: dict = Depends(verificar_admin)
 ):
-    """Admin envia documento para o cliente."""
+    """Admin envia documento para o cliente (endpoint alternativo)."""
     cadastro = buscar_cadastro(cadastro_id)
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
