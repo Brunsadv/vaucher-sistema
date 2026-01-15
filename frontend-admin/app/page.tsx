@@ -1321,7 +1321,6 @@ const EnviarEmailModal = ({
   }
 
   const handleEnviar = async () => {
-    // Verificar se há arquivos selecionados
     const temContrato = arquivosSelecionados.contrato && cadastro.arquivos_gerados?.contrato
     const temProcuracao = arquivosSelecionados.procuracao && cadastro.arquivos_gerados?.procuracao
     
@@ -1338,7 +1337,6 @@ const EnviarEmailModal = ({
       formData.append('assunto', assunto)
       formData.append('mensagem', mensagem)
       
-      // Buscar e anexar documentos gerados selecionados
       if (temContrato) {
         const response = await fetch(`${API_URL}/api/cadastros/${cadastro.id}/download/contrato`)
         if (response.ok) {
@@ -1355,7 +1353,6 @@ const EnviarEmailModal = ({
         }
       }
       
-      // Adicionar arquivos extras
       arquivosExtras.forEach(arquivo => {
         formData.append('arquivos', arquivo, arquivo.name)
       })
@@ -1394,14 +1391,12 @@ const EnviarEmailModal = ({
         </div>
 
         <div className="p-6 space-y-5">
-          {/* Destinatário */}
           <div className="bg-gray-50 rounded-lg p-4">
             <p className="text-sm text-gray-500 mb-1">Destinatário</p>
             <p className="font-medium">{cadastro.dados.nome}</p>
             <p className="text-gray-600">{cadastro.dados.email}</p>
           </div>
 
-          {/* Assunto */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Assunto do E-mail</label>
             <input
@@ -1412,26 +1407,20 @@ const EnviarEmailModal = ({
             />
           </div>
 
-          {/* Mensagem Personalizada */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Mensagem Adicional (opcional)
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Mensagem Adicional (opcional)</label>
             <textarea
               value={mensagem}
               onChange={(e) => setMensagem(e.target.value)}
               rows={3}
-              placeholder="Adicione uma mensagem personalizada que aparecerá no e-mail..."
+              placeholder="Adicione uma mensagem personalizada..."
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 resize-none"
             />
           </div>
 
-          {/* Documentos Gerados */}
           {temDocumentosGerados && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">
-                Documentos Gerados
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Documentos Gerados</label>
               <div className="space-y-2">
                 {cadastro.arquivos_gerados?.contrato && (
                   <label className="flex items-center gap-3 p-3 bg-purple-50 border border-purple-200 rounded-lg cursor-pointer hover:bg-purple-100">
@@ -1461,12 +1450,8 @@ const EnviarEmailModal = ({
             </div>
           )}
 
-          {/* Arquivos Extras */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Outros Arquivos (opcional)
-            </label>
-            
+            <label className="block text-sm font-medium text-gray-700 mb-2">Outros Arquivos (opcional)</label>
             <input
               type="file"
               ref={inputFileRef}
@@ -1474,7 +1459,6 @@ const EnviarEmailModal = ({
               multiple
               className="hidden"
             />
-            
             <button
               type="button"
               onClick={() => inputFileRef.current?.click()}
@@ -1483,7 +1467,6 @@ const EnviarEmailModal = ({
               <Upload className="w-5 h-5" />
               Adicionar Arquivos
             </button>
-
             {arquivosExtras.length > 0 && (
               <div className="mt-3 space-y-2">
                 {arquivosExtras.map((arquivo, index) => (
@@ -1492,10 +1475,7 @@ const EnviarEmailModal = ({
                       <Paperclip className="w-4 h-4 text-gray-500" />
                       <span className="text-sm">{arquivo.name}</span>
                     </div>
-                    <button
-                      onClick={() => removerArquivoExtra(index)}
-                      className="text-red-600 hover:text-red-800"
-                    >
+                    <button onClick={() => removerArquivoExtra(index)} className="text-red-600 hover:text-red-800">
                       <X className="w-4 h-4" />
                     </button>
                   </div>
@@ -1504,17 +1484,14 @@ const EnviarEmailModal = ({
             )}
           </div>
 
-          {/* Info sobre o link */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <p className="text-sm text-blue-800">
-              <strong>📤 Link automático:</strong> O cliente receberá um link para devolver os documentos assinados pelo portal ou por e-mail.
+              <strong>📤 Link automático:</strong> O cliente receberá um link para devolver os documentos assinados.
             </p>
           </div>
 
           {erro && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {erro}
-            </div>
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{erro}</div>
           )}
 
           <div className="flex gap-3 pt-2">
@@ -1544,93 +1521,6 @@ const EnviarEmailModal = ({
             </button>
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
-        onClose()
-      } else {
-        const data = await response.json()
-        setErro(data.detail || 'Erro ao salvar andamento')
-      }
-    } catch (err) {
-      setErro('Erro de conexão')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full">
-        <div className="p-6 border-b flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Calendar className="w-6 h-6 text-red-700" />
-            <h2 className="text-xl font-bold text-gray-800">Novo Andamento</h2>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
-            <X className="w-6 h-6" />
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
-            <input
-              type="date"
-              value={form.data}
-              onChange={(e) => setForm({ ...form, data: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
-            <textarea
-              value={form.descricao}
-              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-              rows={4}
-              placeholder="Descreva o andamento processual..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 resize-none"
-            />
-          </div>
-
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              id="visivel_cliente"
-              checked={form.visivel_cliente}
-              onChange={(e) => setForm({ ...form, visivel_cliente: e.target.checked })}
-              className="w-4 h-4 text-red-800 rounded"
-            />
-            <label htmlFor="visivel_cliente" className="text-sm text-gray-700">
-              Visível para o cliente no Portal
-            </label>
-          </div>
-
-          {erro && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-              {erro}
-            </div>
-          )}
-
-          <div className="flex gap-3 pt-4">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
-            >
-              {loading ? 'Salvando...' : 'Salvar'}
-            </button>
-          </div>
-        </form>
       </div>
     </div>
   )
@@ -2461,7 +2351,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
               {/* Tab: Documentos */}
               {activeTab === 'documentos' && (
                 <div className="space-y-6">
-                  {/* Ações de Documentos */}
+                  {/* Ações */}
                   <div className="flex flex-wrap gap-3">
                     {c.status === 'validado' && (
                       <button
@@ -2482,7 +2372,6 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                         )}
                       </button>
                     )}
-                    
                     {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao) && (
                       <button
                         onClick={() => setShowEnviarEmailModal(true)}
