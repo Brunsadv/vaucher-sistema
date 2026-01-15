@@ -2434,7 +2434,9 @@ async def portal_cliente_alterar_senha(
 @app.get("/api/cliente/meus-dados")
 async def portal_cliente_meus_dados(cliente: dict = Depends(verificar_token_cliente)):
     """Retorna dados pessoais do cliente logado."""
+    logger.info(f"Buscando dados do cliente: {cliente['cadastro_id']}")
     cadastro = buscar_cadastro(cliente["cadastro_id"])
+    logger.info(f"Cadastro encontrado: {cadastro is not None}")
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
