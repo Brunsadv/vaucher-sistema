@@ -446,6 +446,35 @@ def init_db():
             )
         """)
         
+        # ========== DOCUMENTOS ADMIN E EXTRAS ==========
+        
+        # Tabela de documentos enviados pelo admin para o cliente
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS documentos_admin (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                nome_arquivo VARCHAR(255) NOT NULL,
+                nome_original VARCHAR(255) NOT NULL,
+                arquivo_path VARCHAR(500) NOT NULL,
+                descricao VARCHAR(255),
+                enviado_por VARCHAR(255),
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Tabela de documentos extras enviados pelo cliente
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS documentos_extras (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                nome_arquivo VARCHAR(255) NOT NULL,
+                nome_original VARCHAR(255) NOT NULL,
+                arquivo_path VARCHAR(500) NOT NULL,
+                descricao VARCHAR(255),
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
         logger.info("Tabelas do Portal do Cliente verificadas/criadas!")
         
         conn.commit()
@@ -2909,6 +2938,192 @@ def rejeitar_comprovante(comprovante_id: int, admin_email: str, motivo: str = No
         return False
 
 
+# ============================================
+# FUNÇÕES DO BANCO - DOCUMENTOS ADMIN
+# ============================================
+
+def criar_documento_admin(cadastro_id: str, nome_arquivo: str, nome_original: str, arquivo_path: str, descricao: str, admin_email: str) -> int:
+    """Cria um registro de documento enviado pelo admin."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO documentos_admin (cadastro_id, nome_arquivo, nome_original, arquivo_path, descricao, enviado_por)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (cadastro_id, nome_arquivo, nome_original, arquivo_path, descricao, admin_email))
+        doc_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return doc_id
+    except Exception as e:
+        logger.error(f"Erro ao criar documento admin: {e}")
+        return None
+
+def listar_documentos_admin(cadastro_id: str) -> list:
+    """Lista documentos enviados pelo admin para um cliente."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, nome_arquivo, nome_original, descricao, enviado_por, criado_em
+            FROM documentos_admin
+            WHERE cadastro_id = %s
+            ORDER BY criado_em DESC
+        """, (cadastro_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar documentos admin: {e}")
+        return []
+
+def buscar_documento_admin(doc_id: int) -> dict:
+    """Busca um documento admin específico."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM documentos_admin WHERE id = %s", (doc_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar documento admin: {e}")
+        return None
+
+def deletar_documento_admin(doc_id: int) -> bool:
+    """Deleta um documento admin."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        # Buscar caminho do arquivo
+        cur.execute("SELECT arquivo_path FROM documentos_admin WHERE id = %s", (doc_id,))
+        row = cur.fetchone()
+        
+        if row and row["arquivo_path"]:
+            # Deletar arquivo físico
+            if os.path.exists(row["arquivo_path"]):
+                os.remove(row["arquivo_path"])
+        
+        # Deletar registro
+        cur.execute("DELETE FROM documentos_admin WHERE id = %s", (doc_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar documento admin: {e}")
+        return False
+
+
+# ============================================
+# FUNÇÕES DO BANCO - DOCUMENTOS EXTRAS (CLIENTE)
+# ============================================
+
+def criar_documento_extra(cadastro_id: str, nome_arquivo: str, nome_original: str, arquivo_path: str, descricao: str) -> int:
+    """Cria um registro de documento extra enviado pelo cliente."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO documentos_extras (cadastro_id, nome_arquivo, nome_original, arquivo_path, descricao)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (cadastro_id, nome_arquivo, nome_original, arquivo_path, descricao))
+        doc_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return doc_id
+    except Exception as e:
+        logger.error(f"Erro ao criar documento extra: {e}")
+        return None
+
+def listar_documentos_extras(cadastro_id: str) -> list:
+    """Lista documentos extras enviados pelo cliente."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, nome_arquivo, nome_original, descricao, criado_em
+            FROM documentos_extras
+            WHERE cadastro_id = %s
+            ORDER BY criado_em DESC
+        """, (cadastro_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar documentos extras: {e}")
+        return []
+
+def buscar_documento_extra(doc_id: int) -> dict:
+    """Busca um documento extra específico."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM documentos_extras WHERE id = %s", (doc_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar documento extra: {e}")
+        return None
+
+def deletar_documento_extra(doc_id: int) -> bool:
+    """Deleta um documento extra."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        # Buscar caminho do arquivo
+        cur.execute("SELECT arquivo_path FROM documentos_extras WHERE id = %s", (doc_id,))
+        row = cur.fetchone()
+        
+        if row and row["arquivo_path"]:
+            # Deletar arquivo físico
+            if os.path.exists(row["arquivo_path"]):
+                os.remove(row["arquivo_path"])
+        
+        # Deletar registro
+        cur.execute("DELETE FROM documentos_extras WHERE id = %s", (doc_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar documento extra: {e}")
+        return False
+
+
 def buscar_processo_info(cadastro_id: str) -> dict:
     """Busca informações do processo de um cliente."""
     conn = get_db()
@@ -3534,7 +3749,19 @@ async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_clie
                 "disponivel": True
             })
     
-    # 2. Documentos Enviados pelo Cliente (uploads do cadastro)
+    # 2. Documentos Enviados pelo Escritório (admin)
+    docs_admin = listar_documentos_admin(cliente["cadastro_id"])
+    for doc in docs_admin:
+        documentos.append({
+            "tipo": f"admin_{doc['id']}",
+            "nome": doc["nome_original"],
+            "descricao": doc.get("descricao", ""),
+            "categoria": "Enviado pelo Escritório",
+            "disponivel": True,
+            "data": doc["criado_em"].isoformat() if doc.get("criado_em") else None
+        })
+    
+    # 3. Documentos Enviados pelo Cliente (uploads do cadastro)
     documentos_cliente = cadastro.get("documentos", [])
     if documentos_cliente:
         for i, doc_path in enumerate(documentos_cliente):
@@ -3547,7 +3774,7 @@ async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_clie
                 "disponivel": True
             })
     
-    # 3. Documentos Assinados (devolvidos pelo cliente)
+    # 4. Documentos Assinados (devolvidos pelo cliente)
     documentos_assinados = cadastro.get("documentos_assinados", [])
     if documentos_assinados:
         for i, doc_path in enumerate(documentos_assinados):
@@ -3560,17 +3787,115 @@ async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_clie
             })
     
     return {"documentos": documentos}
+
+
+# ============================================
+# ENDPOINTS - PORTAL CLIENTE (DOCUMENTOS EXTRAS)
+# ============================================
+
+@app.post("/api/cliente/documentos-extras")
+async def portal_cliente_enviar_documento_extra(
+    arquivo: UploadFile = File(...),
+    descricao: str = Form(""),
+    cliente: dict = Depends(verificar_token_cliente)
+):
+    """Cliente envia documento extra para o escritório."""
+    # Criar diretório para documentos extras
+    docs_dir = os.path.join(UPLOADS_DIR, "documentos_extras", cliente["cadastro_id"])
+    os.makedirs(docs_dir, exist_ok=True)
     
-    financeiro = buscar_financeiro(cliente["cadastro_id"])
-    if financeiro and len(financeiro.get("depositos", [])) > 0:
-        documentos.append({
-            "tipo": "prestacao",
-            "nome": "Prestação de Contas",
-            "categoria": "Financeiro",
-            "url": f"/api/cadastros/{cliente['cadastro_id']}/prestacao-contas"
-        })
+    # Salvar arquivo
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nome_arquivo = f"{timestamp}_{arquivo.filename}"
+    caminho_arquivo = os.path.join(docs_dir, nome_arquivo)
     
+    with open(caminho_arquivo, "wb") as f:
+        conteudo = await arquivo.read()
+        f.write(conteudo)
+    
+    # Criar registro no banco
+    doc_id = criar_documento_extra(
+        cadastro_id=cliente["cadastro_id"],
+        nome_arquivo=nome_arquivo,
+        nome_original=arquivo.filename,
+        arquivo_path=caminho_arquivo,
+        descricao=descricao
+    )
+    
+    if doc_id:
+        return {
+            "success": True,
+            "message": "Documento enviado com sucesso",
+            "documento_id": doc_id
+        }
+    
+    raise HTTPException(status_code=500, detail="Erro ao salvar documento")
+
+@app.get("/api/cliente/meus-documentos-extras")
+async def portal_cliente_listar_documentos_extras(
+    cliente: dict = Depends(verificar_token_cliente)
+):
+    """Cliente lista seus documentos extras enviados."""
+    documentos = listar_documentos_extras(cliente["cadastro_id"])
     return {"documentos": documentos}
+
+@app.delete("/api/cliente/documentos-extras/{doc_id}")
+async def portal_cliente_deletar_documento_extra(
+    doc_id: int,
+    cliente: dict = Depends(verificar_token_cliente)
+):
+    """Cliente deleta um documento extra enviado."""
+    # Verificar se o documento pertence ao cliente
+    doc = buscar_documento_extra(doc_id)
+    if not doc or doc["cadastro_id"] != cliente["cadastro_id"]:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    
+    if deletar_documento_extra(doc_id):
+        return {"success": True, "message": "Documento deletado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao deletar documento")
+
+@app.get("/api/cliente/documentos/{tipo}/download")
+async def portal_cliente_download_documento(
+    tipo: str,
+    cliente: dict = Depends(verificar_token_cliente)
+):
+    """Cliente baixa um documento."""
+    cadastro = buscar_cadastro(cliente["cadastro_id"])
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    # Documento do admin
+    if tipo.startswith("admin_"):
+        doc_id = int(tipo.replace("admin_", ""))
+        doc = buscar_documento_admin(doc_id)
+        if not doc or doc["cadastro_id"] != cliente["cadastro_id"]:
+            raise HTTPException(status_code=404, detail="Documento não encontrado")
+        
+        if not os.path.exists(doc["arquivo_path"]):
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+        
+        return FileResponse(
+            doc["arquivo_path"],
+            filename=doc["nome_original"],
+            media_type="application/octet-stream"
+        )
+    
+    # Documento gerado (contrato/procuração)
+    arquivos_gerados = cadastro.get("arquivos_gerados", {})
+    if tipo in ["contrato", "procuracao"]:
+        arquivo_path = arquivos_gerados.get(tipo)
+        if not arquivo_path or not os.path.exists(arquivo_path):
+            raise HTTPException(status_code=404, detail="Documento não encontrado")
+        
+        nome = "Contrato de Honorários.docx" if tipo == "contrato" else "Procuração.docx"
+        return FileResponse(
+            arquivo_path,
+            filename=nome,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+    
+    raise HTTPException(status_code=404, detail="Tipo de documento não reconhecido")
 
 @app.get("/api/cliente/mensagens")
 async def portal_cliente_mensagens(cliente: dict = Depends(verificar_token_cliente)):
@@ -4091,6 +4416,146 @@ async def admin_download_comprovante(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# ENDPOINTS - ADMIN DOCUMENTOS (PARA CLIENTE)
+# ============================================
+
+@app.post("/api/admin/clientes/{cadastro_id}/documentos")
+async def admin_upload_documento(
+    cadastro_id: str,
+    arquivo: UploadFile = File(...),
+    descricao: str = Form(""),
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin envia documento para o cliente."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    # Criar diretório para documentos do admin
+    docs_dir = os.path.join(UPLOADS_DIR, "documentos_admin", cadastro_id)
+    os.makedirs(docs_dir, exist_ok=True)
+    
+    # Salvar arquivo
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    nome_arquivo = f"{timestamp}_{arquivo.filename}"
+    caminho_arquivo = os.path.join(docs_dir, nome_arquivo)
+    
+    with open(caminho_arquivo, "wb") as f:
+        conteudo = await arquivo.read()
+        f.write(conteudo)
+    
+    # Criar registro no banco
+    doc_id = criar_documento_admin(
+        cadastro_id=cadastro_id,
+        nome_arquivo=nome_arquivo,
+        nome_original=arquivo.filename,
+        arquivo_path=caminho_arquivo,
+        descricao=descricao,
+        admin_email=usuario["email"]
+    )
+    
+    if doc_id:
+        return {
+            "success": True,
+            "message": "Documento enviado com sucesso",
+            "documento_id": doc_id
+        }
+    
+    raise HTTPException(status_code=500, detail="Erro ao salvar documento")
+
+@app.get("/api/admin/clientes/{cadastro_id}/documentos-enviados")
+async def admin_listar_documentos_enviados(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin lista documentos enviados para o cliente."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    documentos = listar_documentos_admin(cadastro_id)
+    return {"documentos": documentos}
+
+@app.delete("/api/admin/documentos/{doc_id}")
+async def admin_deletar_documento(
+    doc_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin deleta um documento enviado."""
+    if deletar_documento_admin(doc_id):
+        return {"success": True, "message": "Documento deletado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao deletar documento")
+
+@app.get("/api/admin/documentos/{doc_id}/download")
+async def admin_download_documento(
+    doc_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin baixa um documento enviado."""
+    doc = buscar_documento_admin(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    
+    if not os.path.exists(doc["arquivo_path"]):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+    
+    return FileResponse(
+        doc["arquivo_path"],
+        filename=doc["nome_original"],
+        media_type="application/octet-stream"
+    )
+
+
+# ============================================
+# ENDPOINTS - ADMIN DOCUMENTOS EXTRAS (DO CLIENTE)
+# ============================================
+
+@app.get("/api/admin/clientes/{cadastro_id}/documentos-extras")
+async def admin_listar_documentos_extras(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin lista documentos extras enviados pelo cliente."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    documentos = listar_documentos_extras(cadastro_id)
+    return {"documentos": documentos}
+
+@app.get("/api/admin/documentos-extras/{doc_id}/download")
+async def admin_download_documento_extra(
+    doc_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin baixa um documento extra enviado pelo cliente."""
+    doc = buscar_documento_extra(doc_id)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    
+    if not os.path.exists(doc["arquivo_path"]):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+    
+    return FileResponse(
+        doc["arquivo_path"],
+        filename=doc["nome_original"],
+        media_type="application/octet-stream"
+    )
+
+@app.delete("/api/admin/documentos-extras/{doc_id}")
+async def admin_deletar_documento_extra(
+    doc_id: int,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin deleta um documento extra."""
+    if deletar_documento_extra(doc_id):
+        return {"success": True, "message": "Documento deletado"}
+    
+    raise HTTPException(status_code=500, detail="Erro ao deletar documento")
 
 
 # ============================================
