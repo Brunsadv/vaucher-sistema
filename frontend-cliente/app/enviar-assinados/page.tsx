@@ -58,7 +58,15 @@ export default function EnviarAssinados() {
       }
 
       const data = await response.json()
-      setCadastro(data)
+      setCadastro({
+  id: data.id,
+  nome: data.dados?.nome || '',
+  email: data.dados?.email || '',
+  status: data.status,
+  data: data.data,
+  tipo_demanda: data.dados?.tipo_demanda || '',
+  documentos_assinados: data.documentos_assinados || []
+})
 
       if (data.status !== 'enviado' && data.status !== 'assinado') {
         setErro('Você ainda não recebeu os documentos para assinar. Aguarde o envio pelo escritório.')

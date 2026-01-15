@@ -1823,6 +1823,69 @@ def download_documento(cadastro_id: str, tipo: str):
     
     raise HTTPException(status_code=404, detail="Documento não encontrado")
 
+@app.post("/api/cadastros/{cadastro_id}/enviar-assinados")
+async def receber_documentos_assinados(cadastro_id: str, arquivos: List[UploadFile] = File(...)):
+    """Recebe documentos assinados enviados pelo cliente."""
+    logger.info(f"ENVIAR-ASSINADOS: cadastro_id={cadastro_id}, arquivos={len(arquivos)}")
+    
+    # Buscar cadastro
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    # Criar pasta para documentos assinados
+    pasta_assinados = f"/app/uploads/documentos_assinados/{cadastro_id}"
+    os.makedirs(pasta_assinados, exist_ok=True)
+    
+    # Salvar arquivos
+    arquivos_salvos = []
+    for arquivo in arquivos:
+        nome_arquivo = arquivo.filename
+        caminho = f"{pasta_assinados}/{nome_arquivo}"
+        
+        with open(caminho, "wb") as f:
+            conteudo = await arquivo.read()
+            f.write(conteudo)
+        
+        arquivos_salvos.append(nome_arquivo)
+        logger.info(f"Arquivo salvo: {caminho}")
+    
+    # Atualizar cadastro no banco
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor()
+        
+        # Pegar documentos assinados existentes
+        docs_existentes = cadastro.get("documentos_assinados", []) or []
+        docs_atualizados = docs_existentes + arquivos_salvos
+        
+        cur.execute("""
+            UPDATE cadastros 
+            SET documentos_assinados = %s,
+                data_assinatura = NOW(),
+                status = 'assinado'
+            WHERE id = %s
+        """, (json.dumps(docs_atualizados), cadastro_id))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        logger.info(f"Cadastro {cadastro_id} atualizado com {len(arquivos_salvos)} documentos assinados")
+        
+        return {
+            "success": True,
+            "message": f"{len(arquivos_salvos)} documento(s) recebido(s) com sucesso",
+            "arquivos": arquivos_salvos
+        }
+    
+    except Exception as e:
+        logger.error(f"Erro ao salvar documentos assinados: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao salvar documentos")
+
 # --- UPLOAD DE DOCUMENTOS DO CLIENTE ---
 
 @app.post("/api/cadastros/{cadastro_id}/upload")
