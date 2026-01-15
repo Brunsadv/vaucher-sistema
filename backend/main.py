@@ -4466,10 +4466,56 @@ async def admin_enviar_documentos(
             })
     
     if arquivos_salvos:
+        # Enviar e-mail notificando o cliente
+        dados_cliente = cadastro.get("dados", {})
+        email_cliente = dados_cliente.get("email")
+        nome_cliente = dados_cliente.get("nome", "Cliente")
+        
+        if email_cliente:
+            lista_arquivos = "".join([f"<li>{arq['nome']}</li>" for arq in arquivos_salvos])
+            
+            conteudo_email = f"""
+                <h2 style="color: #8B1538;">Novos Documentos Disponíveis</h2>
+                
+                <p>Olá, <strong>{nome_cliente}</strong>!</p>
+                
+                <p>O escritório <strong>Vaucher & Álvares Sociedade de Advogados</strong> enviou novos documentos para você:</p>
+                
+                <ul style="background-color: #f8f8f8; padding: 15px 30px; border-radius: 8px;">
+                    {lista_arquivos}
+                </ul>
+                
+                <p>Para visualizar e baixar os documentos, acesse o <strong>Portal do Cliente</strong>:</p>
+                
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="https://portal.vaucherealvares.com.br" 
+                       style="background-color: #8B1538; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                        Acessar Portal do Cliente
+                    </a>
+                </p>
+                
+                <p style="color: #666; font-size: 14px;">
+                    Caso tenha dúvidas, entre em contato conosco pelo portal ou pelos nossos canais de atendimento.
+                </p>
+            """
+            
+            email_html = criar_email_html(conteudo_email)
+            
+            try:
+                await enviar_email_resend(
+                    email_cliente,
+                    "Novos documentos disponíveis - Vaucher & Álvares",
+                    email_html
+                )
+                logger.info(f"E-mail de notificação enviado para {email_cliente}")
+            except Exception as e:
+                logger.error(f"Erro ao enviar e-mail de notificação: {e}")
+        
         return {
             "success": True,
             "message": f"{len(arquivos_salvos)} documento(s) enviado(s)",
-            "arquivos": arquivos_salvos
+            "arquivos": arquivos_salvos,
+            "email_enviado": bool(email_cliente)
         }
     
     raise HTTPException(status_code=500, detail="Erro ao salvar documentos")
