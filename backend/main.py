@@ -2437,21 +2437,36 @@ async def portal_cliente_alterar_senha(
 @app.get("/api/cliente/meus-dados")
 async def portal_cliente_meus_dados(cliente: dict = Depends(verificar_token_cliente)):
     """Retorna dados pessoais do cliente logado."""
-    logger.info(f"Buscando dados do cliente: {cliente['cadastro_id']}")
-    cadastro = buscar_cadastro(cliente["cadastro_id"])
-    logger.info(f"Cadastro encontrado: {cadastro is not None}")
-    if not cadastro:
-        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
     
-    return {
-        "cadastro_id": cliente["cadastro_id"],
-        "nome": cadastro["dados"].get("nome", ""),
-        "email": cadastro["dados"].get("email", ""),
-        "telefone": cadastro["dados"].get("telefone", ""),
-        "cpf": cadastro["dados"].get("cpf", ""),
-        "endereco": cadastro["dados"].get("endereco_completo", ""),
-        "primeiro_acesso": cliente.get("primeiro_acesso", False)
-    }
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM cadastros WHERE id = %s", (cliente["cadastro_id"],))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Cadastro {cliente['cadastro_id']} não encontrado")
+        
+        dados = row["dados"] if isinstance(row["dados"], dict) else json.loads(row["dados"])
+        
+        return {
+            "cadastro_id": cliente["cadastro_id"],
+            "nome": dados.get("nome", ""),
+            "email": dados.get("email", ""),
+            "telefone": dados.get("telefone", ""),
+            "cpf": dados.get("cpf", ""),
+            "endereco": dados.get("endereco_completo", ""),
+            "primeiro_acesso": cliente.get("primeiro_acesso", False)
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro em meus-dados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/cliente/meu-processo")
 async def portal_cliente_meu_processo(cliente: dict = Depends(verificar_token_cliente)):
