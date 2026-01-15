@@ -51,7 +51,7 @@ export default function EnviarAssinados() {
     setCadastro(null)
 
     try {
-      const response = await fetch(`${API_URL}/api/cliente/${id}`)
+      const response = await fetch(`${API_URL}/api/cadastros/${id}`)
       
       if (!response.ok) {
         throw new Error('Cadastro não encontrado')
@@ -99,8 +99,7 @@ export default function EnviarAssinados() {
         formData.append('arquivos', file)
       })
 
-      const response = await fetch(`${API_URL}/api/cliente/${cadastro.id}/enviar-assinados`, {
-        method: 'POST',
+      const response = await fetch(`${API_URL}/api/cadastros/${cadastro.id}/enviar-assinados`, {
         body: formData
       })
 
