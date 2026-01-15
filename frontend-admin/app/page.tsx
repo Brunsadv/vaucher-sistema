@@ -1286,6 +1286,356 @@ const AndamentoModal = ({
   )
 }
 
+// Modal de Envio de Email com Documentos
+const EnviarEmailModal = ({ 
+  cadastro,
+  onClose, 
+  onSuccess 
+}: { 
+  cadastro: Cadastro
+  onClose: () => void
+  onSuccess: (msg: string) => void 
+}) => {
+  const [assunto, setAssunto] = useState('Seus Documentos - Vaucher & Álvares Advogados')
+  const [mensagem, setMensagem] = useState('')
+  const [arquivosSelecionados, setArquivosSelecionados] = useState<{[key: string]: boolean}>({
+    contrato: true,
+    procuracao: true
+  })
+  const [arquivosExtras, setArquivosExtras] = useState<File[]>([])
+  const [loading, setLoading] = useState(false)
+  const [erro, setErro] = useState('')
+  const inputFileRef = useRef<HTMLInputElement>(null)
+
+  const temDocumentosGerados = cadastro.arquivos_gerados && 
+    (cadastro.arquivos_gerados.contrato || cadastro.arquivos_gerados.procuracao)
+
+  const handleAdicionarArquivos = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setArquivosExtras(prev => [...prev, ...Array.from(e.target.files!)])
+    }
+  }
+
+  const removerArquivoExtra = (index: number) => {
+    setArquivosExtras(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const handleEnviar = async () => {
+    // Verificar se há arquivos selecionados
+    const temContrato = arquivosSelecionados.contrato && cadastro.arquivos_gerados?.contrato
+    const temProcuracao = arquivosSelecionados.procuracao && cadastro.arquivos_gerados?.procuracao
+    
+    if (!temContrato && !temProcuracao && arquivosExtras.length === 0) {
+      setErro('Selecione pelo menos um documento para enviar')
+      return
+    }
+
+    setLoading(true)
+    setErro('')
+
+    try {
+      const formData = new FormData()
+      formData.append('assunto', assunto)
+      formData.append('mensagem', mensagem)
+      
+      // Buscar e anexar documentos gerados selecionados
+      if (temContrato) {
+        const response = await fetch(`${API_URL}/api/cadastros/${cadastro.id}/download/contrato`)
+        if (response.ok) {
+          const blob = await response.blob()
+          formData.append('arquivos', blob, 'Contrato_Honorarios.docx')
+        }
+      }
+      
+      if (temProcuracao) {
+        const response = await fetch(`${API_URL}/api/cadastros/${cadastro.id}/download/procuracao`)
+        if (response.ok) {
+          const blob = await response.blob()
+          formData.append('arquivos', blob, 'Procuracao.docx')
+        }
+      }
+      
+      // Adicionar arquivos extras
+      arquivosExtras.forEach(arquivo => {
+        formData.append('arquivos', arquivo, arquivo.name)
+      })
+
+      const response = await fetch(`${API_URL}/api/cadastros/${cadastro.id}/enviar-email`, {
+        method: 'POST',
+        body: formData
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        onSuccess(data.message || 'E-mail enviado com sucesso!')
+        onClose()
+      } else {
+        setErro(data.detail || 'Erro ao enviar e-mail')
+      }
+    } catch (err) {
+      setErro('Erro de conexão. Tente novamente.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+        <div className="p-6 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Mail className="w-6 h-6 text-red-700" />
+            <h2 className="text-xl font-bold text-gray-800">Enviar Documentos por E-mail</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <div className="p-6 space-y-5">
+          {/* Destinatário */}
+          <div className="bg-gray-50 rounded-lg p-4">
+            <p className="text-sm text-gray-500 mb-1">Destinatário</p>
+            <p className="font-medium">{cadastro.dados.nome}</p>
+            <p className="text-gray-600">{cadastro.dados.email}</p>
+          </div>
+
+          {/* Assunto */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Assunto do E-mail</label>
+            <input
+              type="text"
+              value={assunto}
+              onChange={(e) => setAssunto(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+            />
+          </div>
+
+          {/* Mensagem Personalizada */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Mensagem Adicional (opcional)
+            </label>
+            <textarea
+              value={mensagem}
+              onChange={(e) => setMensagem(e.target.value)}
+              rows={3}
+              placeholder="Adicione uma mensagem personalizada que aparecerá no e-mail..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 resize-none"
+            />
+          </div>
+
+          {/* Documentos Gerados */}
+          {temDocumentosGerados && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Documentos Gerados
+              </label>
+              <div className="space-y-2">
+                {cadastro.arquivos_gerados?.contrato && (
+                  <label className="flex items-center gap-3 p-3 bg-purple-50 border border-purple-200 rounded-lg cursor-pointer hover:bg-purple-100">
+                    <input
+                      type="checkbox"
+                      checked={arquivosSelecionados.contrato}
+                      onChange={(e) => setArquivosSelecionados(prev => ({...prev, contrato: e.target.checked}))}
+                      className="w-4 h-4 text-red-800 rounded"
+                    />
+                    <FileText className="w-5 h-5 text-purple-600" />
+                    <span className="font-medium">Contrato de Honorários</span>
+                  </label>
+                )}
+                {cadastro.arquivos_gerados?.procuracao && (
+                  <label className="flex items-center gap-3 p-3 bg-purple-50 border border-purple-200 rounded-lg cursor-pointer hover:bg-purple-100">
+                    <input
+                      type="checkbox"
+                      checked={arquivosSelecionados.procuracao}
+                      onChange={(e) => setArquivosSelecionados(prev => ({...prev, procuracao: e.target.checked}))}
+                      className="w-4 h-4 text-red-800 rounded"
+                    />
+                    <FileText className="w-5 h-5 text-purple-600" />
+                    <span className="font-medium">Procuração</span>
+                  </label>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Arquivos Extras */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Outros Arquivos (opcional)
+            </label>
+            
+            <input
+              type="file"
+              ref={inputFileRef}
+              onChange={handleAdicionarArquivos}
+              multiple
+              className="hidden"
+            />
+            
+            <button
+              type="button"
+              onClick={() => inputFileRef.current?.click()}
+              className="flex items-center gap-2 px-4 py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-red-800 hover:text-red-800 w-full justify-center"
+            >
+              <Upload className="w-5 h-5" />
+              Adicionar Arquivos
+            </button>
+
+            {arquivosExtras.length > 0 && (
+              <div className="mt-3 space-y-2">
+                {arquivosExtras.map((arquivo, index) => (
+                  <div key={index} className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2">
+                    <div className="flex items-center gap-2">
+                      <Paperclip className="w-4 h-4 text-gray-500" />
+                      <span className="text-sm">{arquivo.name}</span>
+                    </div>
+                    <button
+                      onClick={() => removerArquivoExtra(index)}
+                      className="text-red-600 hover:text-red-800"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Info sobre o link */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+            <p className="text-sm text-blue-800">
+              <strong>📤 Link automático:</strong> O cliente receberá um link para devolver os documentos assinados pelo portal ou por e-mail.
+            </p>
+          </div>
+
+          {erro && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+              {erro}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={handleEnviar}
+              disabled={loading}
+              className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  Enviar E-mail
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+        onClose()
+      } else {
+        const data = await response.json()
+        setErro(data.detail || 'Erro ao salvar andamento')
+      }
+    } catch (err) {
+      setErro('Erro de conexão')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full">
+        <div className="p-6 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Calendar className="w-6 h-6 text-red-700" />
+            <h2 className="text-xl font-bold text-gray-800">Novo Andamento</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <X className="w-6 h-6" />
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Data</label>
+            <input
+              type="date"
+              value={form.data}
+              onChange={(e) => setForm({ ...form, data: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Descrição</label>
+            <textarea
+              value={form.descricao}
+              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+              rows={4}
+              placeholder="Descreva o andamento processual..."
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 resize-none"
+            />
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="visivel_cliente"
+              checked={form.visivel_cliente}
+              onChange={(e) => setForm({ ...form, visivel_cliente: e.target.checked })}
+              className="w-4 h-4 text-red-800 rounded"
+            />
+            <label htmlFor="visivel_cliente" className="text-sm text-gray-700">
+              Visível para o cliente no Portal
+            </label>
+          </div>
+
+          {erro && (
+            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+              {erro}
+            </div>
+          )}
+
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-100"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={loading}
+              className="flex-1 bg-red-800 hover:bg-red-900 text-white font-semibold px-4 py-2 rounded-lg disabled:opacity-50"
+            >
+              {loading ? 'Salvando...' : 'Salvar'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // Dashboard Administrativo Principal
 const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => void }) => {
   const [cadastros, setCadastros] = useState<Cadastro[]>([])
@@ -1320,6 +1670,9 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const [mensagens, setMensagens] = useState<Mensagem[]>([])
   const [novaMensagem, setNovaMensagem] = useState('')
   const [enviandoMensagem, setEnviandoMensagem] = useState(false)
+  
+  // Estados de Envio de Email
+  const [showEnviarEmailModal, setShowEnviarEmailModal] = useState(false)
 
   const tiposDemanda: Record<string, string> = {
     'adicional_insalubridade': 'Adicional de Insalubridade',
@@ -2108,6 +2461,39 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
               {/* Tab: Documentos */}
               {activeTab === 'documentos' && (
                 <div className="space-y-6">
+                  {/* Ações de Documentos */}
+                  <div className="flex flex-wrap gap-3">
+                    {c.status === 'validado' && (
+                      <button
+                        onClick={() => handleGerarDocumentos(c.id)}
+                        disabled={gerandoDocs}
+                        className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                      >
+                        {gerandoDocs ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            Gerando...
+                          </>
+                        ) : (
+                          <>
+                            <FileText className="w-4 h-4" />
+                            Gerar Documentos
+                          </>
+                        )}
+                      </button>
+                    )}
+                    
+                    {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao) && (
+                      <button
+                        onClick={() => setShowEnviarEmailModal(true)}
+                        className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg"
+                      >
+                        <Mail className="w-4 h-4" />
+                        Enviar por E-mail
+                      </button>
+                    )}
+                  </div>
+
                   {/* Documentos do Cliente */}
                   <div className="bg-gray-50 rounded-xl p-6">
                     <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
@@ -2287,6 +2673,14 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
             user={user}
             onClose={() => { setShowAndamentoModal(false); setProcessoParaAndamento(null); }}
             onSave={() => carregarAndamentos(processoParaAndamento)}
+          />
+        )}
+
+        {showEnviarEmailModal && (
+          <EnviarEmailModal
+            cadastro={c}
+            onClose={() => setShowEnviarEmailModal(false)}
+            onSuccess={(msg) => { setMensagemSucesso(msg); setTimeout(() => setMensagemSucesso(''), 8000); }}
           />
         )}
       </div>
