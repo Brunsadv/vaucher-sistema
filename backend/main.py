@@ -58,6 +58,8 @@ app.add_middleware(
         "https://vaucher-cliente.vercel.app",
         "https://vaucher-admin.vercel.app",
         "https://vaucher-portal.vercel.app",
+        "https://portal-cliente-five.vercel.app",
+        "https://portal-cliente-git-main-brunsadvs-projects.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],
