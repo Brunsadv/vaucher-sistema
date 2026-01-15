@@ -3823,6 +3823,45 @@ async def portal_cliente_enviar_documento_extra(
     )
     
     if doc_id:
+        # Enviar e-mail notificando o escritório
+        cadastro = buscar_cadastro(cliente["cadastro_id"])
+        nome_cliente = cliente.get("nome", "Cliente")
+        
+        conteudo_email = f"""
+            <h2 style="color: #8B1538;">Novo Documento Recebido</h2>
+            
+            <p>O cliente <strong>{nome_cliente}</strong> enviou um novo documento pelo Portal do Cliente.</p>
+            
+            <div style="background-color: #f8f8f8; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                <p><strong>Documento:</strong> {arquivo.filename}</p>
+                {f'<p><strong>Descrição:</strong> {descricao}</p>' if descricao else ''}
+                <p><strong>Cliente:</strong> {nome_cliente}</p>
+                <p><strong>Código:</strong> {cliente["cadastro_id"]}</p>
+            </div>
+            
+            <p>Acesse o <strong>Painel Administrativo</strong> para visualizar e baixar o documento:</p>
+            
+            <p style="text-align: center; margin: 30px 0;">
+                <a href="https://painel.vaucherealvares.com.br" 
+                   style="background-color: #8B1538; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                    Acessar Painel Administrativo
+                </a>
+            </p>
+        """
+        
+        email_html = criar_email_html(conteudo_email)
+        
+        try:
+            # Enviar para o e-mail do escritório
+            await enviar_email_resend(
+                "atendimento@vaucherealvares.com.br",
+                f"Novo documento recebido de {nome_cliente}",
+                email_html
+            )
+            logger.info(f"E-mail de notificação enviado para o escritório - documento de {nome_cliente}")
+        except Exception as e:
+            logger.error(f"Erro ao enviar e-mail de notificação: {e}")
+        
         return {
             "success": True,
             "message": "Documento enviado com sucesso",
