@@ -3450,14 +3450,53 @@ async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_clie
     
     documentos = []
     
+    # 1. Documentos Gerados pelo Sistema (Contrato e Procuração)
     arquivos_gerados = cadastro.get("arquivos_gerados", {})
-    for tipo, nome in arquivos_gerados.items():
-        documentos.append({
-            "tipo": "gerado",
-            "nome": nome,
-            "categoria": tipo.replace("_", " ").title(),
-            "url": f"/api/cadastros/{cliente['cadastro_id']}/documentos/{tipo}"
-        })
+    if arquivos_gerados:
+        # Contrato de Honorários
+        if arquivos_gerados.get("contrato"):
+            documentos.append({
+                "tipo": "contrato",
+                "nome": "Contrato de Honorários",
+                "categoria": "Documento Gerado",
+                "disponivel": True
+            })
+        
+        # Procuração
+        if arquivos_gerados.get("procuracao"):
+            documentos.append({
+                "tipo": "procuracao",
+                "nome": "Procuração",
+                "categoria": "Documento Gerado",
+                "disponivel": True
+            })
+    
+    # 2. Documentos Enviados pelo Cliente (uploads do cadastro)
+    documentos_cliente = cadastro.get("documentos", [])
+    if documentos_cliente:
+        for i, doc_path in enumerate(documentos_cliente):
+            # Extrair nome do arquivo do caminho
+            nome_arquivo = doc_path.split("/")[-1] if "/" in doc_path else doc_path
+            documentos.append({
+                "tipo": f"cliente_{i}",
+                "nome": nome_arquivo,
+                "categoria": "Enviado pelo Cliente",
+                "disponivel": True
+            })
+    
+    # 3. Documentos Assinados (devolvidos pelo cliente)
+    documentos_assinados = cadastro.get("documentos_assinados", [])
+    if documentos_assinados:
+        for i, doc_path in enumerate(documentos_assinados):
+            nome_arquivo = doc_path.split("/")[-1] if "/" in doc_path else doc_path
+            documentos.append({
+                "tipo": f"assinado_{i}",
+                "nome": nome_arquivo,
+                "categoria": "Documento Assinado",
+                "disponivel": True
+            })
+    
+    return {"documentos": documentos}
     
     financeiro = buscar_financeiro(cliente["cadastro_id"])
     if financeiro and len(financeiro.get("depositos", [])) > 0:
