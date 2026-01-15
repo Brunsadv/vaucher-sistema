@@ -2384,10 +2384,13 @@ async def portal_cliente_login(dados: ClienteLogin):
     logger.info(f"Tentativa de login cliente: {dados.email}")
     
     cliente = buscar_cliente_por_email(dados.email)
+    logger.info(f"Cliente encontrado: {cliente}")
+    
     if not cliente:
         raise HTTPException(status_code=401, detail="Email não encontrado")
     
     if not cliente.get("senha_hash"):
+        logger.info(f"Senha hash não encontrada para cliente: {cliente.get('cadastro_id')}")
         raise HTTPException(status_code=401, detail="Acesso não habilitado. Entre em contato com o escritório.")
     
     if not verificar_senha(dados.senha, cliente["senha_hash"]):
