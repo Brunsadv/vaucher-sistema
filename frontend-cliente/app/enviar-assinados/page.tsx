@@ -108,6 +108,7 @@ export default function EnviarAssinados() {
       })
 
       const response = await fetch(`${API_URL}/api/cadastros/${cadastro.id}/enviar-assinados`, {
+        method: 'POST',
         body: formData
       })
 
