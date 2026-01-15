@@ -1843,7 +1843,7 @@ def gerar_documento_prestacao_contas(cadastro_id: str):
 # ÁREA DO CLIENTE - DEVOLUÇÃO DE DOCUMENTOS (EXISTENTE)
 # ============================================
 
-@app.get("/api/cliente/{cadastro_id}")
+@app.get("/api/cliente/cadastro/{cadastro_id}")
 def cliente_ver_cadastro_publico(cadastro_id: str):
     """Cliente visualiza seu próprio cadastro (sem autenticação, mas limitado)."""
     cadastro = buscar_cadastro(cadastro_id)
