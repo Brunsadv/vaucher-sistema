@@ -2437,6 +2437,8 @@ async def portal_cliente_alterar_senha(
 @app.get("/api/cliente/meus-dados")
 async def portal_cliente_meus_dados(cliente: dict = Depends(verificar_token_cliente)):
     """Retorna dados pessoais do cliente logado."""
+    logger.info(f"MEUS-DADOS: cadastro_id={cliente['cadastro_id']}")
+    
     conn = get_db()
     if not conn:
         raise HTTPException(status_code=500, detail="Erro de conexão")
@@ -2445,6 +2447,7 @@ async def portal_cliente_meus_dados(cliente: dict = Depends(verificar_token_clie
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT * FROM cadastros WHERE id = %s", (cliente["cadastro_id"],))
         row = cur.fetchone()
+        logger.info(f"MEUS-DADOS: row encontrado={row is not None}")
         cur.close()
         conn.close()
         
@@ -2467,21 +2470,6 @@ async def portal_cliente_meus_dados(cliente: dict = Depends(verificar_token_clie
     except Exception as e:
         logger.error(f"Erro em meus-dados: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/api/cliente/meu-processo")
-async def portal_cliente_meu_processo(cliente: dict = Depends(verificar_token_cliente)):
-    """Retorna informações do processo do cliente."""
-    processo = buscar_processo_info(cliente["cadastro_id"])
-    return processo or {
-        "cadastro_id": cliente["cadastro_id"],
-        "numero_processo": "",
-        "vara_tribunal": "",
-        "fase": "Aguardando informações",
-        "data_distribuicao": None,
-        "valor_causa": 0,
-        "reu": "",
-        "observacoes": ""
-    }
 
 @app.get("/api/cliente/andamentos")
 async def portal_cliente_andamentos(cliente: dict = Depends(verificar_token_cliente)):
