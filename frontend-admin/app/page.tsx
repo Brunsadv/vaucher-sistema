@@ -1561,6 +1561,9 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const [novaMensagem, setNovaMensagem] = useState('')
   const [enviandoMensagem, setEnviandoMensagem] = useState(false)
   
+  // Estados de Documentos Extras
+  const [documentosExtras, setDocumentosExtras] = useState<{id: number, nome_original: string, descricao: string, criado_em: string}[]>([])
+  
   // Estados de Envio de Email
   const [showEnviarEmailModal, setShowEnviarEmailModal] = useState(false)
 
@@ -1650,6 +1653,19 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       }
     } catch (err) {
       console.error('Erro ao carregar mensagens:', err)
+    }
+
+    // Carregar documentos extras enviados pelo cliente
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${cadastroId}/documentos-extras`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setDocumentosExtras(data.documentos || [])
+      }
+    } catch (err) {
+      console.error('Erro ao carregar documentos extras:', err)
     }
   }
 
@@ -2478,6 +2494,43 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                               target="_blank"
                               rel="noopener noreferrer"
                               className="flex items-center gap-1 text-emerald-600 hover:text-emerald-800 text-sm font-medium"
+                            >
+                              <Download className="w-4 h-4" />
+                              Baixar
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Documentos Extras Enviados pelo Cliente */}
+                  {documentosExtras.length > 0 && (
+                    <div className="bg-amber-50 rounded-xl p-6">
+                      <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <Upload className="w-5 h-5 text-amber-600" />
+                        Documentos Extras Enviados pelo Cliente ({documentosExtras.length})
+                      </h3>
+                      <div className="space-y-2">
+                        {documentosExtras.map((doc) => (
+                          <div key={doc.id} className="flex items-center justify-between bg-white border border-amber-200 rounded-lg px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <FileText className="w-5 h-5 text-amber-600" />
+                              <div>
+                                <span className="text-sm font-medium">{doc.nome_original}</span>
+                                {doc.descricao && (
+                                  <p className="text-xs text-gray-500">{doc.descricao}</p>
+                                )}
+                                <p className="text-xs text-gray-400">
+                                  {new Date(doc.criado_em).toLocaleString('pt-BR')}
+                                </p>
+                              </div>
+                            </div>
+                            <a 
+                              href={`${API_URL}/api/admin/documentos-extras/${doc.id}/download`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-amber-600 hover:text-amber-800 text-sm font-medium"
                             >
                               <Download className="w-4 h-4" />
                               Baixar
