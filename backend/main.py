@@ -191,8 +191,8 @@ def criar_email_html(conteudo: str) -> str:
             <div style="background-color: #f8f8f8; padding: 20px; text-align: center; border-top: 1px solid #eee;">
                 <p style="font-size: 12px; color: #666; margin: 0;">
                     <strong>Vaucher & Álvares Sociedade de Advogados</strong><br>
-                    Rua Lima, nº 106, Jardim das Américas, Cuiabá-MT<br>
-                    (65) 3023-5959 | atendimento@vaucherealvares.com
+                    Rua Lima, nº 106, Bairro Jardim das Américas, Cuiabá-MT<br>
+                    (65) 3025-1223 – email: atendimento@vaucherealvares.com
                 </p>
             </div>
         </div>
