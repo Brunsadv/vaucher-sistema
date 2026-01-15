@@ -3954,6 +3954,43 @@ async def portal_cliente_enviar_mensagem(
     
     msg_id = criar_mensagem(cliente["cadastro_id"], "cliente", dados.texto.strip())
     if msg_id:
+        # Enviar e-mail notificando o escritório
+        nome_cliente = cliente.get("nome", "Cliente")
+        
+        conteudo_email = f"""
+            <h2 style="color: #8B1538;">Nova Mensagem Recebida</h2>
+            
+            <p>O cliente <strong>{nome_cliente}</strong> enviou uma nova mensagem pelo Portal do Cliente.</p>
+            
+            <div style="background-color: #f8f8f8; padding: 20px; border-radius: 8px; margin: 20px 0; border-left: 4px solid #8B1538;">
+                <p style="margin: 0; white-space: pre-wrap;">{dados.texto.strip()}</p>
+            </div>
+            
+            <p><strong>Cliente:</strong> {nome_cliente}<br>
+            <strong>Código:</strong> {cliente["cadastro_id"]}</p>
+            
+            <p>Acesse o <strong>Painel Administrativo</strong> para responder:</p>
+            
+            <p style="text-align: center; margin: 30px 0;">
+                <a href="https://painel.vaucherealvares.com.br" 
+                   style="background-color: #8B1538; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
+                    Acessar Painel Administrativo
+                </a>
+            </p>
+        """
+        
+        email_html = criar_email_html(conteudo_email)
+        
+        try:
+            await enviar_email_resend(
+                "atendimento@vaucherealvares.com.br",
+                f"Nova mensagem de {nome_cliente}",
+                email_html
+            )
+            logger.info(f"E-mail de notificação de mensagem enviado - cliente {nome_cliente}")
+        except Exception as e:
+            logger.error(f"Erro ao enviar e-mail de notificação de mensagem: {e}")
+        
         return {"success": True, "message_id": msg_id}
     
     raise HTTPException(status_code=500, detail="Erro ao enviar mensagem")
