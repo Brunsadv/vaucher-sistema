@@ -1958,8 +1958,23 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
             <div className="bg-gradient-to-r from-gray-800 to-gray-900 text-white p-6">
               <div className="flex justify-between items-start">
                 <div>
-                  <h1 className="text-2xl font-bold">{c.dados.nome}</h1>
-                  <p className="text-gray-300 mt-1">{c.dados.email}</p>
+                <h1 className="text-2xl font-bold">{c.dados.nome}</h1>
+<p className="text-gray-300 mt-1">{c.dados.email}</p>
+<div className="flex items-center gap-2 mt-2">
+  <span className="text-gray-400 text-sm">Código:</span>
+  <code className="bg-white/20 px-2 py-1 rounded text-sm font-mono">{c.id}</code>
+  <button
+    onClick={() => {
+      navigator.clipboard.writeText(c.id)
+      setMensagemSucesso('Código copiado!')
+      setTimeout(() => setMensagemSucesso(''), 2000)
+    }}
+    className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded"
+    title="Copiar código"
+  >
+    Copiar
+  </button>
+</div>
                 </div>
                 <div className="flex items-center gap-3">
                   {getStatusBadge(c.status)}
@@ -2472,6 +2487,58 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       </div>
                     </div>
                   )}
+                {/* Enviar Documentos Extras */}
+                  <div className="bg-blue-50 rounded-xl p-6">
+                    <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <Upload className="w-5 h-5 text-blue-600" />
+                      Enviar Documentos para o Cliente
+                    </h3>
+                    <p className="text-sm text-gray-600 mb-4">
+                      Envie documentos extras que ficarão disponíveis no portal do cliente.
+                    </p>
+                    <input
+                      type="file"
+                      multiple
+                      id="upload-docs-admin"
+                      className="hidden"
+                      onChange={async (e) => {
+                        if (!e.target.files || e.target.files.length === 0) return
+                        const formData = new FormData()
+                        Array.from(e.target.files).forEach(file => {
+                          formData.append('arquivos', file)
+                        })
+                        try {
+                          const response = await fetch(`${API_URL}/api/admin/clientes/${c.id}/enviar-documentos`, {
+                            method: 'POST',
+                            headers: { 'Authorization': `Bearer ${user.token}` },
+                            body: formData
+                          })
+                          const data = await response.json()
+                          if (response.ok && data.success) {
+                            setMensagemSucesso(`${data.arquivos.length} documento(s) enviado(s)!`)
+                            // Recarregar cadastro
+                            const cadResponse = await fetch(`${API_URL}/api/cadastros/${c.id}`)
+                            if (cadResponse.ok) {
+                              const cadData = await cadResponse.json()
+                              setSelectedCadastro(cadData)
+                            }
+                          } else {
+                            alert(data.detail || 'Erro ao enviar')
+                          }
+                        } catch (err) {
+                          alert('Erro de conexão')
+                        }
+                        e.target.value = ''
+                      }}
+                    />
+                    <label
+                      htmlFor="upload-docs-admin"
+                      className="flex items-center justify-center gap-2 cursor-pointer border-2 border-dashed border-blue-300 rounded-lg p-4 hover:border-blue-500 hover:bg-blue-100 transition-colors"
+                    >
+                      <Upload className="w-5 h-5 text-blue-600" />
+                      <span className="text-blue-700 font-medium">Clique para selecionar arquivos</span>
+                    </label>
+                  </div>
                 </div>
               )}
 
