@@ -3278,6 +3278,93 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
             onSuccess={(msg) => { setMensagemSucesso(msg); setTimeout(() => setMensagemSucesso(''), 8000); }}
           />
         )}
+
+        {/* Modal Solicitar Atualização Cadastral */}
+        {showModalSolicitarAtualizacao && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl max-w-md w-full shadow-xl">
+              <div className="p-6 border-b">
+                <h3 className="text-lg font-semibold flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-amber-500" />
+                  Solicitar Atualização Cadastral
+                </h3>
+              </div>
+              <div className="p-6">
+                <p className="text-gray-600 mb-4">
+                  O cliente <strong>{c.dados.nome}</strong> receberá um e-mail solicitando que atualize seus dados cadastrais.
+                </p>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Motivo da solicitação (opcional)
+                  </label>
+                  <textarea
+                    value={motivoSolicitacao}
+                    onChange={(e) => setMotivoSolicitacao(e.target.value)}
+                    className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
+                    rows={3}
+                    placeholder="Ex: Documento vencido, endereço desatualizado..."
+                  />
+                </div>
+              </div>
+              <div className="p-6 border-t bg-gray-50 flex gap-3 justify-end rounded-b-xl">
+                <button
+                  onClick={() => {
+                    setShowModalSolicitarAtualizacao(false)
+                    setMotivoSolicitacao('')
+                  }}
+                  className="px-4 py-2 border rounded-lg hover:bg-gray-100"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={async () => {
+                    setLoadingSolicitacao(true)
+                    try {
+                      const response = await fetch(
+                        `${API_URL}/api/admin/clientes/${c.id}/solicitar-atualizacao`,
+                        {
+                          method: 'POST',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${user.token}`
+                          },
+                          body: JSON.stringify({ motivo: motivoSolicitacao })
+                        }
+                      )
+                      
+                      const data = await response.json()
+                      
+                      if (response.ok) {
+                        setMensagemSucesso(`Solicitação enviada com sucesso!${data.email_enviado ? ' O cliente foi notificado por e-mail.' : ''}`)
+                        setShowModalSolicitarAtualizacao(false)
+                        setMotivoSolicitacao('')
+                        setTimeout(() => setMensagemSucesso(''), 5000)
+                      } else {
+                        alert(data.detail || 'Erro ao solicitar atualização')
+                      }
+                    } catch (error) {
+                      console.error('Erro:', error)
+                      alert('Erro ao solicitar atualização. Verifique sua conexão.')
+                    } finally {
+                      setLoadingSolicitacao(false)
+                    }
+                  }}
+                  disabled={loadingSolicitacao}
+                  className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50 flex items-center gap-2"
+                >
+                  {loadingSolicitacao ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Enviando...
+                    </>
+                  ) : (
+                    'Enviar Solicitação'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -3573,55 +3660,6 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       )}
       {showBackupModal && (
         <BackupModal user={user} onClose={() => setShowBackupModal(false)} />
-      )}
-
-      {/* Modal Solicitar Atualização Cadastral */}
-      {showModalSolicitarAtualizacao && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl max-w-md w-full shadow-xl">
-            <div className="p-6 border-b">
-              <h3 className="text-lg font-semibold flex items-center gap-2">
-                <RefreshCw className="w-5 h-5 text-amber-500" />
-                Solicitar Atualização Cadastral
-              </h3>
-            </div>
-            <div className="p-6">
-              <p className="text-gray-600 mb-4">
-                O cliente receberá um e-mail solicitando que atualize seus dados cadastrais.
-              </p>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Motivo da solicitação (opcional)
-                </label>
-                <textarea
-                  value={motivoSolicitacao}
-                  onChange={(e) => setMotivoSolicitacao(e.target.value)}
-                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500"
-                  rows={3}
-                  placeholder="Ex: Documento vencido, endereço desatualizado..."
-                />
-              </div>
-            </div>
-            <div className="p-6 border-t bg-gray-50 flex gap-3 justify-end rounded-b-xl">
-              <button
-                onClick={() => {
-                  setShowModalSolicitarAtualizacao(false)
-                  setMotivoSolicitacao('')
-                }}
-                className="px-4 py-2 border rounded-lg hover:bg-gray-100"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={solicitarAtualizacaoCadastral}
-                disabled={loadingSolicitacao}
-                className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50"
-              >
-                {loadingSolicitacao ? 'Enviando...' : 'Enviar Solicitação'}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       {/* Modal Ver Atualização */}
