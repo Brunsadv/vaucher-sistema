@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt, Scale, MessageSquare, Calendar, Gavel, CreditCard, Building, ChevronDown, ChevronUp, HardDrive, Archive } from 'lucide-react'
+import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt, Scale, MessageSquare, Calendar, Gavel, CreditCard, Building, ChevronDown, ChevronUp, HardDrive, Archive, RefreshCw } from 'lucide-react'
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher%20e%20Alvares-06.jpg"
@@ -189,6 +189,26 @@ interface BackupResumo {
   documentos_existentes: number
   tamanho_total: number
   tamanho_formatado: string
+}
+
+interface AtualizacaoCadastral {
+  id: number
+  cadastro_id: string
+  tipo: string
+  status: string
+  motivo_solicitacao: string | null
+  solicitado_em: string | null
+  solicitado_por: string | null
+  dados_novos: Record<string, any> | null
+  documentos_novos: any[] | null
+  enviado_em: string | null
+  analisado_em: string | null
+  analisado_por: string | null
+  motivo_rejeicao: string | null
+  nome_cliente?: string
+  email_cliente?: string
+  cpf_cliente?: string
+  dados_atuais?: Record<string, any>
 }
 // Tela de Login
 const LoginScreen = ({ onLogin }: { onLogin: (user: UserData) => void }) => {
@@ -1980,6 +2000,17 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const [showEnviarEmailModal, setShowEnviarEmailModal] = useState(false)
 // Estado do Modal de Backup
   const [showBackupModal, setShowBackupModal] = useState(false)
+  
+  // Estados de Atualização Cadastral
+  const [atualizacoesPendentes, setAtualizacoesPendentes] = useState<AtualizacaoCadastral[]>([])
+  const [showModalSolicitarAtualizacao, setShowModalSolicitarAtualizacao] = useState(false)
+  const [motivoSolicitacao, setMotivoSolicitacao] = useState('')
+  const [loadingSolicitacao, setLoadingSolicitacao] = useState(false)
+  const [showModalVerAtualizacao, setShowModalVerAtualizacao] = useState(false)
+  const [atualizacaoSelecionada, setAtualizacaoSelecionada] = useState<AtualizacaoCadastral | null>(null)
+  const [showModalRejeitar, setShowModalRejeitar] = useState(false)
+  const [motivoRejeicao, setMotivoRejeicao] = useState('')
+  
   const tiposDemanda: Record<string, string> = {
     'adicional_insalubridade': 'Adicional de Insalubridade',
     'adicional_periculosidade': 'Adicional de Periculosidade',
@@ -1995,6 +2026,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
 
   useEffect(() => {
     carregarCadastros()
+    buscarAtualizacoesPendentes()
   }, [])
 
   useEffect(() => {
@@ -2012,6 +2044,140 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       console.error('Erro ao carregar cadastros:', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  // ===== FUNÇÕES DE ATUALIZAÇÃO CADASTRAL =====
+
+  const buscarAtualizacoesPendentes = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/admin/atualizacoes-pendentes`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setAtualizacoesPendentes(data.atualizacoes || [])
+      }
+    } catch (error) {
+      console.error('Erro ao buscar atualizações pendentes:', error)
+    }
+  }
+
+  const solicitarAtualizacaoCadastral = async () => {
+    if (!selectedCadastro) return
+    
+    setLoadingSolicitacao(true)
+    try {
+      const response = await fetch(
+        `${API_URL}/api/admin/clientes/${selectedCadastro.id}/solicitar-atualizacao`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${user.token}`
+          },
+          body: JSON.stringify({ motivo: motivoSolicitacao })
+        }
+      )
+      
+      const data = await response.json()
+      
+      if (response.ok) {
+        alert(`Solicitação enviada com sucesso!${data.email_enviado ? ' O cliente foi notificado por e-mail.' : ''}`)
+        setShowModalSolicitarAtualizacao(false)
+        setMotivoSolicitacao('')
+      } else {
+        alert(data.detail || 'Erro ao solicitar atualização')
+      }
+    } catch (error) {
+      console.error('Erro:', error)
+      alert('Erro ao solicitar atualização')
+    } finally {
+      setLoadingSolicitacao(false)
+    }
+  }
+
+  const verDetalhesAtualizacao = async (atualizacao: AtualizacaoCadastral) => {
+    try {
+      const response = await fetch(
+        `${API_URL}/api/admin/atualizacoes/${atualizacao.id}`,
+        { headers: { 'Authorization': `Bearer ${user.token}` } }
+      )
+      
+      if (response.ok) {
+        const data = await response.json()
+        setAtualizacaoSelecionada(data)
+        setShowModalVerAtualizacao(true)
+      }
+    } catch (error) {
+      console.error('Erro ao buscar detalhes:', error)
+    }
+  }
+
+  const aprovarAtualizacao = async (atualizacaoId: number) => {
+    if (!confirm('Confirma a aprovação desta atualização? Os dados do cliente serão atualizados.')) {
+      return
+    }
+    
+    try {
+      const response = await fetch(
+        `${API_URL}/api/admin/atualizacoes/${atualizacaoId}/aprovar`,
+        {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${user.token}` }
+        }
+      )
+      
+      if (response.ok) {
+        alert('Atualização aprovada com sucesso!')
+        setShowModalVerAtualizacao(false)
+        setAtualizacaoSelecionada(null)
+        buscarAtualizacoesPendentes()
+        if (selectedCadastro) {
+          carregarDadosCliente(selectedCadastro.id)
+          // Recarregar cadastros para atualizar a lista
+          carregarCadastros()
+        }
+      } else {
+        const data = await response.json()
+        alert(data.detail || 'Erro ao aprovar atualização')
+      }
+    } catch (error) {
+      console.error('Erro:', error)
+      alert('Erro ao aprovar atualização')
+    }
+  }
+
+  const rejeitarAtualizacao = async () => {
+    if (!atualizacaoSelecionada) return
+    
+    try {
+      const response = await fetch(
+        `${API_URL}/api/admin/atualizacoes/${atualizacaoSelecionada.id}/rejeitar`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${user.token}`
+          },
+          body: JSON.stringify({ motivo: motivoRejeicao })
+        }
+      )
+      
+      if (response.ok) {
+        alert('Atualização rejeitada. O cliente foi notificado.')
+        setShowModalRejeitar(false)
+        setShowModalVerAtualizacao(false)
+        setMotivoRejeicao('')
+        setAtualizacaoSelecionada(null)
+        buscarAtualizacoesPendentes()
+      } else {
+        const data = await response.json()
+        alert(data.detail || 'Erro ao rejeitar atualização')
+      }
+    } catch (error) {
+      console.error('Erro:', error)
+      alert('Erro ao rejeitar atualização')
     }
   }
 
@@ -2522,8 +2688,15 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                             Gerar Documentos
                           </>
                         )}
-                      </button>
+                                      </button>
                     )}
+                    <button
+                      onClick={() => setShowModalSolicitarAtualizacao(true)}
+                      className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-medium px-4 py-2 rounded-lg"
+                    >
+                      <RefreshCw className="w-4 h-4" />
+                      Solicitar Atualização
+                    </button>
                     <button
                       onClick={() => handleDeletar(c.id)}
                       className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-4 py-2 rounded-lg"
@@ -3227,6 +3400,66 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
           </div>
         </div>
 
+        {/* Card de Atualizações Cadastrais Pendentes */}
+        {atualizacoesPendentes.length > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
+            <h3 className="font-semibold text-amber-800 flex items-center gap-2 mb-3">
+              <RefreshCw className="w-5 h-5" />
+              Atualizações Cadastrais Pendentes
+              <span className="bg-amber-500 text-white text-xs px-2 py-1 rounded-full">
+                {atualizacoesPendentes.length}
+              </span>
+            </h3>
+            <div className="space-y-2">
+              {atualizacoesPendentes.slice(0, 5).map((atualizacao) => (
+                <div 
+                  key={atualizacao.id}
+                  className="bg-white rounded-lg p-3 flex justify-between items-center shadow-sm"
+                >
+                  <div>
+                    <p className="font-medium text-gray-800">{atualizacao.nome_cliente}</p>
+                    <p className="text-xs text-gray-500">
+                      {atualizacao.tipo === 'solicitada' ? 'Solicitada pelo escritório' : 'Espontânea'} • 
+                      {atualizacao.enviado_em ? new Date(atualizacao.enviado_em).toLocaleDateString('pt-BR') : ''}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => verDetalhesAtualizacao(atualizacao)}
+                      className="p-2 bg-blue-100 text-blue-600 rounded hover:bg-blue-200"
+                      title="Ver detalhes"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => aprovarAtualizacao(atualizacao.id)}
+                      className="p-2 bg-green-100 text-green-600 rounded hover:bg-green-200"
+                      title="Aprovar"
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setAtualizacaoSelecionada(atualizacao)
+                        setShowModalRejeitar(true)
+                      }}
+                      className="p-2 bg-red-100 text-red-600 rounded hover:bg-red-200"
+                      title="Rejeitar"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+              {atualizacoesPendentes.length > 5 && (
+                <p className="text-center text-amber-700 text-sm pt-2">
+                  + {atualizacoesPendentes.length - 5} atualizações pendentes
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Filtros */}
         <div className="bg-white rounded-xl shadow-sm p-4 mb-6">
           <div className="flex flex-col sm:flex-row gap-4">
@@ -3340,6 +3573,186 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       )}
       {showBackupModal && (
         <BackupModal user={user} onClose={() => setShowBackupModal(false)} />
+      )}
+
+      {/* Modal Solicitar Atualização Cadastral */}
+      {showModalSolicitarAtualizacao && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-xl">
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <RefreshCw className="w-5 h-5 text-amber-500" />
+                Solicitar Atualização Cadastral
+              </h3>
+            </div>
+            <div className="p-6">
+              <p className="text-gray-600 mb-4">
+                O cliente receberá um e-mail solicitando que atualize seus dados cadastrais.
+              </p>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Motivo da solicitação (opcional)
+                </label>
+                <textarea
+                  value={motivoSolicitacao}
+                  onChange={(e) => setMotivoSolicitacao(e.target.value)}
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-amber-500"
+                  rows={3}
+                  placeholder="Ex: Documento vencido, endereço desatualizado..."
+                />
+              </div>
+            </div>
+            <div className="p-6 border-t bg-gray-50 flex gap-3 justify-end rounded-b-xl">
+              <button
+                onClick={() => {
+                  setShowModalSolicitarAtualizacao(false)
+                  setMotivoSolicitacao('')
+                }}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-100"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={solicitarAtualizacaoCadastral}
+                disabled={loadingSolicitacao}
+                className="px-4 py-2 bg-amber-500 text-white rounded-lg hover:bg-amber-600 disabled:opacity-50"
+              >
+                {loadingSolicitacao ? 'Enviando...' : 'Enviar Solicitação'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Ver Atualização */}
+      {showModalVerAtualizacao && atualizacaoSelecionada && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-xl max-w-2xl w-full max-h-[90vh] overflow-auto shadow-xl">
+            <div className="p-6 border-b flex justify-between items-center sticky top-0 bg-white">
+              <h3 className="text-lg font-semibold">Detalhes da Atualização Cadastral</h3>
+              <button 
+                onClick={() => setShowModalVerAtualizacao(false)} 
+                className="p-2 hover:bg-gray-100 rounded"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="bg-gray-50 rounded-lg p-4 mb-4">
+                <p className="font-medium text-gray-800">{atualizacaoSelecionada.nome_cliente}</p>
+                <p className="text-sm text-gray-500">
+                  {atualizacaoSelecionada.tipo === 'solicitada' ? 'Solicitada pelo escritório' : 'Atualização espontânea'}
+                  {atualizacaoSelecionada.enviado_em && (
+                    <> • Enviada em {new Date(atualizacaoSelecionada.enviado_em).toLocaleDateString('pt-BR')}</>
+                  )}
+                </p>
+              </div>
+              
+              {atualizacaoSelecionada.motivo_solicitacao && (
+                <div className="mb-4">
+                  <h4 className="font-medium text-gray-700 mb-2">Motivo da Solicitação:</h4>
+                  <p className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-amber-800">
+                    {atualizacaoSelecionada.motivo_solicitacao}
+                  </p>
+                </div>
+              )}
+              
+              <h4 className="font-medium text-gray-700 mb-3">Dados Novos Informados:</h4>
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
+                {atualizacaoSelecionada.dados_novos && Object.keys(atualizacaoSelecionada.dados_novos).length > 0 ? (
+                  <div className="space-y-2">
+                    {Object.entries(atualizacaoSelecionada.dados_novos).map(([key, value]) => (
+                      value && (
+                        <div key={key} className="flex justify-between py-1 border-b border-green-100 last:border-0">
+                          <span className="text-gray-600 capitalize">{key.replace(/_/g, ' ')}:</span>
+                          <span className="font-medium text-gray-800">{String(value)}</span>
+                        </div>
+                      )
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-500">Nenhum dado informado</p>
+                )}
+              </div>
+
+              {atualizacaoSelecionada.dados_atuais && (
+                <>
+                  <h4 className="font-medium text-gray-700 mb-3">Dados Atuais (para comparação):</h4>
+                  <div className="bg-gray-100 border border-gray-200 rounded-lg p-4 mb-4">
+                    <div className="space-y-2 text-sm">
+                      {['telefone', 'celular', 'email', 'endereco', 'numero', 'complemento', 'bairro', 'cidade', 'estado', 'cep'].map((campo) => (
+                        atualizacaoSelecionada.dados_atuais?.[campo] && (
+                          <div key={campo} className="flex justify-between py-1 border-b border-gray-200 last:border-0">
+                            <span className="text-gray-500 capitalize">{campo.replace(/_/g, ' ')}:</span>
+                            <span className="text-gray-700">{atualizacaoSelecionada.dados_atuais[campo]}</span>
+                          </div>
+                        )
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="p-6 border-t bg-gray-50 flex justify-end gap-3 sticky bottom-0">
+              <button
+                onClick={() => {
+                  setShowModalRejeitar(true)
+                }}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+              >
+                Rejeitar
+              </button>
+              <button
+                onClick={() => aprovarAtualizacao(atualizacaoSelecionada.id)}
+                className="px-4 py-2 bg-green-500 text-white rounded-lg hover:bg-green-600"
+              >
+                Aprovar e Atualizar Dados
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Rejeitar Atualização */}
+      {showModalRejeitar && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[60] p-4">
+          <div className="bg-white rounded-xl max-w-md w-full shadow-xl">
+            <div className="p-6 border-b">
+              <h3 className="text-lg font-semibold text-red-600">Rejeitar Atualização</h3>
+            </div>
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Motivo da rejeição (será enviado ao cliente)
+                </label>
+                <textarea
+                  value={motivoRejeicao}
+                  onChange={(e) => setMotivoRejeicao(e.target.value)}
+                  className="w-full p-3 border rounded-lg focus:ring-2 focus:ring-red-500"
+                  rows={3}
+                  placeholder="Informe o motivo da rejeição..."
+                />
+              </div>
+            </div>
+            <div className="p-6 border-t bg-gray-50 flex gap-3 justify-end rounded-b-xl">
+              <button
+                onClick={() => {
+                  setShowModalRejeitar(false)
+                  setMotivoRejeicao('')
+                }}
+                className="px-4 py-2 border rounded-lg hover:bg-gray-100"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={rejeitarAtualizacao}
+                className="px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
+              >
+                Confirmar Rejeição
+              </button>
+            </div>
+          </div>
+        </div>
       )}
         </div>
   )
