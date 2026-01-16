@@ -5,7 +5,7 @@ import { User, FileText, CheckCircle, Upload, ChevronRight, ChevronLeft, Briefca
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-const LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher%20e%20Alvares-06.jpg"
+const LOGO_URL = "/logo.jpg"
 
 const Logo = ({ size = 'normal' }: { size?: 'small' | 'normal' | 'large' }) => {
   const sizes = {
@@ -16,7 +16,7 @@ const Logo = ({ size = 'normal' }: { size?: 'small' | 'normal' | 'large' }) => {
   return (
     <img 
       src={LOGO_URL} 
-      alt="Vaucher & Álvares Advogados" 
+      alt="Vaucher e Álvares Advogados" 
       className={`${sizes[size]} w-auto`}
     />
   )
@@ -51,6 +51,8 @@ const tiposDemanda = [
   { value: 'ferias_nao_gozadas', label: 'Férias Não Gozadas', texto: 'propor ação judicial visando a indenização por férias não gozadas e seus reflexos' },
   { value: 'horas_extras', label: 'Horas Extras', texto: 'propor ação judicial visando o pagamento de horas extras laboradas e seus reflexos legais' },
   { value: 'reintegracao', label: 'Reintegração', texto: 'propor ação judicial visando a reintegração ao cargo público e pagamento dos vencimentos do período de afastamento' },
+  { value: 'auxilio_moradia_residencia', label: 'Auxílio-moradia Residência Médica', texto: 'propor ação judicial visando o reconhecimento do direito ao auxílio-moradia durante o período de residência médica e pagamento dos valores devidos' },
+  { value: 'isencao_imposto_renda', label: 'Isenção de Imposto de Renda', texto: 'propor ação judicial visando o reconhecimento do direito à isenção de imposto de renda sobre proventos de aposentadoria ou pensão em razão de moléstia grave, bem como a restituição dos valores indevidamente recolhidos' },
   { value: 'outro', label: 'Outro (especificar)', texto: '' },
 ]
 
@@ -347,6 +349,7 @@ export default function CadastroCliente() {
                     <option value="solteiro(a)">Solteiro(a)</option>
                     <option value="casado(a)">Casado(a)</option>
                     <option value="divorciado(a)">Divorciado(a)</option>
+                    <option value="separado(a)">Separado(a)</option>
                     <option value="viúvo(a)">Viúvo(a)</option>
                     <option value="união estável">União Estável</option>
                   </select>
@@ -619,7 +622,7 @@ export default function CadastroCliente() {
 
               <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                 <p className="text-sm text-red-800">
-                  <strong>Importante:</strong> Ao enviar este cadastro, você declara que todas as informações fornecidas são verdadeiras e autoriza o escritório Vaucher & Álvares a representá-lo na demanda especificada.
+                  <strong>Importante:</strong> Ao enviar este cadastro, você declara que todas as informações fornecidas são verdadeiras e autoriza o escritório Vaucher e Álvares a representá-lo na demanda especificada.
                 </p>
               </div>
             </div>
@@ -671,7 +674,7 @@ export default function CadastroCliente() {
 
         {/* Footer */}
         <p className="text-center text-gray-400 text-xs mt-8">
-          © {new Date().getFullYear()} Vaucher & Álvares Sociedade de Advogados — Todos os direitos reservados
+          © {new Date().getFullYear()} Vaucher e Álvares Sociedade de Advogados — Todos os direitos reservados
         </p>
       </main>
     </div>
