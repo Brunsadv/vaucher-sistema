@@ -1,7 +1,7 @@
 {
-  "name": "Painel Admin - Vaucher & Álvares",
-  "short_name": "V&A Admin",
-  "description": "Painel administrativo do escritório",
+  "name": "Portal do Cliente - Vaucher & Álvares",
+  "short_name": "V&A Portal",
+  "description": "Acompanhe seus processos jurídicos pelo celular",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#7f1d1d",
@@ -68,10 +68,17 @@
   ],
   "shortcuts": [
     {
-      "name": "Cadastros",
-      "short_name": "Cadastros",
-      "description": "Ver cadastros de clientes",
-      "url": "/",
+      "name": "Meus Processos",
+      "short_name": "Processos",
+      "description": "Ver andamento dos processos",
+      "url": "/?tab=processos",
+      "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
+    },
+    {
+      "name": "Mensagens",
+      "short_name": "Chat",
+      "description": "Conversar com o escritório",
+      "url": "/?tab=mensagens",
       "icons": [{ "src": "/icons/icon-96x96.png", "sizes": "96x96" }]
     }
   ]
