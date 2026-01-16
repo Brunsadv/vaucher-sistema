@@ -1,8 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt, Scale, MessageSquare, Calendar, Gavel, CreditCard, Building, ChevronDown, ChevronUp } from 'lucide-react'
-
+import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt, Scale, MessageSquare, Calendar, Gavel, CreditCard, Building, ChevronDown, ChevronUp, HardDrive, Archive } from 'lucide-react'
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 const LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher%20e%20Alvares-06.jpg"
@@ -161,7 +160,36 @@ interface AcessoPortal {
   primeiro_acesso: boolean | null
   ultimo_acesso: string | null
 }
+interface DocumentoBackup {
+  id: string
+  db_id?: number
+  tipo: string
+  nome: string
+  arquivo?: string
+  descricao?: string
+  caminho: string
+  existe: boolean
+  tamanho: number
+  status?: string
+  data?: string
+}
 
+interface ClienteDocumentos {
+  cadastro_id: string
+  nome_cliente: string
+  documentos: DocumentoBackup[]
+  total_documentos: number
+  documentos_existentes: number
+  tamanho_total: number
+}
+
+interface BackupResumo {
+  total_clientes: number
+  total_documentos: number
+  documentos_existentes: number
+  tamanho_total: number
+  tamanho_formatado: string
+}
 // Tela de Login
 const LoginScreen = ({ onLogin }: { onLogin: (user: UserData) => void }) => {
   const [email, setEmail] = useState('')
@@ -1525,7 +1553,151 @@ const EnviarEmailModal = ({
     </div>
   )
 }
+// Modal de Backup e Gerenciamento de Documentos
+const BackupModal = ({ user, onClose }: { user: UserData, onClose: () => void }) => {
+  const [loading, setLoading] = useState(true)
+  const [clientes, setClientes] = useState<ClienteDocumentos[]>([])
+  const [resumo, setResumo] = useState<BackupResumo | null>(null)
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set())
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
+  const [baixandoBackup, setBaixandoBackup] = useState(false)
+  const [deletando, setDeletando] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [filtroCliente, setFiltroCliente] = useState('')
 
+  useEffect(() => {
+    carregarDocumentos()
+  }, [])
+
+  const carregarDocumentos = async () => {
+    setLoading(true)
+    try {
+      const response = await fetch(`${API_URL}/api/admin/backup/listar-documentos`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setClientes(data.clientes || [])
+        setResumo(data.resumo || null)
+      }
+    } catch (err) {
+      console.error('Erro ao carregar documentos:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const toggleCliente = (cadastroId: string) => {
+    const novos = new Set(expandidos)
+    if (novos.has(cadastroId)) {
+      novos.delete(cadastroId)
+    } else {
+      novos.add(cadastroId)
+    }
+    setExpandidos(novos)
+  }
+
+  const toggleDocumento = (docId: string) => {
+    const novos = new Set(selecionados)
+    if (novos.has(docId)) {
+      novos.delete(docId)
+    } else {
+      novos.add(docId)
+    }
+    setSelecionados(novos)
+  }
+
+  const selecionarTodosCliente = (cliente: ClienteDocumentos) => {
+    const novos = new Set(selecionados)
+    const docsExistentes = cliente.documentos.filter(d => d.existe)
+    const todosJaSelecionados = docsExistentes.every(d => selecionados.has(d.id))
+    
+    if (todosJaSelecionados) {
+      docsExistentes.forEach(d => novos.delete(d.id))
+    } else {
+      docsExistentes.forEach(d => novos.add(d.id))
+    }
+    setSelecionados(novos)
+  }
+
+  const selecionarTodos = () => {
+    if (selecionados.size > 0) {
+      setSelecionados(new Set())
+    } else {
+      const todos = new Set<string>()
+      clientes.forEach(c => {
+        c.documentos.filter(d => d.existe).forEach(d => todos.add(d.id))
+      })
+      setSelecionados(todos)
+    }
+  }
+
+  const handleBackupCompleto = async () => {
+    setBaixandoBackup(true)
+    try {
+      const response = await fetch(`${API_URL}/api/admin/backup/download-completo`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      if (response.ok) {
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `backup_completo_${new Date().toISOString().split('T')[0]}.zip`
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        window.URL.revokeObjectURL(url)
+      } else {
+        alert('Erro ao gerar backup completo')
+      }
+    } catch (err) {
+      alert('Erro de conexão')
+    } finally {
+      setBaixandoBackup(false)
+    }
+  }
+
+  const handleBackupSelecionados = async () => {
+    if (selecionados.size === 0) {
+      alert('Selecione pelo menos um documento')
+      return
+    }
+
+    setBaixandoBackup(true)
+    try {
+      const response = await fetch(`${API_URL}/api/admin/backup/download`, {
+        method: 'POST',
+        headers: { 
+          'Authorization': `Bearer ${user.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          documentos_ids: Array.from(selecionados),
+          incluir_dados_json: true
+        })
+      })
+      if (response.ok) {
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `backup_selecionados_${new Date().toISOString().split('T')[0]}.zip`
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        window.URL.revokeObjectURL(url)
+      } else {
+        alert('Erro ao gerar backup')
+      }
+    } catch (err) {
+      alert('Erro de conexão')
+    } finally {
+      setBaixandoBackup(false)
+    }
+  }
+
+  const handleDeletarSe
 // Dashboard Administrativo Principal
 const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => void }) => {
   const [cadastros, setCadastros] = useState<Cadastro[]>([])
@@ -1566,7 +1738,8 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   
   // Estados de Envio de Email
   const [showEnviarEmailModal, setShowEnviarEmailModal] = useState(false)
-
+// Estado do Modal de Backup
+  const [showBackupModal, setShowBackupModal] = useState(false)
   const tiposDemanda: Record<string, string> = {
     'adicional_insalubridade': 'Adicional de Insalubridade',
     'adicional_periculosidade': 'Adicional de Periculosidade',
@@ -2718,6 +2891,15 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
               <div className="flex items-center gap-2">
                 {user.is_admin && (
                   <button
+                    onClick={() => setShowBackupModal(true)}
+                    className="p-2 bg-white/10 hover:bg-white/20 rounded-lg"
+                    title="Backup e Documentos"
+                  >
+                    <HardDrive className="w-5 h-5" />
+                  </button>
+                )}
+                {user.is_admin && (
+                  <button
                     onClick={() => setShowUsuariosModal(true)}
                     className="p-2 bg-white/10 hover:bg-white/20 rounded-lg"
                     title="Gerenciar Usuários"
@@ -2916,7 +3098,10 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       {showAlterarSenhaModal && (
         <AlterarSenhaModal user={user} onClose={() => setShowAlterarSenhaModal(false)} />
       )}
-    </div>
+      {showBackupModal && (
+        <BackupModal user={user} onClose={() => setShowBackupModal(false)} />
+      )}
+        </div>
   )
 }
 
