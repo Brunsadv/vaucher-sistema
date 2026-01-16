@@ -248,13 +248,10 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: UserData) => void }) => {
       <div className="max-w-md w-full">
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-2xl mb-4">
-              <Shield className="w-8 h-8 text-red-700" />
-            </div>
-            <div className="flex justify-center">
+            <div className="flex justify-center mb-4">
               <Logo />
             </div>
-            <p className="text-gray-500 text-sm mt-2">Painel Administrativo</p>
+            <p className="text-gray-500 text-sm">Painel Administrativo</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
