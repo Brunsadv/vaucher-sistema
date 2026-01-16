@@ -251,7 +251,9 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: UserData) => void }) => {
             <div className="inline-flex items-center justify-center w-16 h-16 bg-red-100 rounded-2xl mb-4">
               <Shield className="w-8 h-8 text-red-700" />
             </div>
-            <Logo />
+            <div className="flex justify-center">
+              <Logo />
+            </div>
             <p className="text-gray-500 text-sm mt-2">Painel Administrativo</p>
           </div>
 
