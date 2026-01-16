@@ -475,7 +475,35 @@ def init_db():
             )
         """)
         
+        # ========== ATUALIZAÇÃO CADASTRAL ==========
+        
+        # Tabela de solicitações de atualização cadastral
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS atualizacoes_cadastrais (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                tipo VARCHAR(20) NOT NULL,
+                status VARCHAR(20) DEFAULT 'pendente',
+                motivo_solicitacao TEXT,
+                solicitado_em TIMESTAMP,
+                solicitado_por VARCHAR(255),
+                dados_novos JSONB,
+                documentos_novos JSONB,
+                enviado_em TIMESTAMP,
+                analisado_em TIMESTAMP,
+                analisado_por VARCHAR(255),
+                motivo_rejeicao TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Índices para melhor performance
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_atualizacoes_cadastro ON atualizacoes_cadastrais(cadastro_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_atualizacoes_status ON atualizacoes_cadastrais(status)")
+        
         logger.info("Tabelas do Portal do Cliente verificadas/criadas!")
+        logger.info("Tabela de atualizações cadastrais verificada/criada!")
         
         conn.commit()
         
@@ -913,6 +941,18 @@ class AndamentoModel(BaseModel):
 
 class MensagemEnvio(BaseModel):
     texto: str
+
+# Modelos para Atualização Cadastral
+class SolicitacaoAtualizacao(BaseModel):
+    motivo: str = ""
+
+class EnvioAtualizacao(BaseModel):
+    atualizacao_id: Optional[int] = None
+    dados: dict = {}
+    documentos: list = []
+
+class RejeicaoAtualizacao(BaseModel):
+    motivo: str = ""
 
 # ============================================
 # GERADOR DE DOCUMENTOS
@@ -1728,6 +1768,216 @@ async def enviar_email_documentos(
         return {"success": True, "message": f"E-mail enviado para {dados['email']} com {len(anexos_email)} anexo(s)"}
     else:
         raise HTTPException(status_code=500, detail="Erro ao enviar e-mail. Verifique os logs.")
+
+
+# ============================================
+# FUNÇÕES DE EMAIL - ATUALIZAÇÃO CADASTRAL
+# ============================================
+
+def enviar_email_solicitacao_atualizacao(email: str, nome: str, motivo: str) -> bool:
+    """Envia email ao cliente solicitando atualização cadastral."""
+    import httpx
+    
+    try:
+        html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background-color: #1e3a5f; padding: 20px; text-align: center;">
+                <h1 style="color: white; margin: 0;">Vaucher & Álvares</h1>
+                <p style="color: #ccc; margin: 5px 0 0 0;">Sociedade de Advogados</p>
+            </div>
+            <div style="padding: 30px; background-color: #f9f9f9;">
+                <h2 style="color: #1e3a5f;">Solicitação de Atualização Cadastral</h2>
+                <p>Prezado(a) <strong>{nome}</strong>,</p>
+                <p>O escritório <strong>Vaucher & Álvares Sociedade de Advogados</strong> 
+                solicita que você atualize seus dados cadastrais em nosso sistema.</p>
+                {f'<div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;"><strong>Motivo:</strong> {motivo}</div>' if motivo else ''}
+                <p>Por favor, acesse o <strong>Portal do Cliente</strong> para enviar 
+                os dados atualizados:</p>
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="https://portal.vaucherealvares.com" 
+                       style="background-color: #1e3a5f; color: white; padding: 15px 40px; 
+                              text-decoration: none; border-radius: 5px; display: inline-block;">
+                        Acessar Portal do Cliente
+                    </a>
+                </p>
+            </div>
+            <div style="background-color: #eee; padding: 20px; text-align: center; font-size: 12px; color: #666;">
+                <p style="margin: 0;">Vaucher & Álvares Sociedade de Advogados</p>
+                <p style="margin: 5px 0;">Rua Lima, nº 106, Jardim das Américas - Cuiabá/MT</p>
+                <p style="margin: 5px 0;">Tel: (65) 3025-1223</p>
+            </div>
+        </div>
+        """
+        
+        with httpx.Client() as client:
+            response = client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "from": FROM_EMAIL,
+                    "to": email,
+                    "subject": "Solicitação de Atualização Cadastral - Vaucher & Álvares",
+                    "html": html
+                }
+            )
+        
+        if response.status_code in [200, 201]:
+            logger.info(f"Email de solicitação de atualização enviado para {email}")
+            return True
+        else:
+            logger.error(f"Erro ao enviar email: {response.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Erro ao enviar email de solicitação: {e}")
+        return False
+
+
+def enviar_email_atualizacao_aprovada(email: str, nome: str) -> bool:
+    """Notifica cliente que atualização foi aprovada."""
+    import httpx
+    
+    try:
+        html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background-color: #1e3a5f; padding: 20px; text-align: center;">
+                <h1 style="color: white; margin: 0;">Vaucher & Álvares</h1>
+            </div>
+            <div style="padding: 30px; background-color: #f9f9f9;">
+                <div style="background-color: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin-bottom: 20px;">
+                    <h2 style="color: #155724; margin: 0;">✓ Atualização Cadastral Aprovada</h2>
+                </div>
+                <p>Prezado(a) <strong>{nome}</strong>,</p>
+                <p>Sua atualização cadastral foi <strong style="color: #28a745;">aprovada</strong> 
+                e seus dados foram atualizados em nosso sistema.</p>
+                <p>Agradecemos pela colaboração!</p>
+            </div>
+            <div style="background-color: #eee; padding: 20px; text-align: center; font-size: 12px; color: #666;">
+                <p style="margin: 0;">Vaucher & Álvares Sociedade de Advogados</p>
+            </div>
+        </div>
+        """
+        
+        with httpx.Client() as client:
+            response = client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "from": FROM_EMAIL,
+                    "to": email,
+                    "subject": "✓ Atualização Cadastral Aprovada - Vaucher & Álvares",
+                    "html": html
+                }
+            )
+        
+        return response.status_code in [200, 201]
+    except Exception as e:
+        logger.error(f"Erro ao enviar email de aprovação: {e}")
+        return False
+
+
+def enviar_email_atualizacao_rejeitada(email: str, nome: str, motivo: str) -> bool:
+    """Notifica cliente que atualização foi rejeitada."""
+    import httpx
+    
+    try:
+        html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background-color: #1e3a5f; padding: 20px; text-align: center;">
+                <h1 style="color: white; margin: 0;">Vaucher & Álvares</h1>
+            </div>
+            <div style="padding: 30px; background-color: #f9f9f9;">
+                <div style="background-color: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin-bottom: 20px;">
+                    <h2 style="color: #721c24; margin: 0;">Atualização Cadastral - Revisão Necessária</h2>
+                </div>
+                <p>Prezado(a) <strong>{nome}</strong>,</p>
+                <p>Sua atualização cadastral precisa de ajustes antes de ser aprovada.</p>
+                {f'<div style="background-color: #fff; border: 1px solid #ddd; padding: 15px; margin: 20px 0;"><strong>Observação:</strong> {motivo}</div>' if motivo else ''}
+                <p>Por favor, acesse o Portal do Cliente e envie novamente os dados corrigidos.</p>
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="https://portal.vaucherealvares.com" 
+                       style="background-color: #1e3a5f; color: white; padding: 15px 40px; 
+                              text-decoration: none; border-radius: 5px; display: inline-block;">
+                        Acessar Portal
+                    </a>
+                </p>
+            </div>
+            <div style="background-color: #eee; padding: 20px; text-align: center; font-size: 12px; color: #666;">
+                <p style="margin: 0;">Vaucher & Álvares Sociedade de Advogados</p>
+            </div>
+        </div>
+        """
+        
+        with httpx.Client() as client:
+            response = client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "from": FROM_EMAIL,
+                    "to": email,
+                    "subject": "Atualização Cadastral - Revisão Necessária - Vaucher & Álvares",
+                    "html": html
+                }
+            )
+        
+        return response.status_code in [200, 201]
+    except Exception as e:
+        logger.error(f"Erro ao enviar email de rejeição: {e}")
+        return False
+
+
+def enviar_email_nova_atualizacao_admin(cadastro_id: str, nome_cliente: str) -> bool:
+    """Notifica escritório sobre nova atualização cadastral."""
+    import httpx
+    
+    try:
+        html = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+            <div style="background-color: #1e3a5f; padding: 20px; text-align: center;">
+                <h1 style="color: white; margin: 0;">Nova Atualização Cadastral</h1>
+            </div>
+            <div style="padding: 30px; background-color: #f9f9f9;">
+                <p>O cliente <strong>{nome_cliente}</strong> enviou uma atualização cadastral para análise.</p>
+                <p><strong>ID do Cadastro:</strong> {cadastro_id}</p>
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="https://painel.vaucherealvares.com" 
+                       style="background-color: #1e3a5f; color: white; padding: 15px 40px; 
+                              text-decoration: none; border-radius: 5px; display: inline-block;">
+                        Acessar Painel Administrativo
+                    </a>
+                </p>
+            </div>
+        </div>
+        """
+        
+        with httpx.Client() as client:
+            response = client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {RESEND_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "from": FROM_EMAIL,
+                    "to": "atendimento@vaucherealvares.com",
+                    "subject": f"Nova Atualização Cadastral - {nome_cliente}",
+                    "html": html
+                }
+            )
+        
+        return response.status_code in [200, 201]
+    except Exception as e:
+        logger.error(f"Erro ao enviar email para admin: {e}")
+        return False
+
 
 @app.get("/api/cadastros/exportar/excel")
 def exportar_cadastros_excel():
@@ -4824,6 +5074,553 @@ async def portal_cliente_enviar_comprovante(
     except Exception as e:
         logger.error(f"Erro ao enviar comprovante: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# ENDPOINTS - ATUALIZAÇÃO CADASTRAL (ADMIN)
+# ============================================
+
+@app.post("/api/admin/clientes/{cadastro_id}/solicitar-atualizacao")
+async def solicitar_atualizacao_cadastral(
+    cadastro_id: str,
+    dados: SolicitacaoAtualizacao,
+    admin = Depends(verificar_admin)
+):
+    """Admin solicita que cliente atualize seus dados cadastrais."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Verificar se cadastro existe
+        cur.execute("SELECT id FROM cadastros WHERE id = %s", (cadastro_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+        
+        # Verificar se já existe solicitação pendente ou enviada
+        cur.execute("""
+            SELECT id FROM atualizacoes_cadastrais 
+            WHERE cadastro_id = %s AND status IN ('pendente', 'enviada')
+        """, (cadastro_id,))
+        
+        if cur.fetchone():
+            raise HTTPException(
+                status_code=400, 
+                detail="Já existe uma solicitação de atualização pendente para este cliente"
+            )
+        
+        # Criar solicitação
+        cur.execute("""
+            INSERT INTO atualizacoes_cadastrais 
+            (cadastro_id, tipo, status, motivo_solicitacao, solicitado_em, solicitado_por)
+            VALUES (%s, 'solicitada', 'pendente', %s, CURRENT_TIMESTAMP, %s)
+            RETURNING id
+        """, (cadastro_id, dados.motivo, admin["email"]))
+        
+        atualizacao_id = cur.fetchone()["id"]
+        conn.commit()
+        
+        # Buscar dados do cliente para enviar email
+        cur.execute("""
+            SELECT dados->>'nome' as nome, dados->>'email' as email 
+            FROM cadastros WHERE id = %s
+        """, (cadastro_id,))
+        cliente = cur.fetchone()
+        
+        email_enviado = False
+        if cliente and cliente["email"]:
+            email_enviado = enviar_email_solicitacao_atualizacao(
+                cliente["email"], 
+                cliente["nome"] or "Cliente", 
+                dados.motivo
+            )
+        
+        cur.close()
+        conn.close()
+        
+        return {
+            "success": True, 
+            "id": atualizacao_id, 
+            "message": "Solicitação de atualização criada com sucesso",
+            "email_enviado": email_enviado
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao solicitar atualização: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/atualizacoes-pendentes")
+async def listar_atualizacoes_pendentes(admin = Depends(verificar_admin)):
+    """Lista todas as atualizações cadastrais pendentes de análise do admin."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT 
+                a.id, a.cadastro_id, a.tipo, a.status,
+                a.motivo_solicitacao, a.solicitado_em,
+                a.dados_novos, a.documentos_novos, a.enviado_em,
+                c.dados->>'nome' as nome_cliente,
+                c.dados->>'email' as email_cliente,
+                c.dados->>'cpf' as cpf_cliente
+            FROM atualizacoes_cadastrais a
+            JOIN cadastros c ON c.id = a.cadastro_id
+            WHERE a.status = 'enviada'
+            ORDER BY a.enviado_em DESC
+        """)
+        
+        atualizacoes = []
+        for row in cur.fetchall():
+            atualizacao = dict(row)
+            for campo in ['solicitado_em', 'enviado_em']:
+                if atualizacao.get(campo):
+                    atualizacao[campo] = atualizacao[campo].isoformat()
+            atualizacoes.append(atualizacao)
+        
+        cur.close()
+        conn.close()
+        
+        return {"atualizacoes": atualizacoes, "total": len(atualizacoes)}
+        
+    except Exception as e:
+        logger.error(f"Erro ao listar atualizações: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/clientes/{cadastro_id}/atualizacoes")
+async def listar_atualizacoes_cliente(cadastro_id: str, admin = Depends(verificar_admin)):
+    """Lista histórico de atualizações cadastrais de um cliente específico."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, tipo, status, motivo_solicitacao, solicitado_em, 
+                   solicitado_por, dados_novos, enviado_em, analisado_em, 
+                   analisado_por, motivo_rejeicao, criado_em
+            FROM atualizacoes_cadastrais 
+            WHERE cadastro_id = %s 
+            ORDER BY criado_em DESC
+        """, (cadastro_id,))
+        
+        atualizacoes = []
+        for row in cur.fetchall():
+            atualizacao = dict(row)
+            for campo in ['solicitado_em', 'enviado_em', 'analisado_em', 'criado_em']:
+                if atualizacao.get(campo):
+                    atualizacao[campo] = atualizacao[campo].isoformat()
+            atualizacoes.append(atualizacao)
+        
+        cur.close()
+        conn.close()
+        
+        return {"atualizacoes": atualizacoes}
+        
+    except Exception as e:
+        logger.error(f"Erro ao listar atualizações do cliente: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/atualizacoes/{atualizacao_id}")
+async def buscar_atualizacao(atualizacao_id: int, admin = Depends(verificar_admin)):
+    """Busca detalhes de uma atualização específica."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT 
+                a.*,
+                c.dados as dados_atuais,
+                c.dados->>'nome' as nome_cliente
+            FROM atualizacoes_cadastrais a
+            JOIN cadastros c ON c.id = a.cadastro_id
+            WHERE a.id = %s
+        """, (atualizacao_id,))
+        
+        result = cur.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="Atualização não encontrada")
+        
+        atualizacao = dict(result)
+        for campo in ['solicitado_em', 'enviado_em', 'analisado_em', 'criado_em', 'atualizado_em']:
+            if atualizacao.get(campo):
+                atualizacao[campo] = atualizacao[campo].isoformat()
+        
+        cur.close()
+        conn.close()
+        
+        return atualizacao
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar atualização: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/atualizacoes/{atualizacao_id}/aprovar")
+async def aprovar_atualizacao(atualizacao_id: int, admin = Depends(verificar_admin)):
+    """Aprova a atualização e aplica os novos dados ao cadastro do cliente."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT cadastro_id, dados_novos FROM atualizacoes_cadastrais 
+            WHERE id = %s AND status = 'enviada'
+        """, (atualizacao_id,))
+        
+        atualizacao = cur.fetchone()
+        if not atualizacao:
+            raise HTTPException(
+                status_code=404, 
+                detail="Atualização não encontrada ou já foi processada"
+            )
+        
+        cadastro_id = atualizacao["cadastro_id"]
+        dados_novos = atualizacao["dados_novos"]
+        
+        # Atualizar cadastro com novos dados (merge)
+        if dados_novos:
+            cur.execute("""
+                UPDATE cadastros 
+                SET dados = dados || %s::jsonb
+                WHERE id = %s
+            """, (json.dumps(dados_novos), cadastro_id))
+        
+        # Marcar atualização como aprovada
+        cur.execute("""
+            UPDATE atualizacoes_cadastrais 
+            SET status = 'aprovada', 
+                analisado_em = CURRENT_TIMESTAMP,
+                analisado_por = %s,
+                atualizado_em = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (admin["email"], atualizacao_id))
+        
+        conn.commit()
+        
+        # Notificar cliente
+        cur.execute("""
+            SELECT dados->>'nome' as nome, dados->>'email' as email 
+            FROM cadastros WHERE id = %s
+        """, (cadastro_id,))
+        cliente = cur.fetchone()
+        
+        email_enviado = False
+        if cliente and cliente["email"]:
+            email_enviado = enviar_email_atualizacao_aprovada(cliente["email"], cliente["nome"] or "Cliente")
+        
+        cur.close()
+        conn.close()
+        
+        return {
+            "success": True, 
+            "message": "Atualização aprovada e dados atualizados com sucesso",
+            "email_enviado": email_enviado
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erro ao aprovar atualização: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/atualizacoes/{atualizacao_id}/rejeitar")
+async def rejeitar_atualizacao(
+    atualizacao_id: int, 
+    dados: RejeicaoAtualizacao,
+    admin = Depends(verificar_admin)
+):
+    """Rejeita a atualização com um motivo."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT cadastro_id FROM atualizacoes_cadastrais 
+            WHERE id = %s AND status = 'enviada'
+        """, (atualizacao_id,))
+        
+        result = cur.fetchone()
+        if not result:
+            raise HTTPException(
+                status_code=404, 
+                detail="Atualização não encontrada ou já foi processada"
+            )
+        
+        cadastro_id = result["cadastro_id"]
+        
+        cur.execute("""
+            UPDATE atualizacoes_cadastrais 
+            SET status = 'rejeitada', 
+                analisado_em = CURRENT_TIMESTAMP,
+                analisado_por = %s,
+                motivo_rejeicao = %s,
+                atualizado_em = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (admin["email"], dados.motivo, atualizacao_id))
+        
+        conn.commit()
+        
+        # Notificar cliente
+        cur.execute("""
+            SELECT dados->>'nome' as nome, dados->>'email' as email 
+            FROM cadastros WHERE id = %s
+        """, (cadastro_id,))
+        cliente = cur.fetchone()
+        
+        email_enviado = False
+        if cliente and cliente["email"]:
+            email_enviado = enviar_email_atualizacao_rejeitada(
+                cliente["email"], 
+                cliente["nome"] or "Cliente", 
+                dados.motivo
+            )
+        
+        cur.close()
+        conn.close()
+        
+        return {
+            "success": True, 
+            "message": "Atualização rejeitada",
+            "email_enviado": email_enviado
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erro ao rejeitar atualização: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# ENDPOINTS - ATUALIZAÇÃO CADASTRAL (CLIENTE)
+# ============================================
+
+@app.get("/api/cliente/atualizacao-pendente")
+async def verificar_atualizacao_pendente(cliente = Depends(verificar_token_cliente)):
+    """Verifica se há solicitação de atualização pendente para o cliente."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, tipo, motivo_solicitacao, solicitado_em, status
+            FROM atualizacoes_cadastrais 
+            WHERE cadastro_id = %s AND status = 'pendente'
+            ORDER BY criado_em DESC LIMIT 1
+        """, (cliente["cadastro_id"],))
+        
+        result = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if result:
+            return {
+                "tem_solicitacao": True,
+                "solicitacao": {
+                    "id": result["id"],
+                    "tipo": result["tipo"],
+                    "motivo": result["motivo_solicitacao"],
+                    "data": result["solicitado_em"].isoformat() if result["solicitado_em"] else None,
+                    "status": result["status"]
+                }
+            }
+        
+        return {"tem_solicitacao": False, "solicitacao": None}
+        
+    except Exception as e:
+        logger.error(f"Erro ao verificar solicitação pendente: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/cliente/iniciar-atualizacao")
+async def iniciar_atualizacao_espontanea(cliente = Depends(verificar_token_cliente)):
+    """Cliente inicia uma atualização espontânea de seus dados."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        cur.execute("""
+            SELECT id, status FROM atualizacoes_cadastrais 
+            WHERE cadastro_id = %s AND status IN ('pendente', 'enviada')
+            ORDER BY criado_em DESC LIMIT 1
+        """, (cliente["cadastro_id"],))
+        
+        existente = cur.fetchone()
+        if existente:
+            cur.close()
+            conn.close()
+            return {
+                "success": True, 
+                "id": existente["id"], 
+                "status": existente["status"],
+                "message": "Já existe uma atualização em andamento"
+            }
+        
+        cur.execute("""
+            INSERT INTO atualizacoes_cadastrais 
+            (cadastro_id, tipo, status)
+            VALUES (%s, 'espontanea', 'pendente')
+            RETURNING id
+        """, (cliente["cadastro_id"],))
+        
+        atualizacao_id = cur.fetchone()["id"]
+        conn.commit()
+        
+        cur.close()
+        conn.close()
+        
+        return {"success": True, "id": atualizacao_id, "message": "Atualização iniciada"}
+        
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erro ao iniciar atualização: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/cliente/enviar-atualizacao")
+async def enviar_atualizacao_cadastral(
+    dados: EnvioAtualizacao,
+    cliente = Depends(verificar_token_cliente)
+):
+    """Cliente envia dados atualizados para análise do escritório."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        atualizacao_id = dados.atualizacao_id
+        
+        if atualizacao_id:
+            cur.execute("""
+                UPDATE atualizacoes_cadastrais 
+                SET dados_novos = %s,
+                    documentos_novos = %s,
+                    status = 'enviada',
+                    enviado_em = CURRENT_TIMESTAMP,
+                    atualizado_em = CURRENT_TIMESTAMP
+                WHERE id = %s AND cadastro_id = %s AND status = 'pendente'
+                RETURNING id
+            """, (
+                json.dumps(dados.dados),
+                json.dumps(dados.documentos),
+                atualizacao_id,
+                cliente["cadastro_id"]
+            ))
+            
+            result = cur.fetchone()
+            if not result:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Solicitação não encontrada ou já foi enviada"
+                )
+        else:
+            cur.execute("""
+                INSERT INTO atualizacoes_cadastrais 
+                (cadastro_id, tipo, status, dados_novos, documentos_novos, enviado_em)
+                VALUES (%s, 'espontanea', 'enviada', %s, %s, CURRENT_TIMESTAMP)
+                RETURNING id
+            """, (
+                cliente["cadastro_id"],
+                json.dumps(dados.dados),
+                json.dumps(dados.documentos)
+            ))
+            
+            atualizacao_id = cur.fetchone()["id"]
+        
+        conn.commit()
+        
+        # Buscar nome do cliente para email
+        cur.execute("""
+            SELECT dados->>'nome' as nome FROM cadastros WHERE id = %s
+        """, (cliente["cadastro_id"],))
+        result = cur.fetchone()
+        nome_cliente = result["nome"] if result else cliente["cadastro_id"]
+        
+        cur.close()
+        conn.close()
+        
+        enviar_email_nova_atualizacao_admin(cliente["cadastro_id"], nome_cliente)
+        
+        return {
+            "success": True, 
+            "message": "Atualização enviada para análise do escritório",
+            "id": atualizacao_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error(f"Erro ao enviar atualização: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/cliente/minhas-atualizacoes")
+async def listar_minhas_atualizacoes(cliente = Depends(verificar_token_cliente)):
+    """Lista histórico de atualizações cadastrais do cliente logado."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, tipo, status, motivo_solicitacao, 
+                   solicitado_em, enviado_em, analisado_em, motivo_rejeicao
+            FROM atualizacoes_cadastrais 
+            WHERE cadastro_id = %s 
+            ORDER BY criado_em DESC
+        """, (cliente["cadastro_id"],))
+        
+        atualizacoes = []
+        for row in cur.fetchall():
+            atualizacao = dict(row)
+            for campo in ['solicitado_em', 'enviado_em', 'analisado_em']:
+                if atualizacao.get(campo):
+                    atualizacao[campo] = atualizacao[campo].isoformat()
+            atualizacoes.append(atualizacao)
+        
+        cur.close()
+        conn.close()
+        
+        return {"atualizacoes": atualizacoes}
+        
+    except Exception as e:
+        logger.error(f"Erro ao listar atualizações: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ============================================
 # ENDPOINTS - BACKUP E GERENCIAMENTO DE DOCUMENTOS
