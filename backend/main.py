@@ -3854,7 +3854,7 @@ async def portal_cliente_enviar_documento_extra(
         try:
             # Enviar para o e-mail do escritório
             await enviar_email_resend(
-                "atendimento@vaucherealvares.com.br",
+                "atendimento@vaucherealvares.com",
                 f"Novo documento recebido de {nome_cliente}",
                 email_html
             )
@@ -3983,7 +3983,7 @@ async def portal_cliente_enviar_mensagem(
         
         try:
             await enviar_email_resend(
-                "atendimento@vaucherealvares.com.br",
+                "atendimento@vaucherealvares.com",
                 f"Nova mensagem de {nome_cliente}",
                 email_html
             )
