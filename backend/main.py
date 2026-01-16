@@ -505,6 +505,53 @@ def init_db():
         logger.info("Tabelas do Portal do Cliente verificadas/criadas!")
         logger.info("Tabela de atualizações cadastrais verificada/criada!")
         
+        # ========== TERMOS DE USO E PRIVACIDADE ==========
+        
+        # Tabela de versões dos termos
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS termos_versoes (
+                id SERIAL PRIMARY KEY,
+                tipo VARCHAR(50) NOT NULL,
+                versao VARCHAR(20) NOT NULL,
+                conteudo TEXT NOT NULL,
+                data_vigencia TIMESTAMP NOT NULL,
+                ativo BOOLEAN DEFAULT TRUE,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Tabela de aceites dos termos
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS aceites_termos (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) NOT NULL,
+                termos_versao_id INTEGER NOT NULL,
+                ip_address VARCHAR(45) NOT NULL,
+                user_agent TEXT,
+                aceito_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                metadados JSONB DEFAULT '{}'
+            )
+        """)
+        
+        # Adicionar colunas de termos na tabela cadastros se não existirem
+        cur.execute("""
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cadastros' AND column_name='termos_aceitos') THEN
+                    ALTER TABLE cadastros ADD COLUMN termos_aceitos BOOLEAN DEFAULT FALSE;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cadastros' AND column_name='termos_aceitos_em') THEN
+                    ALTER TABLE cadastros ADD COLUMN termos_aceitos_em TIMESTAMP;
+                END IF;
+            END $$;
+        """)
+        
+        # Índices para termos
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_termos_tipo_ativo ON termos_versoes(tipo, ativo)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_aceites_cadastro ON aceites_termos(cadastro_id)")
+        
+        logger.info("Tabelas de Termos de Uso e Privacidade verificadas/criadas!")
+        
         conn.commit()
         
         # Criar usuário admin inicial se não existir
@@ -6277,6 +6324,297 @@ async def admin_download_backup_completo(
         logger.error(f"Erro ao gerar backup completo: {e}")
         raise HTTPException(status_code=500, detail=str(e))
         
+# ============================================
+# TERMOS DE USO E POLÍTICA DE PRIVACIDADE
+# ============================================
+
+@app.get("/api/termos/{tipo}")
+async def get_termos_vigentes(tipo: str):
+    """
+    Retorna a versão vigente dos termos.
+    Tipos: 'termos_uso' ou 'politica_privacidade'
+    """
+    if tipo not in ['termos_uso', 'politica_privacidade']:
+        raise HTTPException(status_code=400, detail="Tipo inválido. Use 'termos_uso' ou 'politica_privacidade'")
+    
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco de dados")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, versao, conteudo, data_vigencia
+            FROM termos_versoes
+            WHERE tipo = %s AND ativo = TRUE
+            ORDER BY data_vigencia DESC
+            LIMIT 1
+        """, (tipo,))
+        
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Termos não encontrados. Configure os termos no banco de dados.")
+        
+        return {
+            "id": row["id"],
+            "versao": row["versao"],
+            "conteudo": row["conteudo"],
+            "data_vigencia": row["data_vigencia"].isoformat() if row["data_vigencia"] else None
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar termos: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar termos")
+
+
+@app.post("/api/aceitar-termos")
+async def aceitar_termos(request):
+    """
+    Registra o aceite dos termos pelo cliente no momento do cadastro.
+    Armazena IP, User-Agent e metadados para validade legal.
+    """
+    from starlette.requests import Request
+    
+    # Obter dados do body
+    try:
+        data = await request.json()
+    except:
+        raise HTTPException(status_code=400, detail="JSON inválido")
+    
+    cadastro_id = data.get('cadastro_id')
+    termos_uso_versao_id = data.get('termos_uso_versao_id')
+    privacidade_versao_id = data.get('privacidade_versao_id')
+    
+    if not cadastro_id:
+        raise HTTPException(status_code=400, detail="cadastro_id é obrigatório")
+    
+    if not termos_uso_versao_id and not privacidade_versao_id:
+        raise HTTPException(status_code=400, detail="Pelo menos um ID de versão de termos é obrigatório")
+    
+    # Capturar IP do cliente
+    ip_address = request.client.host if request.client else "0.0.0.0"
+    
+    # Tentar pegar IP real se estiver atrás de proxy/load balancer
+    forwarded_for = request.headers.get('X-Forwarded-For')
+    if forwarded_for:
+        ip_address = forwarded_for.split(',')[0].strip()
+    
+    # Capturar User-Agent
+    user_agent = request.headers.get('User-Agent', 'Não informado')
+    
+    # Metadados adicionais para prova legal
+    metadados = {
+        "accept_language": request.headers.get('Accept-Language'),
+        "origin": request.headers.get('Origin'),
+        "referer": request.headers.get('Referer'),
+        "timestamp_servidor": datetime.now().isoformat(),
+        "x_real_ip": request.headers.get('X-Real-IP'),
+    }
+    
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco de dados")
+    
+    try:
+        cur = conn.cursor()
+        
+        # Registrar aceite dos Termos de Uso
+        if termos_uso_versao_id:
+            cur.execute("""
+                INSERT INTO aceites_termos (cadastro_id, termos_versao_id, ip_address, user_agent, metadados)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (cadastro_id, termos_uso_versao_id, ip_address, user_agent, json.dumps(metadados)))
+        
+        # Registrar aceite da Política de Privacidade
+        if privacidade_versao_id:
+            cur.execute("""
+                INSERT INTO aceites_termos (cadastro_id, termos_versao_id, ip_address, user_agent, metadados)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (cadastro_id, privacidade_versao_id, ip_address, user_agent, json.dumps(metadados)))
+        
+        # Atualizar cadastro marcando que aceitou os termos
+        cur.execute("""
+            UPDATE cadastros 
+            SET termos_aceitos = TRUE, termos_aceitos_em = NOW()
+            WHERE id = %s
+        """, (cadastro_id,))
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        logger.info(f"Termos aceitos - Cadastro: {cadastro_id}, IP: {ip_address}")
+        
+        return {
+            "success": True, 
+            "message": "Termos aceitos e registrados com sucesso",
+            "cadastro_id": cadastro_id,
+            "ip_registrado": ip_address,
+            "data_aceite": datetime.now().isoformat()
+        }
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Erro ao registrar aceite de termos: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao registrar aceite dos termos")
+
+
+@app.get("/api/admin/clientes/{cadastro_id}/aceites")
+async def get_aceites_cliente(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Lista todos os aceites de termos de um cliente.
+    Usado para auditoria e comprovação legal.
+    """
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco de dados")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Buscar todos os aceites com informações da versão dos termos
+        cur.execute("""
+            SELECT 
+                a.id,
+                a.cadastro_id,
+                t.tipo,
+                t.versao,
+                t.conteudo,
+                a.ip_address,
+                a.user_agent,
+                a.aceito_em,
+                a.metadados
+            FROM aceites_termos a
+            JOIN termos_versoes t ON a.termos_versao_id = t.id
+            WHERE a.cadastro_id = %s
+            ORDER BY a.aceito_em DESC
+        """, (cadastro_id,))
+        
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        aceites = []
+        for row in rows:
+            aceites.append({
+                "id": row["id"],
+                "cadastro_id": row["cadastro_id"],
+                "tipo": row["tipo"],
+                "versao": row["versao"],
+                "conteudo_resumo": row["conteudo"][:200] + "..." if row["conteudo"] and len(row["conteudo"]) > 200 else row["conteudo"],
+                "ip_address": row["ip_address"],
+                "user_agent": row["user_agent"],
+                "aceito_em": row["aceito_em"].isoformat() if row["aceito_em"] else None,
+                "metadados": row["metadados"]
+            })
+        
+        return {
+            "cadastro_id": cadastro_id,
+            "total_aceites": len(aceites),
+            "aceites": aceites
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao buscar aceites do cliente {cadastro_id}: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao buscar aceites")
+
+
+@app.get("/api/admin/aceites/exportar/{cadastro_id}")
+async def exportar_aceites_cliente(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Exporta todos os aceites de um cliente em formato JSON completo.
+    Útil para comprovação judicial.
+    """
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco de dados")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Buscar dados do cadastro
+        cur.execute("SELECT * FROM cadastros WHERE id = %s", (cadastro_id,))
+        cadastro = cur.fetchone()
+        
+        if not cadastro:
+            raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+        
+        # Buscar todos os aceites com o conteúdo completo dos termos
+        cur.execute("""
+            SELECT 
+                a.id,
+                a.cadastro_id,
+                t.tipo,
+                t.versao,
+                t.conteudo,
+                t.data_vigencia,
+                a.ip_address,
+                a.user_agent,
+                a.aceito_em,
+                a.metadados
+            FROM aceites_termos a
+            JOIN termos_versoes t ON a.termos_versao_id = t.id
+            WHERE a.cadastro_id = %s
+            ORDER BY a.aceito_em DESC
+        """, (cadastro_id,))
+        
+        aceites = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        # Montar documento de comprovação
+        dados_cadastro = cadastro["dados"] if isinstance(cadastro["dados"], dict) else json.loads(cadastro["dados"] or "{}")
+        
+        documento_comprovacao = {
+            "titulo": "COMPROVAÇÃO DE ACEITE DE TERMOS",
+            "gerado_em": datetime.now().isoformat(),
+            "gerado_por": usuario["email"],
+            "cliente": {
+                "cadastro_id": cadastro_id,
+                "nome": dados_cadastro.get("nome"),
+                "cpf": dados_cadastro.get("cpf"),
+                "email": dados_cadastro.get("email"),
+                "data_cadastro": str(cadastro["data"]),
+                "termos_aceitos": cadastro.get("termos_aceitos", False),
+                "termos_aceitos_em": cadastro.get("termos_aceitos_em").isoformat() if cadastro.get("termos_aceitos_em") else None
+            },
+            "aceites": [
+                {
+                    "id_aceite": a["id"],
+                    "tipo_documento": a["tipo"],
+                    "versao_documento": a["versao"],
+                    "data_vigencia_documento": a["data_vigencia"].isoformat() if a["data_vigencia"] else None,
+                    "conteudo_integral": a["conteudo"],
+                    "ip_address": a["ip_address"],
+                    "user_agent": a["user_agent"],
+                    "data_hora_aceite": a["aceito_em"].isoformat() if a["aceito_em"] else None,
+                    "metadados_tecnicos": a["metadados"]
+                }
+                for a in aceites
+            ],
+            "declaracao": "Este documento comprova que o titular acima identificado aceitou os termos nas datas e condições especificadas, através do sistema digital do escritório Vaucher & Álvares Sociedade de Advogados."
+        }
+        
+        return documento_comprovacao
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao exportar aceites: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao exportar aceites")
+
+
 # ============================================
 # INICIALIZAÇÃO
 # ============================================
