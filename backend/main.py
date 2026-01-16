@@ -4825,7 +4825,661 @@ async def portal_cliente_enviar_comprovante(
         logger.error(f"Erro ao enviar comprovante: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ============================================
+# ENDPOINTS - BACKUP E GERENCIAMENTO DE DOCUMENTOS
+# ============================================
 
+@app.get("/api/admin/backup/listar-documentos")
+async def admin_listar_todos_documentos(
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Lista TODOS os documentos do sistema organizados por cliente.
+    Retorna estrutura para seleção individual de arquivos.
+    """
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Buscar todos os cadastros
+        cur.execute("""
+            SELECT id, dados, documentos, arquivos_gerados, documentos_assinados
+            FROM cadastros ORDER BY data_hora DESC
+        """)
+        cadastros = cur.fetchall()
+        
+        resultado = []
+        
+        for cadastro in cadastros:
+            cadastro_id = cadastro["id"]
+            dados = cadastro["dados"] if isinstance(cadastro["dados"], dict) else json.loads(cadastro["dados"] or "{}")
+            nome_cliente = dados.get("nome", "Sem nome")
+            
+            documentos_cliente = {
+                "cadastro_id": cadastro_id,
+                "nome_cliente": nome_cliente,
+                "documentos": []
+            }
+            
+            # 1. Documentos enviados pelo cliente no cadastro inicial
+            docs_cadastro = cadastro["documentos"] if isinstance(cadastro["documentos"], list) else json.loads(cadastro["documentos"] or "[]")
+            for doc in docs_cadastro:
+                if isinstance(doc, dict) and doc.get("arquivo"):
+                    caminho = os.path.join(UPLOADS_DIR, doc["arquivo"])
+                    documentos_cliente["documentos"].append({
+                        "id": f"cadastro_{cadastro_id}_{doc.get('arquivo', '')}",
+                        "tipo": "cadastro_inicial",
+                        "nome": doc.get("nome", doc.get("arquivo", "Documento")),
+                        "arquivo": doc.get("arquivo"),
+                        "caminho": caminho,
+                        "existe": os.path.exists(caminho),
+                        "tamanho": os.path.getsize(caminho) if os.path.exists(caminho) else 0
+                    })
+            
+            # 2. Documentos gerados (contrato e procuração)
+            arq_gerados = cadastro["arquivos_gerados"] if isinstance(cadastro["arquivos_gerados"], dict) else json.loads(cadastro["arquivos_gerados"] or "{}")
+            for tipo, caminho in arq_gerados.items():
+                if caminho:
+                    caminho_completo = caminho if os.path.isabs(caminho) else os.path.join(BASE_DIR, caminho)
+                    documentos_cliente["documentos"].append({
+                        "id": f"gerado_{cadastro_id}_{tipo}",
+                        "tipo": "documento_gerado",
+                        "nome": f"{tipo.replace('_', ' ').title()}",
+                        "arquivo": os.path.basename(caminho),
+                        "caminho": caminho_completo,
+                        "existe": os.path.exists(caminho_completo),
+                        "tamanho": os.path.getsize(caminho_completo) if os.path.exists(caminho_completo) else 0
+                    })
+            
+            # 3. Documentos assinados
+            docs_assinados = cadastro["documentos_assinados"] if isinstance(cadastro["documentos_assinados"], list) else json.loads(cadastro["documentos_assinados"] or "[]")
+            for doc in docs_assinados:
+                if isinstance(doc, dict) and doc.get("arquivo"):
+                    caminho = os.path.join(UPLOADS_DIR, doc["arquivo"])
+                    documentos_cliente["documentos"].append({
+                        "id": f"assinado_{cadastro_id}_{doc.get('arquivo', '')}",
+                        "tipo": "documento_assinado",
+                        "nome": doc.get("nome", "Documento Assinado"),
+                        "arquivo": doc.get("arquivo"),
+                        "caminho": caminho,
+                        "existe": os.path.exists(caminho),
+                        "tamanho": os.path.getsize(caminho) if os.path.exists(caminho) else 0
+                    })
+            
+            # 4. Documentos extras enviados pelo cliente (tabela documentos_extras)
+            cur.execute("""
+                SELECT id, nome_original, arquivo_path, descricao, criado_em
+                FROM documentos_extras WHERE cadastro_id = %s
+            """, (cadastro_id,))
+            docs_extras = cur.fetchall()
+            for doc in docs_extras:
+                documentos_cliente["documentos"].append({
+                    "id": f"extra_{doc['id']}",
+                    "db_id": doc["id"],
+                    "tipo": "documento_extra",
+                    "nome": doc["nome_original"],
+                    "descricao": doc.get("descricao", ""),
+                    "caminho": doc["arquivo_path"],
+                    "existe": os.path.exists(doc["arquivo_path"]),
+                    "tamanho": os.path.getsize(doc["arquivo_path"]) if os.path.exists(doc["arquivo_path"]) else 0,
+                    "data": doc["criado_em"].isoformat() if doc["criado_em"] else None
+                })
+            
+            # 5. Documentos enviados pelo admin para o cliente (tabela documentos_admin)
+            cur.execute("""
+                SELECT id, nome_original, arquivo_path, descricao, criado_em
+                FROM documentos_admin WHERE cadastro_id = %s
+            """, (cadastro_id,))
+            docs_admin = cur.fetchall()
+            for doc in docs_admin:
+                documentos_cliente["documentos"].append({
+                    "id": f"admin_{doc['id']}",
+                    "db_id": doc["id"],
+                    "tipo": "documento_admin",
+                    "nome": doc["nome_original"],
+                    "descricao": doc.get("descricao", ""),
+                    "caminho": doc["arquivo_path"],
+                    "existe": os.path.exists(doc["arquivo_path"]),
+                    "tamanho": os.path.getsize(doc["arquivo_path"]) if os.path.exists(doc["arquivo_path"]) else 0,
+                    "data": doc["criado_em"].isoformat() if doc["criado_em"] else None
+                })
+            
+            # 6. Comprovantes de pagamento
+            cur.execute("""
+                SELECT c.id, c.arquivo_nome, c.arquivo_path, c.enviado_em, c.status,
+                       p.numero as parcela_numero, ch.descricao as contrato_descricao
+                FROM comprovantes c
+                JOIN parcelas p ON c.parcela_id = p.id
+                JOIN contratos_honorarios ch ON p.contrato_id = ch.id
+                WHERE ch.cadastro_id = %s
+            """, (cadastro_id,))
+            comprovantes = cur.fetchall()
+            for comp in comprovantes:
+                documentos_cliente["documentos"].append({
+                    "id": f"comprovante_{comp['id']}",
+                    "db_id": comp["id"],
+                    "tipo": "comprovante",
+                    "nome": f"Comprovante - Parcela {comp['parcela_numero']} - {comp.get('contrato_descricao', '')}",
+                    "arquivo": comp["arquivo_nome"],
+                    "caminho": comp["arquivo_path"],
+                    "existe": os.path.exists(comp["arquivo_path"]) if comp["arquivo_path"] else False,
+                    "tamanho": os.path.getsize(comp["arquivo_path"]) if comp["arquivo_path"] and os.path.exists(comp["arquivo_path"]) else 0,
+                    "status": comp["status"],
+                    "data": comp["enviado_em"].isoformat() if comp["enviado_em"] else None
+                })
+            
+            # Calcular totais
+            docs_existentes = [d for d in documentos_cliente["documentos"] if d.get("existe")]
+            documentos_cliente["total_documentos"] = len(documentos_cliente["documentos"])
+            documentos_cliente["documentos_existentes"] = len(docs_existentes)
+            documentos_cliente["tamanho_total"] = sum(d.get("tamanho", 0) for d in docs_existentes)
+            
+            resultado.append(documentos_cliente)
+        
+        cur.close()
+        conn.close()
+        
+        # Calcular totais gerais
+        total_geral = sum(c["total_documentos"] for c in resultado)
+        existentes_geral = sum(c["documentos_existentes"] for c in resultado)
+        tamanho_geral = sum(c["tamanho_total"] for c in resultado)
+        
+        return {
+            "clientes": resultado,
+            "resumo": {
+                "total_clientes": len(resultado),
+                "total_documentos": total_geral,
+                "documentos_existentes": existentes_geral,
+                "tamanho_total": tamanho_geral,
+                "tamanho_formatado": formatar_tamanho(tamanho_geral)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Erro ao listar documentos para backup: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def formatar_tamanho(bytes_size: int) -> str:
+    """Formata tamanho em bytes para formato legível."""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if bytes_size < 1024:
+            return f"{bytes_size:.1f} {unit}"
+        bytes_size /= 1024
+    return f"{bytes_size:.1f} TB"
+
+
+class BackupRequest(BaseModel):
+    documentos_ids: List[str]  # Lista de IDs dos documentos selecionados
+    incluir_dados_json: bool = True  # Se inclui JSON com dados dos clientes
+
+
+@app.post("/api/admin/backup/download")
+async def admin_download_backup(
+    request: BackupRequest,
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Gera um ZIP com os documentos selecionados.
+    Organiza por cliente em pastas separadas.
+    """
+    if not request.documentos_ids:
+        raise HTTPException(status_code=400, detail="Nenhum documento selecionado")
+    
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Criar arquivo ZIP em memória
+        zip_buffer = BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            
+            # Buscar todos os cadastros para organização
+            cur.execute("SELECT id, dados FROM cadastros")
+            cadastros = {row["id"]: row for row in cur.fetchall()}
+            
+            arquivos_adicionados = set()
+            dados_clientes = {}
+            
+            for doc_id in request.documentos_ids:
+                partes = doc_id.split("_", 2)
+                if len(partes) < 2:
+                    continue
+                
+                tipo = partes[0]
+                
+                # Identificar cadastro_id e buscar arquivo
+                caminho_arquivo = None
+                nome_arquivo = None
+                cadastro_id = None
+                
+                if tipo == "cadastro":
+                    # Formato: cadastro_{cadastro_id}_{arquivo}
+                    cadastro_id = partes[1]
+                    arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
+                    caminho_arquivo = os.path.join(UPLOADS_DIR, arquivo)
+                    nome_arquivo = arquivo
+                    
+                elif tipo == "gerado":
+                    # Formato: gerado_{cadastro_id}_{tipo_doc}
+                    cadastro_id = partes[1]
+                    tipo_doc = "_".join(partes[2:]) if len(partes) > 2 else ""
+                    cadastro = buscar_cadastro(cadastro_id)
+                    if cadastro and cadastro.get("arquivos_gerados"):
+                        caminho = cadastro["arquivos_gerados"].get(tipo_doc)
+                        if caminho:
+                            caminho_arquivo = caminho if os.path.isabs(caminho) else os.path.join(BASE_DIR, caminho)
+                            nome_arquivo = os.path.basename(caminho)
+                
+                elif tipo == "assinado":
+                    # Formato: assinado_{cadastro_id}_{arquivo}
+                    cadastro_id = partes[1]
+                    arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
+                    caminho_arquivo = os.path.join(UPLOADS_DIR, arquivo)
+                    nome_arquivo = arquivo
+                
+                elif tipo == "extra":
+                    # Formato: extra_{db_id}
+                    db_id = int(partes[1])
+                    cur.execute("SELECT * FROM documentos_extras WHERE id = %s", (db_id,))
+                    doc = cur.fetchone()
+                    if doc:
+                        cadastro_id = doc["cadastro_id"]
+                        caminho_arquivo = doc["arquivo_path"]
+                        nome_arquivo = doc["nome_original"]
+                
+                elif tipo == "admin":
+                    # Formato: admin_{db_id}
+                    db_id = int(partes[1])
+                    cur.execute("SELECT * FROM documentos_admin WHERE id = %s", (db_id,))
+                    doc = cur.fetchone()
+                    if doc:
+                        cadastro_id = doc["cadastro_id"]
+                        caminho_arquivo = doc["arquivo_path"]
+                        nome_arquivo = doc["nome_original"]
+                
+                elif tipo == "comprovante":
+                    # Formato: comprovante_{db_id}
+                    db_id = int(partes[1])
+                    cur.execute("""
+                        SELECT c.*, ch.cadastro_id 
+                        FROM comprovantes c
+                        JOIN parcelas p ON c.parcela_id = p.id
+                        JOIN contratos_honorarios ch ON p.contrato_id = ch.id
+                        WHERE c.id = %s
+                    """, (db_id,))
+                    doc = cur.fetchone()
+                    if doc:
+                        cadastro_id = doc["cadastro_id"]
+                        caminho_arquivo = doc["arquivo_path"]
+                        nome_arquivo = doc["arquivo_nome"]
+                
+                # Adicionar arquivo ao ZIP
+                if caminho_arquivo and os.path.exists(caminho_arquivo) and caminho_arquivo not in arquivos_adicionados:
+                    # Buscar nome do cliente
+                    nome_cliente = "Sem_Nome"
+                    if cadastro_id and cadastro_id in cadastros:
+                        dados = cadastros[cadastro_id]["dados"]
+                        if isinstance(dados, str):
+                            dados = json.loads(dados)
+                        nome_cliente = dados.get("nome", "Sem_Nome").replace(" ", "_").replace("/", "-")[:50]
+                    
+                    # Criar pasta do cliente
+                    pasta_cliente = f"{cadastro_id}_{nome_cliente}"
+                    
+                    # Adicionar ao ZIP
+                    zip_file.write(caminho_arquivo, f"{pasta_cliente}/{nome_arquivo}")
+                    arquivos_adicionados.add(caminho_arquivo)
+                    
+                    # Guardar dados do cliente para JSON
+                    if cadastro_id not in dados_clientes:
+                        dados_clientes[cadastro_id] = {
+                            "cadastro_id": cadastro_id,
+                            "nome": nome_cliente,
+                            "arquivos": []
+                        }
+                    dados_clientes[cadastro_id]["arquivos"].append(nome_arquivo)
+            
+            # Incluir JSON com dados dos clientes
+            if request.incluir_dados_json:
+                # Buscar dados completos dos clientes incluídos
+                for cadastro_id in dados_clientes.keys():
+                    cadastro = buscar_cadastro(cadastro_id)
+                    if cadastro:
+                        dados_clientes[cadastro_id]["dados_cadastro"] = cadastro["dados"]
+                        dados_clientes[cadastro_id]["status"] = cadastro["status"]
+                        dados_clientes[cadastro_id]["data_cadastro"] = cadastro["data"]
+                        
+                        # Buscar processos
+                        processos = listar_processos(cadastro_id)
+                        dados_clientes[cadastro_id]["processos"] = processos
+                        
+                        # Buscar contratos
+                        contratos = listar_contratos(cadastro_id)
+                        dados_clientes[cadastro_id]["contratos"] = contratos
+                
+                # Adicionar JSON ao ZIP
+                json_content = json.dumps(list(dados_clientes.values()), indent=2, ensure_ascii=False, default=str)
+                zip_file.writestr("dados_clientes.json", json_content)
+        
+        cur.close()
+        conn.close()
+        
+        # Retornar o ZIP
+        zip_buffer.seek(0)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"backup_vaucher_alvares_{timestamp}.zip"
+        
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.error(f"Erro ao gerar backup: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DeleteDocumentosRequest(BaseModel):
+    documentos_ids: List[str]  # Lista de IDs dos documentos a deletar
+    confirmar: bool = False  # Confirmação obrigatória
+
+
+@app.post("/api/admin/backup/deletar-documentos")
+async def admin_deletar_documentos_selecionados(
+    request: DeleteDocumentosRequest,
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Deleta múltiplos documentos selecionados.
+    Requer confirmação explícita.
+    """
+    if not request.confirmar:
+        raise HTTPException(
+            status_code=400, 
+            detail="Confirmação obrigatória. Defina 'confirmar: true' para prosseguir."
+        )
+    
+    if not request.documentos_ids:
+        raise HTTPException(status_code=400, detail="Nenhum documento selecionado")
+    
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        deletados = []
+        erros = []
+        
+        for doc_id in request.documentos_ids:
+            try:
+                partes = doc_id.split("_", 2)
+                if len(partes) < 2:
+                    erros.append({"id": doc_id, "erro": "ID inválido"})
+                    continue
+                
+                tipo = partes[0]
+                sucesso = False
+                
+                if tipo == "cadastro":
+                    # Documentos do cadastro inicial - remover do JSON
+                    cadastro_id = partes[1]
+                    arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
+                    caminho = os.path.join(UPLOADS_DIR, arquivo)
+                    
+                    # Remover arquivo físico
+                    if os.path.exists(caminho):
+                        os.remove(caminho)
+                    
+                    # Atualizar JSON no banco
+                    cadastro = buscar_cadastro(cadastro_id)
+                    if cadastro:
+                        docs = cadastro.get("documentos", [])
+                        docs_atualizados = [d for d in docs if d.get("arquivo") != arquivo]
+                        cur.execute(
+                            "UPDATE cadastros SET documentos = %s WHERE id = %s",
+                            (json.dumps(docs_atualizados), cadastro_id)
+                        )
+                        conn.commit()
+                    sucesso = True
+                    
+                elif tipo == "gerado":
+                    # Documentos gerados - remover arquivo e atualizar JSON
+                    cadastro_id = partes[1]
+                    tipo_doc = "_".join(partes[2:]) if len(partes) > 2 else ""
+                    
+                    cadastro = buscar_cadastro(cadastro_id)
+                    if cadastro and cadastro.get("arquivos_gerados"):
+                        caminho = cadastro["arquivos_gerados"].get(tipo_doc)
+                        if caminho:
+                            caminho_completo = caminho if os.path.isabs(caminho) else os.path.join(BASE_DIR, caminho)
+                            if os.path.exists(caminho_completo):
+                                os.remove(caminho_completo)
+                        
+                        # Atualizar JSON
+                        arq_gerados = cadastro["arquivos_gerados"]
+                        arq_gerados[tipo_doc] = None
+                        cur.execute(
+                            "UPDATE cadastros SET arquivos_gerados = %s WHERE id = %s",
+                            (json.dumps(arq_gerados), cadastro_id)
+                        )
+                        conn.commit()
+                    sucesso = True
+                    
+                elif tipo == "assinado":
+                    # Documentos assinados
+                    cadastro_id = partes[1]
+                    arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
+                    caminho = os.path.join(UPLOADS_DIR, arquivo)
+                    
+                    if os.path.exists(caminho):
+                        os.remove(caminho)
+                    
+                    cadastro = buscar_cadastro(cadastro_id)
+                    if cadastro:
+                        docs = cadastro.get("documentos_assinados", [])
+                        docs_atualizados = [d for d in docs if d.get("arquivo") != arquivo]
+                        cur.execute(
+                            "UPDATE cadastros SET documentos_assinados = %s WHERE id = %s",
+                            (json.dumps(docs_atualizados), cadastro_id)
+                        )
+                        conn.commit()
+                    sucesso = True
+                    
+                elif tipo == "extra":
+                    # Documentos extras - deletar do banco e arquivo
+                    db_id = int(partes[1])
+                    cur.execute("SELECT arquivo_path FROM documentos_extras WHERE id = %s", (db_id,))
+                    doc = cur.fetchone()
+                    if doc and doc["arquivo_path"] and os.path.exists(doc["arquivo_path"]):
+                        os.remove(doc["arquivo_path"])
+                    cur.execute("DELETE FROM documentos_extras WHERE id = %s", (db_id,))
+                    conn.commit()
+                    sucesso = True
+                    
+                elif tipo == "admin":
+                    # Documentos admin
+                    db_id = int(partes[1])
+                    cur.execute("SELECT arquivo_path FROM documentos_admin WHERE id = %s", (db_id,))
+                    doc = cur.fetchone()
+                    if doc and doc["arquivo_path"] and os.path.exists(doc["arquivo_path"]):
+                        os.remove(doc["arquivo_path"])
+                    cur.execute("DELETE FROM documentos_admin WHERE id = %s", (db_id,))
+                    conn.commit()
+                    sucesso = True
+                    
+                elif tipo == "comprovante":
+                    # Comprovantes
+                    db_id = int(partes[1])
+                    cur.execute("SELECT arquivo_path FROM comprovantes WHERE id = %s", (db_id,))
+                    doc = cur.fetchone()
+                    if doc and doc["arquivo_path"] and os.path.exists(doc["arquivo_path"]):
+                        os.remove(doc["arquivo_path"])
+                    cur.execute("DELETE FROM comprovantes WHERE id = %s", (db_id,))
+                    conn.commit()
+                    sucesso = True
+                
+                if sucesso:
+                    deletados.append(doc_id)
+                else:
+                    erros.append({"id": doc_id, "erro": "Tipo não reconhecido"})
+                    
+            except Exception as e:
+                erros.append({"id": doc_id, "erro": str(e)})
+        
+        cur.close()
+        conn.close()
+        
+        return {
+            "success": True,
+            "deletados": len(deletados),
+            "erros": len(erros),
+            "detalhes": {
+                "ids_deletados": deletados,
+                "erros": erros
+            }
+        }
+    except Exception as e:
+        logger.error(f"Erro ao deletar documentos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/backup/download-completo")
+async def admin_download_backup_completo(
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Gera um backup COMPLETO de todos os clientes e documentos.
+    Inclui JSON com todos os dados.
+    """
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        
+        # Criar arquivo ZIP em memória
+        zip_buffer = BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            
+            # Buscar todos os cadastros
+            cur.execute("SELECT * FROM cadastros ORDER BY data_hora DESC")
+            cadastros = cur.fetchall()
+            
+            todos_dados = []
+            
+            for cadastro in cadastros:
+                cadastro_id = cadastro["id"]
+                dados = cadastro["dados"] if isinstance(cadastro["dados"], dict) else json.loads(cadastro["dados"] or "{}")
+                nome_cliente = dados.get("nome", "Sem_Nome").replace(" ", "_").replace("/", "-")[:50]
+                pasta_cliente = f"{cadastro_id}_{nome_cliente}"
+                
+                cliente_dados = {
+                    "cadastro_id": cadastro_id,
+                    "nome": dados.get("nome"),
+                    "dados_cadastro": dados,
+                    "status": cadastro["status"],
+                    "data_cadastro": str(cadastro["data"]),
+                    "arquivos_incluidos": []
+                }
+                
+                # 1. Documentos do cadastro
+                docs = cadastro["documentos"] if isinstance(cadastro["documentos"], list) else json.loads(cadastro["documentos"] or "[]")
+                for doc in docs:
+                    if isinstance(doc, dict) and doc.get("arquivo"):
+                        caminho = os.path.join(UPLOADS_DIR, doc["arquivo"])
+                        if os.path.exists(caminho):
+                            zip_file.write(caminho, f"{pasta_cliente}/cadastro/{doc['arquivo']}")
+                            cliente_dados["arquivos_incluidos"].append(f"cadastro/{doc['arquivo']}")
+                
+                # 2. Documentos gerados
+                arq = cadastro["arquivos_gerados"] if isinstance(cadastro["arquivos_gerados"], dict) else json.loads(cadastro["arquivos_gerados"] or "{}")
+                for tipo, caminho in arq.items():
+                    if caminho:
+                        caminho_completo = caminho if os.path.isabs(caminho) else os.path.join(BASE_DIR, caminho)
+                        if os.path.exists(caminho_completo):
+                            nome = os.path.basename(caminho)
+                            zip_file.write(caminho_completo, f"{pasta_cliente}/gerados/{nome}")
+                            cliente_dados["arquivos_incluidos"].append(f"gerados/{nome}")
+                
+                # 3. Documentos assinados
+                docs_ass = cadastro["documentos_assinados"] if isinstance(cadastro["documentos_assinados"], list) else json.loads(cadastro["documentos_assinados"] or "[]")
+                for doc in docs_ass:
+                    if isinstance(doc, dict) and doc.get("arquivo"):
+                        caminho = os.path.join(UPLOADS_DIR, doc["arquivo"])
+                        if os.path.exists(caminho):
+                            zip_file.write(caminho, f"{pasta_cliente}/assinados/{doc['arquivo']}")
+                            cliente_dados["arquivos_incluidos"].append(f"assinados/{doc['arquivo']}")
+                
+                # 4. Documentos extras
+                cur.execute("SELECT * FROM documentos_extras WHERE cadastro_id = %s", (cadastro_id,))
+                for doc in cur.fetchall():
+                    if doc["arquivo_path"] and os.path.exists(doc["arquivo_path"]):
+                        zip_file.write(doc["arquivo_path"], f"{pasta_cliente}/extras/{doc['nome_original']}")
+                        cliente_dados["arquivos_incluidos"].append(f"extras/{doc['nome_original']}")
+                
+                # 5. Documentos admin
+                cur.execute("SELECT * FROM documentos_admin WHERE cadastro_id = %s", (cadastro_id,))
+                for doc in cur.fetchall():
+                    if doc["arquivo_path"] and os.path.exists(doc["arquivo_path"]):
+                        zip_file.write(doc["arquivo_path"], f"{pasta_cliente}/documentos_escritorio/{doc['nome_original']}")
+                        cliente_dados["arquivos_incluidos"].append(f"documentos_escritorio/{doc['nome_original']}")
+                
+                # 6. Comprovantes
+                cur.execute("""
+                    SELECT c.* FROM comprovantes c
+                    JOIN parcelas p ON c.parcela_id = p.id
+                    JOIN contratos_honorarios ch ON p.contrato_id = ch.id
+                    WHERE ch.cadastro_id = %s
+                """, (cadastro_id,))
+                for comp in cur.fetchall():
+                    if comp["arquivo_path"] and os.path.exists(comp["arquivo_path"]):
+                        zip_file.write(comp["arquivo_path"], f"{pasta_cliente}/comprovantes/{comp['arquivo_nome']}")
+                        cliente_dados["arquivos_incluidos"].append(f"comprovantes/{comp['arquivo_nome']}")
+                
+                # Buscar processos e contratos
+                cliente_dados["processos"] = listar_processos(cadastro_id)
+                cliente_dados["contratos"] = listar_contratos(cadastro_id)
+                
+                # Buscar financeiro
+                financeiro = buscar_financeiro(cadastro_id)
+                if financeiro:
+                    cliente_dados["financeiro"] = financeiro
+                
+                todos_dados.append(cliente_dados)
+            
+            # Adicionar JSON completo
+            json_content = json.dumps(todos_dados, indent=2, ensure_ascii=False, default=str)
+            zip_file.writestr("backup_completo.json", json_content)
+        
+        cur.close()
+        conn.close()
+        
+        zip_buffer.seek(0)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"backup_completo_vaucher_alvares_{timestamp}.zip"
+        
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except Exception as e:
+        logger.error(f"Erro ao gerar backup completo: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+        
 # ============================================
 # INICIALIZAÇÃO
 # ============================================
