@@ -50,9 +50,9 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:3001",
         "http://localhost:3002",
-        "https://cadastro.vaucherealvares.com.br",
-        "https://painel.vaucherealvares.com.br",
-        "https://portal.vaucherealvares.com.br",
+        "https://cadastro.vaucherealvares.com",
+        "https://painel.vaucherealvares.com",
+        "https://portal.vaucherealvares.com",
         "https://cadastro.vaucherealvares.com",
         "https://painel.vaucherealvares.com",
         "https://portal.vaucherealvares.com",
@@ -3842,7 +3842,7 @@ async def portal_cliente_enviar_documento_extra(
             <p>Acesse o <strong>Painel Administrativo</strong> para visualizar e baixar o documento:</p>
             
             <p style="text-align: center; margin: 30px 0;">
-                <a href="https://painel.vaucherealvares.com.br" 
+                <a href="https://painel.vaucherealvares.com" 
                    style="background-color: #8B1538; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
                     Acessar Painel Administrativo
                 </a>
@@ -3972,7 +3972,7 @@ async def portal_cliente_enviar_mensagem(
             <p>Acesse o <strong>Painel Administrativo</strong> para responder:</p>
             
             <p style="text-align: center; margin: 30px 0;">
-                <a href="https://painel.vaucherealvares.com.br" 
+                <a href="https://painel.vaucherealvares.com" 
                    style="background-color: #8B1538; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
                     Acessar Painel Administrativo
                 </a>
@@ -4036,7 +4036,7 @@ async def admin_habilitar_acesso_cliente(
                     <p style="margin: 10px 0;"><strong>Senha temporária:</strong> <code style="background: #e0e0e0; padding: 3px 8px; border-radius: 4px; font-size: 18px;">{senha_temporaria}</code></p>
                 </div>
                 
-                <p>Acesse o portal em: <a href="https://portal.vaucherealvares.com.br" style="color: #8B1538;">portal.vaucherealvares.com.br</a></p>
+                <p>Acesse o portal em: <a href="https://portal.vaucherealvares.com" style="color: #8B1538;">portal.vaucherealvares.com </a></p>
                 
                 <p style="color: #666; font-size: 14px;">
                     <strong>Importante:</strong> Recomendamos que você altere sua senha no primeiro acesso.
@@ -4564,7 +4564,7 @@ async def admin_enviar_documentos(
                 <p>Para visualizar e baixar os documentos, acesse o <strong>Portal do Cliente</strong>:</p>
                 
                 <p style="text-align: center; margin: 30px 0;">
-                    <a href="https://portal.vaucherealvares.com.br" 
+                    <a href="https://portal.vaucherealvares.com" 
                        style="background-color: #8B1538; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold;">
                         Acessar Portal do Cliente
                     </a>
