@@ -15,7 +15,7 @@ const Logo = ({ size = 'normal' }: { size?: 'small' | 'normal' | 'large' }) => {
   return (
     <img 
       src={LOGO_URL} 
-      alt="Vaucher & Álvares Advogados" 
+      alt="Vaucher e Álvares Advogados" 
       className={`${sizes[size]} w-auto`}
     />
   )
@@ -307,7 +307,7 @@ const LoginScreen = ({ onLogin }: { onLogin: (user: UserData) => void }) => {
         </div>
 
         <p className="text-center text-gray-400 text-xs mt-6">
-          © {new Date().getFullYear()} Vaucher & Álvares Sociedade de Advogados
+          © {new Date().getFullYear()} Vaucher e Álvares Sociedade de Advogados
         </p>
       </div>
     </div>
@@ -1343,7 +1343,7 @@ const EnviarEmailModal = ({
   onClose: () => void
   onSuccess: (msg: string) => void 
 }) => {
-  const [assunto, setAssunto] = useState('Seus Documentos - Vaucher & Álvares Advogados')
+  const [assunto, setAssunto] = useState('Seus Documentos - Vaucher e Álvares Advogados')
   const [mensagem, setMensagem] = useState('')
   const [arquivosSelecionados, setArquivosSelecionados] = useState<{[key: string]: boolean}>({
     contrato: true,
@@ -3645,7 +3645,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
         </div>
 
         <p className="text-center text-gray-400 text-xs mt-8">
-          © {new Date().getFullYear()} Vaucher & Álvares Sociedade de Advogados — Painel Administrativo
+          © {new Date().getFullYear()} Vaucher e Álvares Sociedade de Advogados — Painel Administrativo
         </p>
       </div>
 
