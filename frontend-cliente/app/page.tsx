@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { User, FileText, CheckCircle, Upload, ChevronRight, ChevronLeft, Briefcase, Phone, Mail, MapPin, Calendar, CreditCard, Users, FileCheck, AlertCircle, X, Check } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -99,6 +99,40 @@ export default function CadastroCliente() {
   const [sucesso, setSucesso] = useState(false)
   const [erro, setErro] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  
+  // Estados para Termos de Uso e Privacidade
+  const [termosAceitos, setTermosAceitos] = useState(false)
+  const [termosUso, setTermosUso] = useState<any>(null)
+  const [politicaPrivacidade, setPoliticaPrivacidade] = useState<any>(null)
+  const [modalTermos, setModalTermos] = useState<'termos' | 'privacidade' | null>(null)
+  const [carregandoTermos, setCarregandoTermos] = useState(true)
+
+  // Carregar termos ao montar o componente
+  useEffect(() => {
+    const carregarTermos = async () => {
+      try {
+        const [termosRes, privacidadeRes] = await Promise.all([
+          fetch(`${API_URL}/api/termos/termos_uso`),
+          fetch(`${API_URL}/api/termos/politica_privacidade`)
+        ])
+        
+        if (termosRes.ok) {
+          const termosData = await termosRes.json()
+          setTermosUso(termosData)
+        }
+        if (privacidadeRes.ok) {
+          const privacidadeData = await privacidadeRes.json()
+          setPoliticaPrivacidade(privacidadeData)
+        }
+      } catch (error) {
+        console.error('Erro ao carregar termos:', error)
+      } finally {
+        setCarregandoTermos(false)
+      }
+    }
+    
+    carregarTermos()
+  }, [])
 
   const updateField = (field: keyof FormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
@@ -134,6 +168,8 @@ export default function CadastroCliente() {
         return !!(formData.tipo_demanda && formData.objeto_contrato)
       case 3:
         return true // Documentos são opcionais
+      case 4:
+        return termosAceitos // Termos devem ser aceitos para enviar
       default:
         return true
     }
@@ -154,6 +190,12 @@ export default function CadastroCliente() {
   }
 
   const handleSubmit = async () => {
+    // Verificar se os termos foram aceitos
+    if (!termosAceitos) {
+      setErro('É necessário aceitar os Termos de Uso e a Política de Privacidade para continuar.')
+      return
+    }
+    
     setEnviando(true)
     setErro('')
 
@@ -174,7 +216,24 @@ export default function CadastroCliente() {
       const novoId = data.id
       setCadastroId(novoId)
 
-      // 2. Upload de arquivos (se houver)
+      // 2. Registrar aceite dos termos
+      if (termosUso?.id || politicaPrivacidade?.id) {
+        try {
+          await fetch(`${API_URL}/api/aceitar-termos`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              cadastro_id: novoId,
+              termos_uso_versao_id: termosUso?.id,
+              privacidade_versao_id: politicaPrivacidade?.id
+            })
+          })
+        } catch (errTermos) {
+          console.error('Erro ao registrar aceite dos termos:', errTermos)
+        }
+      }
+
+      // 3. Upload de arquivos (se houver)
       for (const arquivo of arquivos) {
         const formDataUpload = new FormData()
         formDataUpload.append('arquivo', arquivo)
@@ -620,9 +679,47 @@ export default function CadastroCliente() {
                 </div>
               </div>
 
+              {/* Checkbox de Aceite dos Termos */}
+              <div className="bg-gray-50 rounded-xl p-4">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="aceite-termos"
+                    checked={termosAceitos}
+                    onChange={(e) => setTermosAceitos(e.target.checked)}
+                    className="mt-1 h-5 w-5 rounded border-gray-300 text-red-800 focus:ring-red-800 cursor-pointer"
+                  />
+                  <label htmlFor="aceite-termos" className="text-sm text-gray-700 cursor-pointer">
+                    Li e aceito os{' '}
+                    <button
+                      type="button"
+                      onClick={() => setModalTermos('termos')}
+                      className="text-red-800 hover:text-red-900 underline font-semibold"
+                    >
+                      Termos de Uso
+                    </button>
+                    {' '}e a{' '}
+                    <button
+                      type="button"
+                      onClick={() => setModalTermos('privacidade')}
+                      className="text-red-800 hover:text-red-900 underline font-semibold"
+                    >
+                      Política de Privacidade
+                    </button>
+                    {' '}do escritório Vaucher & Álvares Sociedade de Advogados.
+                    <span className="text-red-500 ml-1">*</span>
+                  </label>
+                </div>
+                {!termosAceitos && (
+                  <p className="text-xs text-gray-500 mt-2 ml-8">
+                    É necessário aceitar os termos para prosseguir com o cadastro.
+                  </p>
+                )}
+              </div>
+
               <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                 <p className="text-sm text-red-800">
-                  <strong>Importante:</strong> Ao enviar este cadastro, você declara que todas as informações fornecidas são verdadeiras e autoriza o escritório Vaucher e Álvares a representá-lo na demanda especificada.
+                  <strong>Importante:</strong> Ao enviar este cadastro, você declara que todas as informações fornecidas são verdadeiras e autoriza o escritório Vaucher & Álvares a entrar em contato para dar andamento à sua demanda.
                 </p>
               </div>
             </div>
@@ -653,8 +750,8 @@ export default function CadastroCliente() {
             ) : (
               <button
                 onClick={handleSubmit}
-                disabled={enviando}
-                className="flex items-center gap-2 px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50"
+                disabled={enviando || !termosAceitos}
+                className="flex items-center gap-2 px-8 py-3 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {enviando ? (
                   <>
@@ -671,6 +768,54 @@ export default function CadastroCliente() {
             )}
           </div>
         </div>
+
+        {/* Modal de Termos */}
+        {modalTermos && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-2xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl">
+              <div className="p-4 border-b flex justify-between items-center bg-gray-50 rounded-t-2xl">
+                <h3 className="text-lg font-bold text-gray-800">
+                  {modalTermos === 'termos' ? 'Termos de Uso' : 'Política de Privacidade'}
+                </h3>
+                <button
+                  onClick={() => setModalTermos(null)}
+                  className="text-gray-500 hover:text-gray-700 p-1 rounded-full hover:bg-gray-200 transition-colors"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+              
+              <div className="p-6 overflow-y-auto flex-1">
+                {carregandoTermos ? (
+                  <div className="flex items-center justify-center py-8">
+                    <div className="w-8 h-8 border-4 border-red-800 border-t-transparent rounded-full animate-spin"></div>
+                  </div>
+                ) : (
+                  <div 
+                    className="prose prose-sm max-w-none prose-headings:text-gray-800 prose-h1:text-xl prose-h2:text-lg prose-h2:mt-6 prose-h2:mb-3 prose-p:text-gray-600 prose-li:text-gray-600 prose-table:text-sm"
+                    dangerouslySetInnerHTML={{ 
+                      __html: modalTermos === 'termos' 
+                        ? (termosUso?.conteudo || '<p>Termos não disponíveis.</p>')
+                        : (politicaPrivacidade?.conteudo || '<p>Política não disponível.</p>')
+                    }} 
+                  />
+                )}
+              </div>
+              
+              <div className="p-4 border-t flex justify-between items-center bg-gray-50 rounded-b-2xl">
+                <span className="text-xs text-gray-500">
+                  Versão {modalTermos === 'termos' ? termosUso?.versao : politicaPrivacidade?.versao}
+                </span>
+                <button
+                  onClick={() => setModalTermos(null)}
+                  className="px-6 py-2 bg-red-800 text-white rounded-lg hover:bg-red-900 transition-colors font-medium"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Footer */}
         <p className="text-center text-gray-400 text-xs mt-8">
