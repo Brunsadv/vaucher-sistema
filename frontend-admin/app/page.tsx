@@ -1996,6 +1996,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const [showUsuariosModal, setShowUsuariosModal] = useState(false)
   const [showAlterarSenhaModal, setShowAlterarSenhaModal] = useState(false)
   const [mensagemSucesso, setMensagemSucesso] = useState('')
+  const [mensagemErro, setMensagemErro] = useState('')
   
   // Estados do Portal do Cliente
   const [activeTab, setActiveTab] = useState<'dados' | 'processos' | 'contratos' | 'documentos' | 'mensagens'>('dados')
@@ -2026,6 +2027,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   // Estados para dados da demanda específica (Auxílio Moradia)
   const [dadosDemanda, setDadosDemanda] = useState<DadosDemanda | null>(null)
   const [gerandoPeticao, setGerandoPeticao] = useState(false)
+  const [documentosDemanda, setDocumentosDemanda] = useState<{id: number, tipo_documento: string, nome_original: string, descricao: string, criado_em: string}[]>([])
   
   // Estados de Envio de Email
   const [showEnviarEmailModal, setShowEnviarEmailModal] = useState(false)
@@ -2329,6 +2331,17 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       console.error('Erro ao carregar documentos extras:', err)
     }
 
+    // Carregar documentos específicos da demanda
+    try {
+      const response = await fetch(`${API_URL}/api/cadastros/${cadastroId}/documentos-demanda`)
+      if (response.ok) {
+        const data = await response.json()
+        setDocumentosDemanda(data.documentos || [])
+      }
+    } catch (err) {
+      console.error('Erro ao carregar documentos da demanda:', err)
+    }
+
     // Carregar dados específicos da demanda (se for auxílio moradia)
     const cadastro = cadastros.find(c => c.id === cadastroId)
     if (cadastro?.dados.tipo_demanda === 'auxilio_moradia_residencia') {
@@ -2624,6 +2637,9 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
               setProcessos([])
               setContratos([])
               setMensagens([])
+              setDocumentosExtras([])
+              setDocumentosDemanda([])
+              setDadosDemanda(null)
             }}
             className="flex items-center gap-2 text-gray-600 hover:text-gray-800 mb-6"
           >
@@ -2635,6 +2651,19 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
             <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg mb-4 flex items-center gap-2">
               <CheckCircle className="w-5 h-5" />
               {mensagemSucesso}
+            </div>
+          )}
+
+          {mensagemErro && (
+            <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg mb-4 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5" />
+              {mensagemErro}
+              <button 
+                onClick={() => setMensagemErro('')}
+                className="ml-auto text-red-600 hover:text-red-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
           )}
 
@@ -3230,6 +3259,40 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       <p className="text-gray-500 text-sm">Nenhum documento enviado pelo cliente</p>
                     )}
                   </div>
+
+                  {/* Documentos Específicos da Demanda */}
+                  {documentosDemanda.length > 0 && (
+                    <div className="bg-blue-50 rounded-xl p-6">
+                      <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <Briefcase className="w-5 h-5 text-blue-600" />
+                        Documentos Específicos da Demanda ({documentosDemanda.length})
+                      </h3>
+                      <div className="space-y-2">
+                        {documentosDemanda.map((doc) => (
+                          <div key={doc.id} className="flex items-center justify-between bg-white border border-blue-200 rounded-lg px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <FileText className="w-5 h-5 text-blue-600" />
+                              <div>
+                                <span className="text-sm font-medium">{doc.nome_original}</span>
+                                {doc.descricao && (
+                                  <p className="text-xs text-gray-500">{doc.descricao}</p>
+                                )}
+                              </div>
+                            </div>
+                            <a 
+                              href={`${API_URL}/api/cadastros/${c.id}/documentos-demanda/${doc.id}/download`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-blue-600 hover:text-blue-800 text-sm font-medium"
+                            >
+                              <Download className="w-4 h-4" />
+                              Baixar
+                            </a>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
 
                   {/* Documentos Gerados */}
                   {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao || c.arquivos_gerados.peticao_auxilio_moradia) && (
