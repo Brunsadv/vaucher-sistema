@@ -6858,6 +6858,45 @@ async def listar_docs_demanda(cadastro_id: str):
     documentos = listar_documentos_demanda(cadastro_id)
     return {"success": True, "documentos": documentos}
 
+@app.get("/api/cadastros/{cadastro_id}/documentos-demanda/{doc_id}/download")
+async def download_documento_demanda(cadastro_id: str, doc_id: int):
+    """Download de um documento específico da demanda."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT * FROM documentos_demanda 
+            WHERE id = %s AND cadastro_id = %s
+        """, (doc_id, cadastro_id))
+        doc = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not doc:
+            raise HTTPException(status_code=404, detail="Documento não encontrado")
+        
+        arquivo_path = doc['arquivo_path']
+        if not os.path.exists(arquivo_path):
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado no servidor")
+        
+        return FileResponse(
+            arquivo_path,
+            filename=doc['nome_original'],
+            media_type="application/octet-stream"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao baixar documento da demanda: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao baixar documento")
+
 
 # ============================================
 # FUNÇÃO PARA GERAR PETIÇÃO INICIAL - AUXÍLIO MORADIA
