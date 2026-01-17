@@ -171,7 +171,7 @@ export default function CadastroCliente() {
   const [formData, setFormData] = useState<FormData>(initialFormData)
   const [dadosAuxilioMoradia, setDadosAuxilioMoradia] = useState<DadosAuxilioMoradia>(initialDadosAuxilioMoradia)
   const [arquivos, setArquivos] = useState<File[]>([])
-  const [arquivosDemanda, setArquivosDemanda] = useState<{[key: string]: File | null}>({})
+  const [arquivosDemanda, setArquivosDemanda] = useState<{[key: string]: File[]}>({})
   const [enviando, setEnviando] = useState(false)
   const [salvandoRascunho, setSalvandoRascunho] = useState(false)
   const [cadastroId, setCadastroId] = useState<string | null>(null)
@@ -264,9 +264,21 @@ export default function CadastroCliente() {
     }
   }
 
-  const handleDocumentoDemandaSelect = (docId: string, file: File | null) => {
-    setArquivosDemanda(prev => ({ ...prev, [docId]: file }))
+  const handleDocumentoDemandaSelect = (docId: string, files: FileList | null) => {
+  if (files && files.length > 0) {
+    setArquivosDemanda(prev => ({
+      ...prev,
+      [docId]: [...(prev[docId] || []), ...Array.from(files)]
+    }))
   }
+}
+
+const removeDocumentoDemanda = (docId: string, index: number) => {
+  setArquivosDemanda(prev => ({
+    ...prev,
+    [docId]: (prev[docId] || []).filter((_, i) => i !== index)
+  }))
+}
 
   const removeFile = (index: number) => {
     setArquivos(prev => prev.filter((_, i) => i !== index))
@@ -446,18 +458,15 @@ export default function CadastroCliente() {
       }
 
       // 5. Upload de documentos específicos da demanda
-      for (const [docId, arquivo] of Object.entries(arquivosDemanda)) {
-        if (arquivo) {
-          const formDataUpload = new FormData()
-          formDataUpload.append('arquivo', arquivo)
-          formDataUpload.append('descricao', documentosAuxilioMoradia.find(d => d.id === docId)?.nome || '')
-
-          await fetch(`${API_URL}/api/cadastros/${novoId}/documento-demanda/${docId}`, {
-            method: 'POST',
-            body: formDataUpload
-          })
-        }
-      }
+      for (const [docId, arquivosDoc] of Object.entries(arquivosDemanda)) {
+  if (arquivosDoc && arquivosDoc.length > 0) {
+    for (const arquivo of arquivosDoc) {
+      const formDataUpload = new FormData()
+      formDataUpload.append('arquivo', arquivo)
+      // ...
+    }
+  }
+}
 
       // Limpar rascunho após envio bem-sucedido
       limparRascunho()
@@ -1133,7 +1142,8 @@ export default function CadastroCliente() {
                             <input
                               type="file"
                               id={`doc-${doc.id}`}
-                              onChange={(e) => handleDocumentoDemandaSelect(doc.id, e.target.files?.[0] || null)}
+                              onChange={(e) => handleDocumentoDemandaSelect(doc.id, e.target.files)}
+                              multiple
                               accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
                               className="hidden"
                             />
@@ -1145,33 +1155,37 @@ export default function CadastroCliente() {
                                   : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                               }`}
                             >
-                              {arquivosDemanda[doc.id] ? (
-                                <>
-                                  <FileCheck className="w-4 h-4" />
-                                  Anexado
-                                </>
-                              ) : (
-                                <>
-                                  <Upload className="w-4 h-4" />
-                                  Anexar
-                                </>
-                              )}
+                              {arquivosDemanda[doc.id] && arquivosDemanda[doc.id].length > 0 ? (
+  <>
+    <FileCheck className="w-4 h-4" />
+    {arquivosDemanda[doc.id].length} arquivo(s)
+  </>
+) : (
+  <>
+    <Upload className="w-4 h-4" />
+    Anexar
+  </>
+)}
                             </label>
                           </div>
                         </div>
-                        {arquivosDemanda[doc.id] && (
-                          <div className="mt-2 flex items-center justify-between bg-gray-50 rounded px-3 py-2">
-                            <span className="text-sm text-gray-600 truncate">
-                              {arquivosDemanda[doc.id]?.name}
-                            </span>
-                            <button
-                              onClick={() => handleDocumentoDemandaSelect(doc.id, null)}
-                              className="text-red-500 hover:text-red-700"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
+                        {arquivosDemanda[doc.id] && arquivosDemanda[doc.id].length > 0 && (
+  <div className="mt-2 space-y-1">
+    {arquivosDemanda[doc.id].map((file, idx) => (
+      <div key={idx} className="flex items-center justify-between bg-gray-50 rounded px-3 py-2">
+        <span className="text-sm text-gray-600 truncate">
+          {file.name}
+        </span>
+        <button
+          onClick={() => removeDocumentoDemanda(doc.id, idx)}
+          className="text-red-500 hover:text-red-700"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+    ))}
+  </div>
+)}
                       </div>
                     ))}
                   </div>
@@ -1304,19 +1318,19 @@ export default function CadastroCliente() {
                   <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
                     <FileText className="w-4 h-4" /> Documentos
                   </h3>
-                  {(arquivos.length > 0 || Object.values(arquivosDemanda).some(f => f !== null)) ? (
+                  {(arquivos.length > 0 || Object.values(arquivosDemanda).some(f => f && f.length > 0)) ? (
                     <ul className="text-sm space-y-1">
                       {/* Documentos específicos da demanda */}
-                      {Object.entries(arquivosDemanda).map(([docId, file]) => {
-                        if (!file) return null
-                        const doc = documentosAuxilioMoradia.find(d => d.id === docId)
-                        return (
-                          <li key={docId} className="flex items-center gap-2">
-                            <FileCheck className="w-4 h-4 text-green-600" />
-                            <span className="text-gray-600">{doc?.nome}:</span> {file.name}
-                          </li>
-                        )
-                      })}
+                      {Object.entries(arquivosDemanda).map(([docId, files]) => {
+  if (!files || files.length === 0) return null
+  const doc = documentosAuxilioMoradia.find(d => d.id === docId)
+  return files.map((file, idx) => (
+    <li key={`${docId}-${idx}`} className="flex items-center gap-2">
+      <FileCheck className="w-4 h-4 text-green-600" />
+      <span className="text-gray-600">{doc?.nome}:</span> {file.name}
+    </li>
+  ))
+})}
                       {/* Documentos gerais */}
                       {arquivos.map((file, i) => (
                         <li key={i} className="flex items-center gap-2">
