@@ -24,6 +24,7 @@ import base64
 import secrets
 from io import BytesIO
 from dateutil.relativedelta import relativedelta
+from decimal import Decimal
 
 # Configurar logging detalhado
 logging.basicConfig(level=logging.INFO)
@@ -549,7 +550,37 @@ def init_db():
         # Índices para termos
         cur.execute("CREATE INDEX IF NOT EXISTS idx_termos_tipo_ativo ON termos_versoes(tipo, ativo)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_aceites_cadastro ON aceites_termos(cadastro_id)")
+        # ========== DEMANDAS ESPECÍFICAS (FORMULÁRIOS DINÂMICOS) ==========
         
+        # Tabela para dados específicos de cada tipo de demanda
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS dados_demanda_especifica (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                tipo_demanda VARCHAR(100) NOT NULL,
+                dados JSONB NOT NULL DEFAULT '{}',
+                status VARCHAR(20) DEFAULT 'rascunho',
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(cadastro_id, tipo_demanda)
+            )
+        """)
+        
+        # Tabela para documentos específicos da demanda
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS documentos_demanda (
+                id SERIAL PRIMARY KEY,
+                cadastro_id VARCHAR(20) REFERENCES cadastros(id) ON DELETE CASCADE,
+                tipo_documento VARCHAR(100) NOT NULL,
+                nome_arquivo VARCHAR(255) NOT NULL,
+                nome_original VARCHAR(255) NOT NULL,
+                arquivo_path VARCHAR(500) NOT NULL,
+                descricao VARCHAR(255),
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        logger.info("Tabelas de Demandas Específicas verificadas/criadas!")
         logger.info("Tabelas de Termos de Uso e Privacidade verificadas/criadas!")
         
         conn.commit()
@@ -951,6 +982,29 @@ class SucumbenciaItem(BaseModel):
 class RetencaoItem(BaseModel):
     descricao: str = ""
     valor: float = 0
+class DadosResidenciaMedica(BaseModel):
+    # Dados da Residência Médica
+    instituicao_ensino: str = ""
+    unidade_hospitalar: str = ""
+    especialidade_medica: str = ""
+    data_inicio_residencia: str = ""
+    data_termino_residencia: str = ""
+    valor_bolsa_mensal: float = 0
+    recebeu_moradia: bool = False
+    
+    # Histórico Processual
+    processo_anterior: bool = False
+    numero_processo_anterior: Optional[str] = ""
+    vara_juizado_anterior: Optional[str] = ""
+    data_protocolo_anterior: Optional[str] = ""
+    data_citacao_anterior: Optional[str] = ""
+    
+    # Dados Bancários
+    dados_bancarios: str = ""
+
+class SalvarRascunhoDemanda(BaseModel):
+    tipo_demanda: str
+    dados: dict
 
 class FinanceiroData(BaseModel):
     numero_processo: Optional[str] = ""
@@ -1513,6 +1567,118 @@ async def enviar_email_resend(destinatario: str, assunto: str, corpo_html: str, 
     except Exception as e:
         logger.error(f"Erro ao enviar e-mail: {e}")
         return False
+# ============================================
+# FUNÇÕES DO BANCO - DEMANDAS ESPECÍFICAS
+# ============================================
+
+def salvar_dados_demanda(cadastro_id: str, tipo_demanda: str, dados: dict, status: str = "rascunho") -> bool:
+    """Salva ou atualiza dados específicos de uma demanda."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO dados_demanda_especifica (cadastro_id, tipo_demanda, dados, status)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (cadastro_id, tipo_demanda) DO UPDATE SET
+                dados = EXCLUDED.dados,
+                status = EXCLUDED.status,
+                atualizado_em = CURRENT_TIMESTAMP
+        """, (cadastro_id, tipo_demanda, json.dumps(dados), status))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao salvar dados da demanda: {e}")
+        return False
+
+def buscar_dados_demanda(cadastro_id: str, tipo_demanda: str) -> dict:
+    """Busca dados específicos de uma demanda."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT * FROM dados_demanda_especifica 
+            WHERE cadastro_id = %s AND tipo_demanda = %s
+        """, (cadastro_id, tipo_demanda))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if row:
+            dados = row['dados']
+            if isinstance(dados, str):
+                dados = json.loads(dados)
+            return {
+                "id": row['id'],
+                "cadastro_id": row['cadastro_id'],
+                "tipo_demanda": row['tipo_demanda'],
+                "dados": dados,
+                "status": row['status'],
+                "criado_em": row['criado_em'].isoformat() if row['criado_em'] else None,
+                "atualizado_em": row['atualizado_em'].isoformat() if row['atualizado_em'] else None
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar dados da demanda: {e}")
+        return None
+
+def salvar_documento_demanda(cadastro_id: str, tipo_documento: str, nome_arquivo: str, 
+                              nome_original: str, arquivo_path: str, descricao: str = "") -> bool:
+    """Salva referência de documento específico da demanda."""
+    conn = get_db()
+    if not conn:
+        return False
+    
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO documentos_demanda (cadastro_id, tipo_documento, nome_arquivo, 
+                nome_original, arquivo_path, descricao)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (cadastro_id, tipo_documento, nome_arquivo, nome_original, arquivo_path, descricao))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao salvar documento da demanda: {e}")
+        return False
+
+def listar_documentos_demanda(cadastro_id: str) -> list:
+    """Lista documentos específicos de uma demanda."""
+    conn = get_db()
+    if not conn:
+        return []
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT * FROM documentos_demanda 
+            WHERE cadastro_id = %s
+            ORDER BY criado_em DESC
+        """, (cadastro_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        
+        return [{
+            "id": row['id'],
+            "tipo_documento": row['tipo_documento'],
+            "nome_arquivo": row['nome_arquivo'],
+            "nome_original": row['nome_original'],
+            "descricao": row['descricao'],
+            "criado_em": row['criado_em'].isoformat() if row['criado_em'] else None
+        } for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar documentos da demanda: {e}")
+        return []
 
 # ============================================
 # ROTAS DA API - BÁSICAS
@@ -6614,7 +6780,472 @@ async def exportar_aceites_cliente(
         logger.error(f"Erro ao exportar aceites: {e}")
         raise HTTPException(status_code=500, detail="Erro ao exportar aceites")
 
+# ============================================
+# ENDPOINTS - DEMANDA ESPECÍFICA E DOCUMENTOS
+# ============================================
 
+@app.post("/api/cadastros/{cadastro_id}/demanda-especifica")
+async def salvar_rascunho_demanda(cadastro_id: str, dados: SalvarRascunhoDemanda):
+    """Salva ou atualiza dados específicos de uma demanda (rascunho)."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    sucesso = salvar_dados_demanda(cadastro_id, dados.tipo_demanda, dados.dados, "rascunho")
+    if not sucesso:
+        raise HTTPException(status_code=500, detail="Erro ao salvar rascunho")
+    
+    return {"success": True, "message": "Rascunho salvo com sucesso"}
+
+@app.get("/api/cadastros/{cadastro_id}/demanda-especifica/{tipo_demanda}")
+async def buscar_rascunho_demanda(cadastro_id: str, tipo_demanda: str):
+    """Busca dados específicos de uma demanda."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    dados = buscar_dados_demanda(cadastro_id, tipo_demanda)
+    return {"success": True, "dados": dados}
+
+@app.post("/api/cadastros/{cadastro_id}/documento-demanda/{tipo_documento}")
+async def upload_documento_demanda(
+    cadastro_id: str, 
+    tipo_documento: str,
+    arquivo: UploadFile = File(...),
+    descricao: str = Form("")
+):
+    """Faz upload de um documento específico da demanda."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    # Criar diretório para documentos da demanda
+    cliente_dir = os.path.join(UPLOADS_DIR, "documentos_demanda", cadastro_id)
+    os.makedirs(cliente_dir, exist_ok=True)
+    
+    # Gerar nome único para o arquivo
+    ext = os.path.splitext(arquivo.filename)[1]
+    nome_arquivo = f"{tipo_documento}_{uuid.uuid4().hex[:8]}{ext}"
+    arquivo_path = os.path.join(cliente_dir, nome_arquivo)
+    
+    # Salvar arquivo
+    with open(arquivo_path, "wb") as f:
+        content = await arquivo.read()
+        f.write(content)
+    
+    # Salvar referência no banco
+    sucesso = salvar_documento_demanda(
+        cadastro_id, tipo_documento, nome_arquivo, 
+        arquivo.filename, arquivo_path, descricao
+    )
+    
+    if not sucesso:
+        raise HTTPException(status_code=500, detail="Erro ao registrar documento")
+    
+    return {"success": True, "message": "Documento enviado com sucesso", "nome_arquivo": nome_arquivo}
+
+@app.get("/api/cadastros/{cadastro_id}/documentos-demanda")
+async def listar_docs_demanda(cadastro_id: str):
+    """Lista documentos específicos da demanda."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    documentos = listar_documentos_demanda(cadastro_id)
+    return {"success": True, "documentos": documentos}
+
+
+# ============================================
+# FUNÇÃO PARA GERAR PETIÇÃO INICIAL - AUXÍLIO MORADIA
+# ============================================
+
+def gerar_peticao_auxilio_moradia(dados_cliente: dict, dados_residencia: dict, cadastro_id: str) -> str:
+    """Gera a petição inicial de auxílio moradia para residência médica."""
+    from docx import Document
+    from docx.shared import Pt, Cm, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.style import WD_STYLE_TYPE
+    
+    doc = Document()
+    
+    # Configurar margens
+    for section in doc.sections:
+        section.top_margin = Cm(3)
+        section.bottom_margin = Cm(2)
+        section.left_margin = Cm(3)
+        section.right_margin = Cm(2)
+    
+    # Extrair dados
+    nome = dados_cliente.get('nome', '').upper()
+    cpf = dados_cliente.get('cpf', '')
+    endereco = dados_cliente.get('endereco_completo', '')
+    email = dados_cliente.get('email', '')
+    estado_civil = dados_cliente.get('estado_civil', '')
+    nacionalidade = dados_cliente.get('nacionalidade', 'brasileiro(a)')
+    profissao = dados_cliente.get('profissao', 'médico(a)')
+    
+    instituicao = dados_residencia.get('instituicao_ensino', '[INSTITUIÇÃO]')
+    unidade_hospitalar = dados_residencia.get('unidade_hospitalar', '[UNIDADE HOSPITALAR]')
+    especialidade = dados_residencia.get('especialidade_medica', '[ESPECIALIDADE]')
+    data_inicio = dados_residencia.get('data_inicio_residencia', '__/__/____')
+    data_termino = dados_residencia.get('data_termino_residencia', '__/__/____')
+    valor_bolsa = dados_residencia.get('valor_bolsa_mensal', 0)
+    processo_anterior = dados_residencia.get('processo_anterior', False)
+    
+    def formatar_data(data_str):
+        """Formata data de YYYY-MM-DD para DD/MM/YYYY."""
+        if not data_str or data_str == '__/__/____':
+            return '__/__/____'
+        try:
+            partes = data_str.split('-')
+            return f"{partes[2]}/{partes[1]}/{partes[0]}"
+        except:
+            return data_str
+    
+    data_inicio_fmt = formatar_data(data_inicio)
+    data_termino_fmt = formatar_data(data_termino)
+    
+    # Calcular valor da causa
+    try:
+        if data_inicio and data_termino and data_inicio != '__/__/____' and data_termino != '__/__/____':
+            from datetime import datetime
+            dt_inicio = datetime.strptime(data_inicio, '%Y-%m-%d')
+            dt_termino = datetime.strptime(data_termino, '%Y-%m-%d')
+            meses = (dt_termino.year - dt_inicio.year) * 12 + (dt_termino.month - dt_inicio.month)
+            if meses < 0:
+                meses = 0
+        else:
+            meses = 36
+        
+        valor_bolsa_float = float(valor_bolsa) if valor_bolsa else 3330.43
+        valor_causa = valor_bolsa_float * 0.30 * meses
+    except:
+        meses = 36
+        valor_causa = 3330.43 * 0.30 * 36
+    
+    def formatar_moeda(valor):
+        return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    # CABEÇALHO
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("AO JUÍZO DO JUIZADO ESPECIAL FEDERAL DA SEÇÃO JUDICIÁRIA DE MATO GROSSO")
+    run.bold = True
+    run.font.size = Pt(12)
+    
+    doc.add_paragraph()
+    doc.add_paragraph()
+    
+    # QUALIFICAÇÃO DO AUTOR
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    run = p.add_run(f"{nome}")
+    run.bold = True
+    p.add_run(f", {nacionalidade}, {estado_civil}, {profissao}, inscrito no CPF sob o nº {cpf}, ")
+    p.add_run(f"residente e domiciliado em {endereco}, ")
+    p.add_run(f"e-mail: {email} (doc. 01), ")
+    p.add_run("por seus procuradores judiciais que a presente subscrevem (doc. 02), ")
+    p.add_run("que informam possuir endereço profissional à Rua Lima, nº 106, ")
+    p.add_run("Bairro Jardim das Américas, em Cuiabá/MT, vem, à presença de Vossa Excelência, intentar a presente")
+    
+    doc.add_paragraph()
+    
+    # TÍTULO DA AÇÃO
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("AÇÃO INDENIZATÓRIA DE AUXÍLIO MORADIA DE RESIDÊNCIA MÉDICA")
+    run.bold = True
+    run.font.size = Pt(14)
+    
+    doc.add_paragraph()
+    
+    # RÉU
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Em face da ")
+    run = p.add_run(f"{instituicao.upper()}")
+    run.bold = True
+    p.add_run(f" e {unidade_hospitalar.upper()}, ")
+    p.add_run("pelas razões de fato e direito a seguir expostas:")
+    
+    doc.add_paragraph()
+    
+    # 1. DOS FATOS
+    p = doc.add_paragraph()
+    run = p.add_run("1. DOS FATOS")
+    run.bold = True
+    run.font.size = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Trata-se de ação de cobrança por indenização contra a requerida, tendo em vista ")
+    p.add_run("a ausência de auferimento do auxílio moradia durante a realização de residência ")
+    p.add_run("médica pelo requerente.")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run(f"O requerente foi devidamente matriculado no Programa de Residência Médica na ")
+    p.add_run(f"especialidade de ")
+    run = p.add_run(f"{especialidade}")
+    run.bold = True
+    p.add_run(f". O referido programa teve início em ")
+    run = p.add_run(f"{data_inicio_fmt}")
+    run.bold = True
+    p.add_run(" e término em ")
+    run = p.add_run(f"{data_termino_fmt}")
+    run.bold = True
+    p.add_run(" (doc. 03).")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Nesse ínterim, o residente deveria ter recebido auxílio moradia, conforme ")
+    p.add_run("redação prevista no art. 4º da Lei nº 6.932, de 7 de julho de 1981, dada pela ")
+    p.add_run("Lei nº 12.514/2011.")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Contudo, em que pese a imposição da lei nº 12.514/2011, que regulamenta os ")
+    p.add_run("cursos de Residência Médica, e determina a concessão dos benefícios como o ")
+    p.add_run("fornecimento de alojamento/moradia aos médicos residentes, o Requerente nunca ")
+    p.add_run("recebeu qualquer auxílio nesse sentido, seja in natura ou in pecúnia, conforme ")
+    p.add_run("se afere dos rendimentos pagos pela Requerida (doc. 04).")
+    
+    # Se houver processo anterior
+    if processo_anterior:
+        doc.add_paragraph()
+        p = doc.add_paragraph()
+        run = p.add_run("2. PRELIMINARMENTE - DA INTERRUPÇÃO DA PRESCRIÇÃO")
+        run.bold = True
+        run.font.size = Pt(12)
+        
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p.add_run("Cumpre ressaltar que o autor já ingressou anteriormente com ação idêntica ")
+        p.add_run(f"(Processo nº {dados_residencia.get('numero_processo_anterior', '[NÚMERO]')}), ")
+        p.add_run(f"distribuída para a {dados_residencia.get('vara_juizado_anterior', '[VARA]')}, ")
+        p.add_run("a qual foi extinta sem resolução do mérito.")
+        
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p.add_run("Nos termos do art. 240, §1º do CPC, a interrupção da prescrição, ")
+        p.add_run("operada pelo despacho que ordena a citação, ainda que proferido por juízo ")
+        p.add_run("incompetente, retroage à data da propositura da ação.")
+    
+    doc.add_paragraph()
+    
+    # DA CONCESSÃO DO AUXÍLIO MORADIA
+    num_topico = 3 if processo_anterior else 2
+    p = doc.add_paragraph()
+    run = p.add_run(f"{num_topico}. DA CONCESSÃO DO AUXÍLIO MORADIA")
+    run.bold = True
+    run.font.size = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("A lei nº 6.932/1981, alterada pela Lei nº 12.514/2011, determina, em seu ")
+    p.add_run("artigo 4º, alguns direitos dos médicos residentes, entre eles, moradia. Vejamos:")
+    
+    # Citação legal
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.paragraph_format.left_indent = Cm(2)
+    run = p.add_run("Art. 4º ")
+    run.italic = True
+    run = p.add_run("Ao médico-residente é assegurado bolsa [...] A instituição de saúde ")
+    run.italic = True
+    run = p.add_run("responsável por programas de residência médica oferecerá ao médico-residente, ")
+    run.italic = True
+    run = p.add_run("durante todo o período de residência: [...] III - ")
+    run.italic = True
+    run = p.add_run("moradia")
+    run.italic = True
+    run.bold = True
+    run = p.add_run(", conforme estabelecido em regulamento.")
+    run.italic = True
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("O Superior Tribunal de Justiça já firmou o entendimento de que às instituições ")
+    p.add_run("de saúde responsáveis por programas de residência médica cabe o dever de oferecer ")
+    p.add_run("aos residentes alimentação e moradia no decorrer do período de residência, e que ")
+    p.add_run("a impossibilidade da prestação da tutela específica autoriza medidas que assegurem ")
+    p.add_run("o resultado prático equivalente ou a conversão em perdas e danos.")
+    
+    # DO PEDIDO
+    doc.add_paragraph()
+    num_topico += 1
+    p = doc.add_paragraph()
+    run = p.add_run(f"{num_topico}. DO PEDIDO")
+    run.bold = True
+    run.font.size = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Ante o exposto, requer:")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("a) A citação da(s) ré(s) para, querendo, apresentar(em) contestação;")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("b) A procedência total dos pedidos para condenar a(s) ré(s) ao pagamento ")
+    p.add_run("de indenização correspondente ao auxílio-moradia não fornecido durante todo o ")
+    p.add_run("período de residência médica;")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("c) A correção monetária pelo IPCA-E desde o vencimento de cada parcela, ")
+    p.add_run("acrescidos de juros de mora de 1% ao mês a partir da citação;")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("d) A condenação da(s) ré(s) ao pagamento das custas processuais e honorários advocatícios.")
+    
+    # VALOR DA CAUSA
+    doc.add_paragraph()
+    num_topico += 1
+    p = doc.add_paragraph()
+    run = p.add_run(f"{num_topico}. DO VALOR DA CAUSA")
+    run.bold = True
+    run.font.size = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run(f"Dá-se à causa o valor de ")
+    run = p.add_run(f"{formatar_moeda(valor_causa)}")
+    run.bold = True
+    p.add_run(f" ({meses} meses x 30% de {formatar_moeda(float(valor_bolsa) if valor_bolsa else 3330.43)}).")
+    
+    # ENCERRAMENTO
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Nestes termos,")
+    p.add_run("\nPede deferimento.")
+    
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    data_atual = datetime.now()
+    meses_pt = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+                'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+    p.add_run(f"Cuiabá/MT, {data_atual.day} de {meses_pt[data_atual.month-1]} de {data_atual.year}.")
+    
+    doc.add_paragraph()
+    doc.add_paragraph()
+    
+    # ASSINATURAS DOS ADVOGADOS
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("_______________________________________")
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("BRUNO ALMEIDA ÁLVARES")
+    run.bold = True
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("OAB/MT 17.629")
+    
+    doc.add_paragraph()
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("_______________________________________")
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("JORDANA VAUCHER MORESCHI ÁLVARES")
+    run.bold = True
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("OAB/MT 18.173")
+    
+    # Salvar documento
+    cliente_dir = os.path.join(GERADOS_DIR, cadastro_id)
+    os.makedirs(cliente_dir, exist_ok=True)
+    
+    nome_arquivo = f"Peticao_Auxilio_Moradia_{nome.replace(' ', '_')}.docx"
+    caminho_arquivo = os.path.join(cliente_dir, nome_arquivo)
+    
+    doc.save(caminho_arquivo)
+    
+    return caminho_arquivo
+
+
+# ============================================
+# ENDPOINTS PARA GERAR PETIÇÃO INICIAL
+# ============================================
+
+@app.post("/api/admin/clientes/{cadastro_id}/gerar-peticao/{tipo_demanda}")
+async def gerar_peticao_inicial(cadastro_id: str, tipo_demanda: str, usuario: dict = Depends(verificar_admin)):
+    """Gera a petição inicial para uma demanda específica."""
+    
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    dados_demanda = buscar_dados_demanda(cadastro_id, tipo_demanda)
+    if not dados_demanda:
+        raise HTTPException(status_code=404, detail="Dados da demanda não encontrados")
+    
+    try:
+        if tipo_demanda == "auxilio_moradia_residencia":
+            caminho = gerar_peticao_auxilio_moradia(
+                cadastro.get('dados', {}),
+                dados_demanda.get('dados', {}),
+                cadastro_id
+            )
+            
+            # Atualizar arquivos_gerados no cadastro
+            arquivos = cadastro.get('arquivos_gerados', {})
+            arquivos['peticao_auxilio_moradia'] = caminho
+            
+            conn = get_db()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    UPDATE cadastros SET arquivos_gerados = %s WHERE id = %s
+                """, (json.dumps(arquivos), cadastro_id))
+                conn.commit()
+                cur.close()
+                conn.close()
+            
+            return {
+                "success": True,
+                "message": "Petição gerada com sucesso",
+                "arquivo": os.path.basename(caminho)
+            }
+        else:
+            raise HTTPException(status_code=400, detail="Tipo de demanda não suportado para geração de petição")
+    
+    except Exception as e:
+        logger.error(f"Erro ao gerar petição: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar petição: {str(e)}")
+
+@app.get("/api/admin/clientes/{cadastro_id}/peticao/{tipo_demanda}")
+async def download_peticao(cadastro_id: str, tipo_demanda: str, usuario: dict = Depends(verificar_admin)):
+    """Download da petição gerada."""
+    
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    arquivos = cadastro.get('arquivos_gerados', {})
+    
+    if tipo_demanda == "auxilio_moradia_residencia":
+        caminho = arquivos.get('peticao_auxilio_moradia')
+    else:
+        raise HTTPException(status_code=400, detail="Tipo de demanda não suportado")
+    
+    if not caminho or not os.path.exists(caminho):
+        raise HTTPException(status_code=404, detail="Petição não encontrada. Gere a petição primeiro.")
+    
+    return FileResponse(
+        caminho,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=os.path.basename(caminho)
+    )
+    
 # ============================================
 # INICIALIZAÇÃO
 # ============================================

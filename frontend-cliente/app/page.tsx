@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { User, FileText, CheckCircle, Upload, ChevronRight, ChevronLeft, Briefcase, Phone, Mail, MapPin, Calendar, CreditCard, Users, FileCheck, AlertCircle, X, Check } from 'lucide-react'
+import { User, FileText, CheckCircle, Upload, ChevronRight, ChevronLeft, Briefcase, Phone, Mail, MapPin, Calendar, CreditCard, Users, FileCheck, AlertCircle, X, Check, Save, Building, GraduationCap, Stethoscope, Clock, FileQuestion, BadgeDollarSign, Landmark } from 'lucide-react'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -40,18 +40,18 @@ const maskPhone = (value: string) => {
     .replace(/(-\d{4})\d+?$/, '$1')
 }
 
+const maskCurrency = (value: string) => {
+  const numericValue = value.replace(/\D/g, '')
+  const numberValue = parseInt(numericValue || '0', 10) / 100
+  return numberValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
+
 // Validação matemática de CPF (algoritmo oficial)
 const validarCPF = (cpf: string): boolean => {
-  // Remove caracteres não numéricos
   const cpfLimpo = cpf.replace(/\D/g, '')
-  
-  // Deve ter 11 dígitos
   if (cpfLimpo.length !== 11) return false
-  
-  // Verifica se todos os dígitos são iguais (ex: 111.111.111-11)
   if (/^(\d)\1+$/.test(cpfLimpo)) return false
   
-  // Validação do primeiro dígito verificador
   let soma = 0
   for (let i = 0; i < 9; i++) {
     soma += parseInt(cpfLimpo[i]) * (10 - i)
@@ -60,7 +60,6 @@ const validarCPF = (cpf: string): boolean => {
   if (resto === 10 || resto === 11) resto = 0
   if (resto !== parseInt(cpfLimpo[9])) return false
   
-  // Validação do segundo dígito verificador
   soma = 0
   for (let i = 0; i < 10; i++) {
     soma += parseInt(cpfLimpo[i]) * (11 - i)
@@ -74,19 +73,44 @@ const validarCPF = (cpf: string): boolean => {
 
 // Tipos de demanda com textos pré-definidos
 const tiposDemanda = [
-  { value: 'adicional_insalubridade', label: 'Adicional de Insalubridade', texto: 'propor ação judicial visando o reconhecimento do direito ao adicional de insalubridade, bem como as diferenças remuneratórias decorrentes' },
-  { value: 'adicional_periculosidade', label: 'Adicional de Periculosidade', texto: 'propor ação judicial visando o reconhecimento do direito ao adicional de periculosidade, bem como as diferenças remuneratórias decorrentes' },
-  { value: 'desvio_funcao', label: 'Desvio de Função', texto: 'propor ação judicial visando o reconhecimento do desvio de função e pagamento das diferenças salariais correspondentes' },
-  { value: 'progressao_funcional', label: 'Progressão Funcional', texto: 'propor ação judicial visando o reconhecimento do direito à progressão funcional e seus efeitos financeiros' },
-  { value: 'revisao_aposentadoria', label: 'Revisão de Aposentadoria', texto: 'propor ação judicial visando a revisão dos proventos de aposentadoria e pagamento das diferenças devidas' },
-  { value: 'licenca_premio', label: 'Licença Prêmio', texto: 'propor ação judicial visando o reconhecimento do direito à licença prêmio ou sua conversão em pecúnia' },
-  { value: 'ferias_nao_gozadas', label: 'Férias Não Gozadas', texto: 'propor ação judicial visando a indenização por férias não gozadas e seus reflexos' },
-  { value: 'horas_extras', label: 'Horas Extras', texto: 'propor ação judicial visando o pagamento de horas extras laboradas e seus reflexos legais' },
-  { value: 'reintegracao', label: 'Reintegração', texto: 'propor ação judicial visando a reintegração ao cargo público e pagamento dos vencimentos do período de afastamento' },
-  { value: 'auxilio_moradia_residencia', label: 'Auxílio-moradia Residência Médica', texto: 'propor ação judicial visando o reconhecimento do direito ao auxílio-moradia durante o período de residência médica e pagamento dos valores devidos' },
-  { value: 'isencao_imposto_renda', label: 'Isenção de Imposto de Renda', texto: 'propor ação judicial visando o reconhecimento do direito à isenção de imposto de renda sobre proventos de aposentadoria ou pensão em razão de moléstia grave, bem como a restituição dos valores indevidamente recolhidos' },
-  { value: 'outro', label: 'Outro (especificar)', texto: '' },
+  { value: 'adicional_insalubridade', label: 'Adicional de Insalubridade', texto: 'propor ação judicial visando o reconhecimento do direito ao adicional de insalubridade, bem como as diferenças remuneratórias decorrentes', temFormulario: false },
+  { value: 'adicional_periculosidade', label: 'Adicional de Periculosidade', texto: 'propor ação judicial visando o reconhecimento do direito ao adicional de periculosidade, bem como as diferenças remuneratórias decorrentes', temFormulario: false },
+  { value: 'desvio_funcao', label: 'Desvio de Função', texto: 'propor ação judicial visando o reconhecimento do desvio de função e pagamento das diferenças salariais correspondentes', temFormulario: false },
+  { value: 'progressao_funcional', label: 'Progressão Funcional', texto: 'propor ação judicial visando o reconhecimento do direito à progressão funcional e seus efeitos financeiros', temFormulario: false },
+  { value: 'revisao_aposentadoria', label: 'Revisão de Aposentadoria', texto: 'propor ação judicial visando a revisão dos proventos de aposentadoria e pagamento das diferenças devidas', temFormulario: false },
+  { value: 'licenca_premio', label: 'Licença Prêmio', texto: 'propor ação judicial visando o reconhecimento do direito à licença prêmio ou sua conversão em pecúnia', temFormulario: false },
+  { value: 'ferias_nao_gozadas', label: 'Férias Não Gozadas', texto: 'propor ação judicial visando a indenização por férias não gozadas e seus reflexos', temFormulario: false },
+  { value: 'horas_extras', label: 'Horas Extras', texto: 'propor ação judicial visando o pagamento de horas extras laboradas e seus reflexos legais', temFormulario: false },
+  { value: 'reintegracao', label: 'Reintegração', texto: 'propor ação judicial visando a reintegração ao cargo público e pagamento dos vencimentos do período de afastamento', temFormulario: false },
+  { value: 'auxilio_moradia_residencia', label: 'Auxílio-moradia Residência Médica', texto: 'propor ação judicial visando o reconhecimento do direito ao auxílio-moradia durante o período de residência médica e pagamento dos valores devidos', temFormulario: true },
+  { value: 'isencao_imposto_renda', label: 'Isenção de Imposto de Renda', texto: 'propor ação judicial visando o reconhecimento do direito à isenção de imposto de renda sobre proventos de aposentadoria ou pensão em razão de moléstia grave, bem como a restituição dos valores indevidamente recolhidos', temFormulario: false },
+  { value: 'outro', label: 'Outro (especificar)', texto: '', temFormulario: false },
 ]
+
+// Documentos específicos para Auxílio Moradia Residência Médica
+const documentosAuxilioMoradia = [
+  { id: 'doc_pessoais', nome: 'Documentos Pessoais', descricao: 'RG e CPF (ou CNH) e Comprovante de Residência atualizado', obrigatorio: false },
+  { id: 'certificado_residencia', nome: 'Certificado/Declaração de Conclusão da Residência', descricao: 'Documento emitido pela COREME ou retirado do SISCNRM com data de início, fim e especialidade', obrigatorio: false },
+  { id: 'historico_financeiro', nome: 'Histórico Financeiro / Contracheques', descricao: 'Fichas financeiras ou extratos bancários de todo o período da residência', obrigatorio: false },
+  { id: 'processo_anterior', nome: 'Cópia do Processo Anterior', descricao: 'Se houver processo anterior, anexar petição inicial e decisão de extinção', obrigatorio: false },
+]
+
+// Interface para dados específicos do Auxílio Moradia
+interface DadosAuxilioMoradia {
+  instituicao_ensino: string
+  unidade_hospitalar: string
+  especialidade_medica: string
+  data_inicio_residencia: string
+  data_termino_residencia: string
+  valor_bolsa_mensal: string
+  recebeu_moradia: boolean
+  processo_anterior: boolean
+  numero_processo_anterior: string
+  vara_juizado_anterior: string
+  data_protocolo_anterior: string
+  data_citacao_anterior: string
+  dados_bancarios: string
+}
 
 interface FormData {
   nome: string
@@ -126,14 +150,34 @@ const initialFormData: FormData = {
   observacoes: '',
 }
 
+const initialDadosAuxilioMoradia: DadosAuxilioMoradia = {
+  instituicao_ensino: '',
+  unidade_hospitalar: '',
+  especialidade_medica: '',
+  data_inicio_residencia: '',
+  data_termino_residencia: '',
+  valor_bolsa_mensal: '',
+  recebeu_moradia: false,
+  processo_anterior: false,
+  numero_processo_anterior: '',
+  vara_juizado_anterior: '',
+  data_protocolo_anterior: '',
+  data_citacao_anterior: '',
+  dados_bancarios: '',
+}
+
 export default function CadastroCliente() {
   const [step, setStep] = useState(1)
   const [formData, setFormData] = useState<FormData>(initialFormData)
+  const [dadosAuxilioMoradia, setDadosAuxilioMoradia] = useState<DadosAuxilioMoradia>(initialDadosAuxilioMoradia)
   const [arquivos, setArquivos] = useState<File[]>([])
+  const [arquivosDemanda, setArquivosDemanda] = useState<{[key: string]: File | null}>({})
   const [enviando, setEnviando] = useState(false)
+  const [salvandoRascunho, setSalvandoRascunho] = useState(false)
   const [cadastroId, setCadastroId] = useState<string | null>(null)
   const [sucesso, setSucesso] = useState(false)
   const [erro, setErro] = useState('')
+  const [rascunhoSalvo, setRascunhoSalvo] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   
   // Estados para Termos de Uso e Privacidade
@@ -142,6 +186,13 @@ export default function CadastroCliente() {
   const [politicaPrivacidade, setPoliticaPrivacidade] = useState<any>(null)
   const [modalTermos, setModalTermos] = useState<'termos' | 'privacidade' | null>(null)
   const [carregandoTermos, setCarregandoTermos] = useState(true)
+
+  // Verificar se o tipo de demanda atual tem formulário específico
+  const demandaAtual = tiposDemanda.find(t => t.value === formData.tipo_demanda)
+  const temFormularioEspecifico = demandaAtual?.temFormulario || false
+  
+  // Calcular número total de steps
+  const totalSteps = temFormularioEspecifico ? 5 : 4
 
   // Carregar termos ao montar o componente
   useEffect(() => {
@@ -170,8 +221,30 @@ export default function CadastroCliente() {
     carregarTermos()
   }, [])
 
+  // Tentar recuperar rascunho do localStorage
+  useEffect(() => {
+    const rascunho = localStorage.getItem('cadastro_rascunho')
+    if (rascunho) {
+      try {
+        const dados = JSON.parse(rascunho)
+        if (dados.formData) setFormData(dados.formData)
+        if (dados.dadosAuxilioMoradia) setDadosAuxilioMoradia(dados.dadosAuxilioMoradia)
+        if (dados.step) setStep(dados.step)
+        setRascunhoSalvo(true)
+      } catch (e) {
+        console.error('Erro ao recuperar rascunho:', e)
+      }
+    }
+  }, [])
+
   const updateField = (field: keyof FormData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }))
+    setRascunhoSalvo(false)
+  }
+
+  const updateAuxilioMoradiaField = (field: keyof DadosAuxilioMoradia, value: any) => {
+    setDadosAuxilioMoradia(prev => ({ ...prev, [field]: value }))
+    setRascunhoSalvo(false)
   }
 
   const handleTipoDemandaChange = (tipo: string) => {
@@ -182,6 +255,7 @@ export default function CadastroCliente() {
       objeto_contrato: demanda?.texto || '',
       poderes_especificos: demanda?.texto || ''
     }))
+    setRascunhoSalvo(false)
   }
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -190,20 +264,46 @@ export default function CadastroCliente() {
     }
   }
 
+  const handleDocumentoDemandaSelect = (docId: string, file: File | null) => {
+    setArquivosDemanda(prev => ({ ...prev, [docId]: file }))
+  }
+
   const removeFile = (index: number) => {
     setArquivos(prev => prev.filter((_, i) => i !== index))
+  }
+
+  // Salvar rascunho localmente
+  const salvarRascunhoLocal = () => {
+    setSalvandoRascunho(true)
+    try {
+      const rascunho = {
+        formData,
+        dadosAuxilioMoradia,
+        step,
+        timestamp: new Date().toISOString()
+      }
+      localStorage.setItem('cadastro_rascunho', JSON.stringify(rascunho))
+      setRascunhoSalvo(true)
+      setTimeout(() => setSalvandoRascunho(false), 1000)
+    } catch (e) {
+      console.error('Erro ao salvar rascunho:', e)
+      setSalvandoRascunho(false)
+    }
+  }
+
+  const limparRascunho = () => {
+    localStorage.removeItem('cadastro_rascunho')
+    setRascunhoSalvo(false)
   }
 
   const validateStep = (currentStep: number): boolean => {
     switch (currentStep) {
       case 1:
-        // Validar campos obrigatórios (documento_identificacao, matricula_funcional e orgao_vinculacao são opcionais)
         if (!formData.nome || !formData.cpf || !formData.data_nascimento || 
             !formData.estado_civil || !formData.profissao || !formData.endereco_completo || 
             !formData.email || !formData.telefone) {
           return false
         }
-        // Validar CPF
         if (!validarCPF(formData.cpf)) {
           return false
         }
@@ -211,9 +311,20 @@ export default function CadastroCliente() {
       case 2:
         return !!(formData.tipo_demanda && formData.objeto_contrato)
       case 3:
-        return true // Documentos são opcionais
+        // Se tem formulário específico, validar campos obrigatórios
+        if (temFormularioEspecifico && formData.tipo_demanda === 'auxilio_moradia_residencia') {
+          if (!dadosAuxilioMoradia.instituicao_ensino || 
+              !dadosAuxilioMoradia.especialidade_medica ||
+              !dadosAuxilioMoradia.data_inicio_residencia ||
+              !dadosAuxilioMoradia.data_termino_residencia) {
+            return false
+          }
+        }
+        return true
       case 4:
-        return termosAceitos // Termos devem ser aceitos para enviar
+        return true // Documentos são opcionais
+      case 5:
+        return termosAceitos
       default:
         return true
     }
@@ -221,7 +332,6 @@ export default function CadastroCliente() {
 
   const nextStep = () => {
     if (step === 1) {
-      // Validações específicas com mensagens de erro detalhadas
       if (!formData.nome || !formData.cpf || !formData.data_nascimento || 
           !formData.estado_civil || !formData.profissao || !formData.endereco_completo || 
           !formData.email || !formData.telefone) {
@@ -234,8 +344,18 @@ export default function CadastroCliente() {
       }
     }
     
+    if (step === 3 && temFormularioEspecifico && formData.tipo_demanda === 'auxilio_moradia_residencia') {
+      if (!dadosAuxilioMoradia.instituicao_ensino || 
+          !dadosAuxilioMoradia.especialidade_medica ||
+          !dadosAuxilioMoradia.data_inicio_residencia ||
+          !dadosAuxilioMoradia.data_termino_residencia) {
+        setErro('Por favor, preencha os campos obrigatórios da residência médica.')
+        return
+      }
+    }
+    
     if (validateStep(step)) {
-      setStep(prev => Math.min(prev + 1, 4))
+      setStep(prev => Math.min(prev + 1, totalSteps))
       setErro('')
     } else {
       setErro('Por favor, preencha todos os campos obrigatórios.')
@@ -248,7 +368,6 @@ export default function CadastroCliente() {
   }
 
   const handleSubmit = async () => {
-    // Verificar se os termos foram aceitos
     if (!termosAceitos) {
       setErro('É necessário aceitar os Termos de Uso e a Política de Privacidade para continuar.')
       return
@@ -291,7 +410,31 @@ export default function CadastroCliente() {
         }
       }
 
-      // 3. Upload de arquivos (se houver)
+      // 3. Salvar dados específicos da demanda (se aplicável)
+      if (temFormularioEspecifico && formData.tipo_demanda === 'auxilio_moradia_residencia') {
+        try {
+          // Converter valor da bolsa para número
+          const valorBolsa = dadosAuxilioMoradia.valor_bolsa_mensal
+            ? parseFloat(dadosAuxilioMoradia.valor_bolsa_mensal.replace(/[^\d,]/g, '').replace(',', '.'))
+            : 0
+
+          await fetch(`${API_URL}/api/cadastros/${novoId}/demanda-especifica`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              tipo_demanda: formData.tipo_demanda,
+              dados: {
+                ...dadosAuxilioMoradia,
+                valor_bolsa_mensal: valorBolsa
+              }
+            })
+          })
+        } catch (errDemanda) {
+          console.error('Erro ao salvar dados da demanda:', errDemanda)
+        }
+      }
+
+      // 4. Upload de arquivos gerais
       for (const arquivo of arquivos) {
         const formDataUpload = new FormData()
         formDataUpload.append('arquivo', arquivo)
@@ -302,11 +445,51 @@ export default function CadastroCliente() {
         })
       }
 
+      // 5. Upload de documentos específicos da demanda
+      for (const [docId, arquivo] of Object.entries(arquivosDemanda)) {
+        if (arquivo) {
+          const formDataUpload = new FormData()
+          formDataUpload.append('arquivo', arquivo)
+          formDataUpload.append('descricao', documentosAuxilioMoradia.find(d => d.id === docId)?.nome || '')
+
+          await fetch(`${API_URL}/api/cadastros/${novoId}/documento-demanda/${docId}`, {
+            method: 'POST',
+            body: formDataUpload
+          })
+        }
+      }
+
+      // Limpar rascunho após envio bem-sucedido
+      limparRascunho()
       setSucesso(true)
     } catch (err: any) {
       setErro(err.message || 'Erro ao enviar cadastro. Tente novamente.')
     } finally {
       setEnviando(false)
+    }
+  }
+
+  // Calcular valor estimado da causa para auxílio moradia
+  const calcularValorCausa = () => {
+    if (!dadosAuxilioMoradia.data_inicio_residencia || !dadosAuxilioMoradia.data_termino_residencia) {
+      return null
+    }
+    
+    try {
+      const inicio = new Date(dadosAuxilioMoradia.data_inicio_residencia)
+      const termino = new Date(dadosAuxilioMoradia.data_termino_residencia)
+      const meses = (termino.getFullYear() - inicio.getFullYear()) * 12 + (termino.getMonth() - inicio.getMonth())
+      
+      let valorBolsa = 3330.43 // Valor padrão
+      if (dadosAuxilioMoradia.valor_bolsa_mensal) {
+        const parsed = parseFloat(dadosAuxilioMoradia.valor_bolsa_mensal.replace(/[^\d,]/g, '').replace(',', '.'))
+        if (!isNaN(parsed)) valorBolsa = parsed
+      }
+      
+      const valorCausa = valorBolsa * 0.30 * meses
+      return { meses, valorBolsa, valorCausa }
+    } catch {
+      return null
     }
   }
 
@@ -334,6 +517,16 @@ export default function CadastroCliente() {
     )
   }
 
+  // Determinar labels dos steps baseado no tipo de demanda
+  const getStepLabels = () => {
+    if (temFormularioEspecifico) {
+      return ['Dados Pessoais', 'Demanda', 'Dados Específicos', 'Documentos', 'Confirmação']
+    }
+    return ['Dados Pessoais', 'Demanda', 'Documentos', 'Confirmação']
+  }
+
+  const stepLabels = getStepLabels()
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100">
       {/* Header */}
@@ -349,7 +542,7 @@ export default function CadastroCliente() {
       <div className="bg-white border-b">
         <div className="max-w-4xl mx-auto px-4 py-4">
           <div className="flex items-center justify-between mb-2">
-            {[1, 2, 3, 4].map((s) => (
+            {Array.from({ length: totalSteps }, (_, i) => i + 1).map((s) => (
               <div key={s} className="flex items-center">
                 <div className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold transition-all ${
                   s < step ? 'bg-green-500 text-white' :
@@ -358,8 +551,8 @@ export default function CadastroCliente() {
                 }`}>
                   {s < step ? <Check className="w-5 h-5" /> : s}
                 </div>
-                {s < 4 && (
-                  <div className={`w-16 sm:w-24 h-1 mx-2 rounded ${
+                {s < totalSteps && (
+                  <div className={`w-12 sm:w-20 h-1 mx-2 rounded ${
                     s < step ? 'bg-green-500' : 'bg-gray-200'
                   }`} />
                 )}
@@ -367,10 +560,9 @@ export default function CadastroCliente() {
             ))}
           </div>
           <div className="flex justify-between text-xs sm:text-sm text-gray-500">
-            <span className={step === 1 ? 'text-red-800 font-medium' : ''}>Dados Pessoais</span>
-            <span className={step === 2 ? 'text-red-800 font-medium' : ''}>Demanda</span>
-            <span className={step === 3 ? 'text-red-800 font-medium' : ''}>Documentos</span>
-            <span className={step === 4 ? 'text-red-800 font-medium' : ''}>Confirmação</span>
+            {stepLabels.map((label, i) => (
+              <span key={i} className={step === i + 1 ? 'text-red-800 font-medium' : ''}>{label}</span>
+            ))}
           </div>
         </div>
       </div>
@@ -378,6 +570,24 @@ export default function CadastroCliente() {
       {/* Form Content */}
       <main className="max-w-4xl mx-auto px-4 py-8">
         <div className="bg-white rounded-2xl shadow-lg p-6 sm:p-8">
+          
+          {/* Botão Salvar Rascunho */}
+          {step < totalSteps && (
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={salvarRascunhoLocal}
+                disabled={salvandoRascunho}
+                className={`flex items-center gap-2 px-4 py-2 text-sm rounded-lg transition-all ${
+                  rascunhoSalvo 
+                    ? 'bg-green-100 text-green-700' 
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                <Save className="w-4 h-4" />
+                {salvandoRascunho ? 'Salvando...' : rascunhoSalvo ? 'Rascunho salvo!' : 'Salvar rascunho'}
+              </button>
+            </div>
+          )}
           
           {/* Erro */}
           {erro && (
@@ -497,7 +707,7 @@ export default function CadastroCliente() {
                     value={formData.profissao}
                     onChange={(e) => updateField('profissao', e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
-                    placeholder="Ex: Enfermeiro(a), Técnico(a) de Enfermagem"
+                    placeholder="Ex: Médico(a), Enfermeiro(a)"
                   />
                 </div>
 
@@ -525,7 +735,7 @@ export default function CadastroCliente() {
                     value={formData.orgao_vinculacao}
                     onChange={(e) => updateField('orgao_vinculacao', e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
-                    placeholder="Ex: SES-MT, Prefeitura de Cuiabá, etc."
+                    placeholder="Ex: Hospital Geral Universitário"
                   />
                 </div>
 
@@ -601,6 +811,23 @@ export default function CadastroCliente() {
                 </select>
               </div>
 
+              {/* Aviso para demandas com formulário específico */}
+              {temFormularioEspecifico && (
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <div className="flex items-start gap-3">
+                    <FileQuestion className="w-5 h-5 text-blue-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm text-blue-800 font-medium">
+                        Formulário adicional necessário
+                      </p>
+                      <p className="text-sm text-blue-700 mt-1">
+                        Este tipo de demanda requer informações específicas. Na próxima etapa, você preencherá dados adicionais sobre a residência médica.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
                   Objeto do Contrato / Poderes da Procuração <span className="text-red-500">*</span>
@@ -635,8 +862,243 @@ export default function CadastroCliente() {
             </div>
           )}
 
-          {/* Step 3: Documentos */}
-          {step === 3 && (
+          {/* Step 3: Formulário Específico - Auxílio Moradia (apenas se tem formulário específico) */}
+          {step === 3 && temFormularioEspecifico && formData.tipo_demanda === 'auxilio_moradia_residencia' && (
+            <div className="space-y-6">
+              <div className="flex items-center gap-3 mb-6">
+                <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
+                  <Stethoscope className="w-6 h-6 text-red-700" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">Dados da Residência Médica</h2>
+                  <p className="text-gray-500 text-sm">Informações necessárias para fundamentar o direito</p>
+                </div>
+              </div>
+
+              {/* Dados da Residência */}
+              <div className="bg-gray-50 rounded-xl p-5 space-y-4">
+                <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                  <GraduationCap className="w-5 h-5" /> Dados da Residência
+                </h3>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Instituição de Ensino (Universidade vinculada) <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={dadosAuxilioMoradia.instituicao_ensino}
+                      onChange={(e) => updateAuxilioMoradiaField('instituicao_ensino', e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                      placeholder="Ex: Universidade Federal de São Paulo - UNIFESP"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Unidade Hospitalar (Local de atuação)
+                    </label>
+                    <input
+                      type="text"
+                      value={dadosAuxilioMoradia.unidade_hospitalar}
+                      onChange={(e) => updateAuxilioMoradiaField('unidade_hospitalar', e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                      placeholder="Ex: Hospital Geral Universitário"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Especialidade Médica cursada <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={dadosAuxilioMoradia.especialidade_medica}
+                      onChange={(e) => updateAuxilioMoradiaField('especialidade_medica', e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                      placeholder="Ex: Otorrinolaringologia, Medicina de Família e Comunidade"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Data de Início da Residência <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={dadosAuxilioMoradia.data_inicio_residencia}
+                      onChange={(e) => updateAuxilioMoradiaField('data_inicio_residencia', e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Data de Término da Residência <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={dadosAuxilioMoradia.data_termino_residencia}
+                      onChange={(e) => updateAuxilioMoradiaField('data_termino_residencia', e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Valor bruto da bolsa recebida mensalmente
+                    </label>
+                    <input
+                      type="text"
+                      value={dadosAuxilioMoradia.valor_bolsa_mensal}
+                      onChange={(e) => updateAuxilioMoradiaField('valor_bolsa_mensal', maskCurrency(e.target.value))}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                      placeholder="R$ 3.330,43"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Geralmente R$ 3.330,43 ou R$ 4.106,09</p>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Recebeu moradia in natura ou auxílio?
+                    </label>
+                    <select
+                      value={dadosAuxilioMoradia.recebeu_moradia ? 'sim' : 'nao'}
+                      onChange={(e) => updateAuxilioMoradiaField('recebeu_moradia', e.target.value === 'sim')}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                    >
+                      <option value="nao">Não</option>
+                      <option value="sim">Sim</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Cálculo estimado do valor da causa */}
+              {calcularValorCausa() && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                  <div className="flex items-start gap-3">
+                    <BadgeDollarSign className="w-5 h-5 text-green-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm text-green-800 font-medium">Estimativa do Valor da Causa</p>
+                      <p className="text-lg font-bold text-green-700 mt-1">
+                        {calcularValorCausa()?.valorCausa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                      </p>
+                      <p className="text-xs text-green-600 mt-1">
+                        ({calcularValorCausa()?.meses} meses × 30% de {calcularValorCausa()?.valorBolsa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })})
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Histórico Processual */}
+              <div className="bg-gray-50 rounded-xl p-5 space-y-4">
+                <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                  <Clock className="w-5 h-5" /> Histórico Processual
+                </h3>
+                
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-xs text-amber-800">
+                    <strong>Atenção:</strong> Preencha esta seção apenas se você já ingressou com esta ação anteriormente e ela foi extinta/arquivada.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Já ingressou com esta ação anteriormente?
+                  </label>
+                  <select
+                    value={dadosAuxilioMoradia.processo_anterior ? 'sim' : 'nao'}
+                    onChange={(e) => updateAuxilioMoradiaField('processo_anterior', e.target.value === 'sim')}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                  >
+                    <option value="nao">Não</option>
+                    <option value="sim">Sim</option>
+                  </select>
+                </div>
+
+                {dadosAuxilioMoradia.processo_anterior && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                    <div className="sm:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Número do Processo Anterior
+                      </label>
+                      <input
+                        type="text"
+                        value={dadosAuxilioMoradia.numero_processo_anterior}
+                        onChange={(e) => updateAuxilioMoradiaField('numero_processo_anterior', e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                        placeholder="Ex: 0000000-00.0000.0.00.0000"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Vara/Juizado Anterior
+                      </label>
+                      <input
+                        type="text"
+                        value={dadosAuxilioMoradia.vara_juizado_anterior}
+                        onChange={(e) => updateAuxilioMoradiaField('vara_juizado_anterior', e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                        placeholder="Ex: 1ª Vara Federal de Cuiabá"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Data de Protocolo da ação anterior
+                      </label>
+                      <input
+                        type="date"
+                        value={dadosAuxilioMoradia.data_protocolo_anterior}
+                        onChange={(e) => updateAuxilioMoradiaField('data_protocolo_anterior', e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Data da Citação/Despacho inicial
+                      </label>
+                      <input
+                        type="date"
+                        value={dadosAuxilioMoradia.data_citacao_anterior}
+                        onChange={(e) => updateAuxilioMoradiaField('data_citacao_anterior', e.target.value)}
+                        className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Dados Bancários */}
+              <div className="bg-gray-50 rounded-xl p-5 space-y-4">
+                <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                  <Landmark className="w-5 h-5" /> Dados Bancários
+                </h3>
+                
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Banco, Agência e Conta
+                  </label>
+                  <input
+                    type="text"
+                    value={dadosAuxilioMoradia.dados_bancarios}
+                    onChange={(e) => updateAuxilioMoradiaField('dados_bancarios', e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                    placeholder="Ex: Banco do Brasil, Ag. 1234-5, CC 12345-6"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Para fins de recebimento futuro</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4 (ou 3 se não tem formulário específico): Documentos */}
+          {((step === 3 && !temFormularioEspecifico) || (step === 4 && temFormularioEspecifico)) && (
             <div className="space-y-6">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
@@ -648,13 +1110,81 @@ export default function CadastroCliente() {
                 </div>
               </div>
 
+              {/* Documentos específicos para Auxílio Moradia */}
+              {formData.tipo_demanda === 'auxilio_moradia_residencia' && (
+                <div className="space-y-4">
+                  <h3 className="font-semibold text-gray-800">Documentos específicos para Auxílio Moradia</h3>
+                  <p className="text-sm text-gray-600">
+                    Todos os documentos são opcionais neste momento. Você pode enviá-los posteriormente.
+                  </p>
+                  
+                  <div className="space-y-3">
+                    {documentosAuxilioMoradia.map((doc) => (
+                      <div key={doc.id} className="border border-gray-200 rounded-lg p-4">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <label className="block text-sm font-medium text-gray-700">
+                              {doc.nome}
+                              {doc.obrigatorio && <span className="text-red-500 ml-1">*</span>}
+                            </label>
+                            <p className="text-xs text-gray-500 mt-1">{doc.descricao}</p>
+                          </div>
+                          <div className="ml-4">
+                            <input
+                              type="file"
+                              id={`doc-${doc.id}`}
+                              onChange={(e) => handleDocumentoDemandaSelect(doc.id, e.target.files?.[0] || null)}
+                              accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                              className="hidden"
+                            />
+                            <label
+                              htmlFor={`doc-${doc.id}`}
+                              className={`cursor-pointer inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all ${
+                                arquivosDemanda[doc.id]
+                                  ? 'bg-green-100 text-green-700'
+                                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                              }`}
+                            >
+                              {arquivosDemanda[doc.id] ? (
+                                <>
+                                  <FileCheck className="w-4 h-4" />
+                                  Anexado
+                                </>
+                              ) : (
+                                <>
+                                  <Upload className="w-4 h-4" />
+                                  Anexar
+                                </>
+                              )}
+                            </label>
+                          </div>
+                        </div>
+                        {arquivosDemanda[doc.id] && (
+                          <div className="mt-2 flex items-center justify-between bg-gray-50 rounded px-3 py-2">
+                            <span className="text-sm text-gray-600 truncate">
+                              {arquivosDemanda[doc.id]?.name}
+                            </span>
+                            <button
+                              onClick={() => handleDocumentoDemandaSelect(doc.id, null)}
+                              className="text-red-500 hover:text-red-700"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Documentos gerais */}
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-                <h3 className="font-medium text-amber-800 mb-2">Documentos recomendados:</h3>
+                <h3 className="font-medium text-amber-800 mb-2">Documentos adicionais (opcionais):</h3>
                 <ul className="text-sm text-amber-700 space-y-1">
                   <li>• Documento de identidade (RG ou CNH)</li>
                   <li>• Comprovante de residência atualizado</li>
-                  <li>• Últimos 3 contracheques</li>
-                  <li>• Documentos relacionados à demanda</li>
+                  <li>• Outros documentos relevantes</li>
                 </ul>
               </div>
 
@@ -674,7 +1204,7 @@ export default function CadastroCliente() {
                 >
                   <Upload className="w-8 h-8" />
                   <div className="text-left">
-                    <p className="font-medium">Clique para selecionar arquivos</p>
+                    <p className="font-medium">Clique para selecionar arquivos adicionais</p>
                     <p className="text-sm text-gray-500">PDF, JPG, PNG, DOC ou DOCX</p>
                   </div>
                 </button>
@@ -705,8 +1235,8 @@ export default function CadastroCliente() {
             </div>
           )}
 
-          {/* Step 4: Confirmação */}
-          {step === 4 && (
+          {/* Step Final: Confirmação */}
+          {step === totalSteps && (
             <div className="space-y-6">
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-12 h-12 bg-red-100 rounded-xl flex items-center justify-center">
@@ -727,21 +1257,12 @@ export default function CadastroCliente() {
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div><span className="text-gray-500">Nome:</span> <strong>{formData.nome}</strong></div>
                     <div><span className="text-gray-500">CPF:</span> <strong>{formData.cpf}</strong></div>
-                    {formData.documento_identificacao && (
-                      <div><span className="text-gray-500">Documento:</span> <strong>{formData.documento_identificacao}</strong></div>
-                    )}
                     <div><span className="text-gray-500">Nascimento:</span> <strong>{formData.data_nascimento}</strong></div>
                     <div><span className="text-gray-500">Estado Civil:</span> <strong className="capitalize">{formData.estado_civil}</strong></div>
                     <div><span className="text-gray-500">Profissão:</span> <strong>{formData.profissao}</strong></div>
-                    {formData.matricula_funcional && (
-                      <div><span className="text-gray-500">Matrícula:</span> <strong>{formData.matricula_funcional}</strong></div>
-                    )}
-                    {formData.orgao_vinculacao && (
-                      <div><span className="text-gray-500">Órgão:</span> <strong>{formData.orgao_vinculacao}</strong></div>
-                    )}
-                    <div className="col-span-2"><span className="text-gray-500">Endereço:</span> <strong>{formData.endereco_completo}</strong></div>
                     <div><span className="text-gray-500">E-mail:</span> <strong>{formData.email}</strong></div>
                     <div><span className="text-gray-500">Telefone:</span> <strong>{formData.telefone}</strong></div>
+                    <div className="col-span-2"><span className="text-gray-500">Endereço:</span> <strong>{formData.endereco_completo}</strong></div>
                   </div>
                 </div>
 
@@ -756,12 +1277,47 @@ export default function CadastroCliente() {
                   </div>
                 </div>
 
+                {/* Dados específicos do Auxílio Moradia */}
+                {formData.tipo_demanda === 'auxilio_moradia_residencia' && (
+                  <div className="bg-gray-50 rounded-xl p-4">
+                    <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
+                      <Stethoscope className="w-4 h-4" /> Dados da Residência Médica
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="col-span-2"><span className="text-gray-500">Instituição:</span> <strong>{dadosAuxilioMoradia.instituicao_ensino}</strong></div>
+                      {dadosAuxilioMoradia.unidade_hospitalar && (
+                        <div className="col-span-2"><span className="text-gray-500">Hospital:</span> <strong>{dadosAuxilioMoradia.unidade_hospitalar}</strong></div>
+                      )}
+                      <div><span className="text-gray-500">Especialidade:</span> <strong>{dadosAuxilioMoradia.especialidade_medica}</strong></div>
+                      <div><span className="text-gray-500">Período:</span> <strong>{dadosAuxilioMoradia.data_inicio_residencia} a {dadosAuxilioMoradia.data_termino_residencia}</strong></div>
+                      {dadosAuxilioMoradia.valor_bolsa_mensal && (
+                        <div><span className="text-gray-500">Bolsa:</span> <strong>{dadosAuxilioMoradia.valor_bolsa_mensal}</strong></div>
+                      )}
+                      {calcularValorCausa() && (
+                        <div><span className="text-gray-500">Valor estimado:</span> <strong className="text-green-700">{calcularValorCausa()?.valorCausa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong></div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="bg-gray-50 rounded-xl p-4">
                   <h3 className="font-semibold text-gray-800 mb-3 flex items-center gap-2">
                     <FileText className="w-4 h-4" /> Documentos
                   </h3>
-                  {arquivos.length > 0 ? (
+                  {(arquivos.length > 0 || Object.values(arquivosDemanda).some(f => f !== null)) ? (
                     <ul className="text-sm space-y-1">
+                      {/* Documentos específicos da demanda */}
+                      {Object.entries(arquivosDemanda).map(([docId, file]) => {
+                        if (!file) return null
+                        const doc = documentosAuxilioMoradia.find(d => d.id === docId)
+                        return (
+                          <li key={docId} className="flex items-center gap-2">
+                            <FileCheck className="w-4 h-4 text-green-600" />
+                            <span className="text-gray-600">{doc?.nome}:</span> {file.name}
+                          </li>
+                        )
+                      })}
+                      {/* Documentos gerais */}
                       {arquivos.map((file, i) => (
                         <li key={i} className="flex items-center gap-2">
                           <FileCheck className="w-4 h-4 text-green-600" />
@@ -835,7 +1391,7 @@ export default function CadastroCliente() {
               <div />
             )}
 
-            {step < 4 ? (
+            {step < totalSteps ? (
               <button
                 onClick={nextStep}
                 className="flex items-center gap-2 px-6 py-3 bg-red-800 hover:bg-red-900 text-white font-semibold rounded-xl transition-all"
