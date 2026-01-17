@@ -931,7 +931,6 @@ class DadosCliente(BaseModel):
     nacionalidade: str = "brasileiro(a)"
     estado_civil: str
     profissao: str
-    rg: str
     cpf: str
     data_nascimento: str
     endereco_completo: str
@@ -940,6 +939,11 @@ class DadosCliente(BaseModel):
     tipo_demanda: str
     objeto_contrato: str
     poderes_especificos: str
+    # Campos opcionais
+    rg: Optional[str] = ""
+    documento_identificacao: Optional[str] = ""
+    matricula_funcional: Optional[str] = ""
+    orgao_vinculacao: Optional[str] = ""
     honorarios: Optional[str] = ""
     observacoes: Optional[str] = ""
 
@@ -7245,7 +7249,7 @@ async def download_peticao(cadastro_id: str, tipo_demanda: str, usuario: dict = 
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=os.path.basename(caminho)
     )
-    
+
 # ============================================
 # INICIALIZAÇÃO
 # ============================================
