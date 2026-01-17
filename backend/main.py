@@ -1,5 +1,5 @@
 """
-Backend - Vaucher & Álvares Sistema de Cadastro
+Backend - Vaucher e Álvares Sistema de Cadastro
 FastAPI + PostgreSQL + Geração de Documentos + Resend para E-mail
 Com gerenciamento de usuários no banco de dados
 VERSÃO 3.0 - COM PORTAL DO CLIENTE
@@ -38,7 +38,7 @@ from psycopg2.extras import RealDictCursor
 # ============================================
 
 app = FastAPI(
-    title="Vaucher & Álvares - API",
+    title="Vaucher e Álvares - API",
     description="Sistema de cadastro de clientes e geração de documentos",
     version="3.0.0"
 )
@@ -93,7 +93,7 @@ ADMIN_INICIAL_SENHA = os.getenv("ADMIN_INICIAL_SENHA", "VaucherAdmin2024!")
 TOKEN_SECRET = os.getenv("TOKEN_SECRET", "vaucher_alvares_secret_key_2024")
 
 # URL da logo
-LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher%20e%20Alvares-06.jpg"
+LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher_e_Alvares-06.jpg"
 
 # ============================================
 # FUNÇÕES DE SEGURANÇA
@@ -179,7 +179,7 @@ def criar_email_html(conteudo: str) -> str:
         <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
             <!-- Cabeçalho com Logo -->
             <div style="background-color: #ffffff; padding: 30px; text-align: center; border-bottom: 3px solid #8B1538;">
-                <img src="{LOGO_URL}" alt="Vaucher & Álvares Advogados" style="max-width: 300px; height: auto;" />
+                <img src="{LOGO_URL}" alt="Vaucher e Álvares Advogados" style="max-width: 300px; height: auto;" />
             </div>
             
             <!-- Conteúdo -->
@@ -190,7 +190,7 @@ def criar_email_html(conteudo: str) -> str:
             <!-- Rodapé -->
             <div style="background-color: #f8f8f8; padding: 20px; text-align: center; border-top: 1px solid #eee;">
                 <p style="font-size: 12px; color: #666; margin: 0;">
-                    <strong>Vaucher & Álvares Sociedade de Advogados</strong><br>
+                    <strong>Vaucher e Álvares Sociedade de Advogados</strong><br>
                     Rua Lima, nº 106, Bairro Jardim das Américas, Cuiabá-MT<br>
                     (65) 3025-1223 – email: atendimento@vaucherealvares.com
                 </p>
@@ -1480,7 +1480,7 @@ async def enviar_email_resend(destinatario: str, assunto: str, corpo_html: str, 
     logger.info(f"Enviando e-mail via Resend para {destinatario}")
     
     payload = {
-        "from": f"Vaucher & Álvares <{FROM_EMAIL}>",
+        "from": f"Vaucher e Álvares <{FROM_EMAIL}>",
         "to": [destinatario],
         "subject": assunto,
         "html": corpo_html
@@ -1520,7 +1520,7 @@ async def enviar_email_resend(destinatario: str, assunto: str, corpo_html: str, 
 
 @app.get("/")
 def root():
-    return {"message": "Vaucher & Álvares API", "status": "online", "version": "3.0"}
+    return {"message": "Vaucher e Álvares API", "status": "online", "version": "3.0"}
 
 @app.get("/health")
 def health():
@@ -1647,7 +1647,7 @@ async def criar_cadastro(dados: DadosCliente):
             
             await enviar_email_resend(
                 dados.email,
-                "✅ Cadastro Recebido - Vaucher & Álvares Advogados",
+                "✅ Cadastro Recebido - Vaucher e Álvares Advogados",
                 corpo_html
             )
         except Exception as e:
@@ -1741,7 +1741,7 @@ def gerar_documentos(cadastro_id: str):
 @app.post("/api/cadastros/{cadastro_id}/enviar-email")
 async def enviar_email_documentos(
     cadastro_id: str,
-    assunto: str = Form(default="Seus Documentos - Vaucher & Álvares Advogados"),
+    assunto: str = Form(default="Seus Documentos - Vaucher e Álvares Advogados"),
     mensagem: str = Form(default=""),
     arquivos: List[UploadFile] = File(default=[])
 ):
@@ -1829,13 +1829,13 @@ def enviar_email_solicitacao_atualizacao(email: str, nome: str, motivo: str) -> 
         html = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background-color: #1e3a5f; padding: 20px; text-align: center;">
-                <h1 style="color: white; margin: 0;">Vaucher & Álvares</h1>
+                <h1 style="color: white; margin: 0;">Vaucher e Álvares</h1>
                 <p style="color: #ccc; margin: 5px 0 0 0;">Sociedade de Advogados</p>
             </div>
             <div style="padding: 30px; background-color: #f9f9f9;">
                 <h2 style="color: #1e3a5f;">Solicitação de Atualização Cadastral</h2>
                 <p>Prezado(a) <strong>{nome}</strong>,</p>
-                <p>O escritório <strong>Vaucher & Álvares Sociedade de Advogados</strong> 
+                <p>O escritório <strong>Vaucher e Álvares Sociedade de Advogados</strong> 
                 solicita que você atualize seus dados cadastrais em nosso sistema.</p>
                 {f'<div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0;"><strong>Motivo:</strong> {motivo}</div>' if motivo else ''}
                 <p>Por favor, acesse o <strong>Portal do Cliente</strong> para enviar 
@@ -1849,7 +1849,7 @@ def enviar_email_solicitacao_atualizacao(email: str, nome: str, motivo: str) -> 
                 </p>
             </div>
             <div style="background-color: #eee; padding: 20px; text-align: center; font-size: 12px; color: #666;">
-                <p style="margin: 0;">Vaucher & Álvares Sociedade de Advogados</p>
+                <p style="margin: 0;">Vaucher e Álvares Sociedade de Advogados</p>
                 <p style="margin: 5px 0;">Rua Lima, nº 106, Jardim das Américas - Cuiabá/MT</p>
                 <p style="margin: 5px 0;">Tel: (65) 3025-1223</p>
             </div>
@@ -1866,7 +1866,7 @@ def enviar_email_solicitacao_atualizacao(email: str, nome: str, motivo: str) -> 
                 json={
                     "from": FROM_EMAIL,
                     "to": email,
-                    "subject": "Solicitação de Atualização Cadastral - Vaucher & Álvares",
+                    "subject": "Solicitação de Atualização Cadastral - Vaucher e Álvares",
                     "html": html
                 }
             )
@@ -1890,7 +1890,7 @@ def enviar_email_atualizacao_aprovada(email: str, nome: str) -> bool:
         html = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background-color: #1e3a5f; padding: 20px; text-align: center;">
-                <h1 style="color: white; margin: 0;">Vaucher & Álvares</h1>
+                <h1 style="color: white; margin: 0;">Vaucher e Álvares</h1>
             </div>
             <div style="padding: 30px; background-color: #f9f9f9;">
                 <div style="background-color: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin-bottom: 20px;">
@@ -1902,7 +1902,7 @@ def enviar_email_atualizacao_aprovada(email: str, nome: str) -> bool:
                 <p>Agradecemos pela colaboração!</p>
             </div>
             <div style="background-color: #eee; padding: 20px; text-align: center; font-size: 12px; color: #666;">
-                <p style="margin: 0;">Vaucher & Álvares Sociedade de Advogados</p>
+                <p style="margin: 0;">Vaucher e Álvares Sociedade de Advogados</p>
             </div>
         </div>
         """
@@ -1917,7 +1917,7 @@ def enviar_email_atualizacao_aprovada(email: str, nome: str) -> bool:
                 json={
                     "from": FROM_EMAIL,
                     "to": email,
-                    "subject": "✓ Atualização Cadastral Aprovada - Vaucher & Álvares",
+                    "subject": "✓ Atualização Cadastral Aprovada - Vaucher e Álvares",
                     "html": html
                 }
             )
@@ -1936,7 +1936,7 @@ def enviar_email_atualizacao_rejeitada(email: str, nome: str, motivo: str) -> bo
         html = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
             <div style="background-color: #1e3a5f; padding: 20px; text-align: center;">
-                <h1 style="color: white; margin: 0;">Vaucher & Álvares</h1>
+                <h1 style="color: white; margin: 0;">Vaucher e Álvares</h1>
             </div>
             <div style="padding: 30px; background-color: #f9f9f9;">
                 <div style="background-color: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin-bottom: 20px;">
@@ -1955,7 +1955,7 @@ def enviar_email_atualizacao_rejeitada(email: str, nome: str, motivo: str) -> bo
                 </p>
             </div>
             <div style="background-color: #eee; padding: 20px; text-align: center; font-size: 12px; color: #666;">
-                <p style="margin: 0;">Vaucher & Álvares Sociedade de Advogados</p>
+                <p style="margin: 0;">Vaucher e Álvares Sociedade de Advogados</p>
             </div>
         </div>
         """
@@ -1970,7 +1970,7 @@ def enviar_email_atualizacao_rejeitada(email: str, nome: str, motivo: str) -> bo
                 json={
                     "from": FROM_EMAIL,
                     "to": email,
-                    "subject": "Atualização Cadastral - Revisão Necessária - Vaucher & Álvares",
+                    "subject": "Atualização Cadastral - Revisão Necessária - Vaucher e Álvares",
                     "html": html
                 }
             )
@@ -4343,7 +4343,7 @@ async def admin_habilitar_acesso_cliente(
             
             await enviar_email_resend(
                 email_cliente,
-                "🔐 Seu acesso ao Portal do Cliente - Vaucher & Álvares",
+                "🔐 Seu acesso ao Portal do Cliente - Vaucher e Álvares",
                 corpo_html
             )
             
@@ -4852,7 +4852,7 @@ async def admin_enviar_documentos(
                 
                 <p>Olá, <strong>{nome_cliente}</strong>!</p>
                 
-                <p>O escritório <strong>Vaucher & Álvares Sociedade de Advogados</strong> enviou novos documentos para você:</p>
+                <p>O escritório <strong>Vaucher e Álvares Sociedade de Advogados</strong> enviou novos documentos para você:</p>
                 
                 <ul style="background-color: #f8f8f8; padding: 15px 30px; border-radius: 8px;">
                     {lista_arquivos}
@@ -4877,7 +4877,7 @@ async def admin_enviar_documentos(
             try:
                 await enviar_email_resend(
                     email_cliente,
-                    "Novos documentos disponíveis - Vaucher & Álvares",
+                    "Novos documentos disponíveis - Vaucher e Álvares",
                     email_html
                 )
                 logger.info(f"E-mail de notificação enviado para {email_cliente}")
@@ -6603,7 +6603,7 @@ async def exportar_aceites_cliente(
                 }
                 for a in aceites
             ],
-            "declaracao": "Este documento comprova que o titular acima identificado aceitou os termos nas datas e condições especificadas, através do sistema digital do escritório Vaucher & Álvares Sociedade de Advogados."
+            "declaracao": "Este documento comprova que o titular acima identificado aceitou os termos nas datas e condições especificadas, através do sistema digital do escritório Vaucher e Álvares Sociedade de Advogados."
         }
         
         return documento_comprovacao
