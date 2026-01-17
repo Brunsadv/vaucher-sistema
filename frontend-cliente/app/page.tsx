@@ -40,6 +40,38 @@ const maskPhone = (value: string) => {
     .replace(/(-\d{4})\d+?$/, '$1')
 }
 
+// Validação matemática de CPF (algoritmo oficial)
+const validarCPF = (cpf: string): boolean => {
+  // Remove caracteres não numéricos
+  const cpfLimpo = cpf.replace(/\D/g, '')
+  
+  // Deve ter 11 dígitos
+  if (cpfLimpo.length !== 11) return false
+  
+  // Verifica se todos os dígitos são iguais (ex: 111.111.111-11)
+  if (/^(\d)\1+$/.test(cpfLimpo)) return false
+  
+  // Validação do primeiro dígito verificador
+  let soma = 0
+  for (let i = 0; i < 9; i++) {
+    soma += parseInt(cpfLimpo[i]) * (10 - i)
+  }
+  let resto = (soma * 10) % 11
+  if (resto === 10 || resto === 11) resto = 0
+  if (resto !== parseInt(cpfLimpo[9])) return false
+  
+  // Validação do segundo dígito verificador
+  soma = 0
+  for (let i = 0; i < 10; i++) {
+    soma += parseInt(cpfLimpo[i]) * (11 - i)
+  }
+  resto = (soma * 10) % 11
+  if (resto === 10 || resto === 11) resto = 0
+  if (resto !== parseInt(cpfLimpo[10])) return false
+  
+  return true
+}
+
 // Tipos de demanda com textos pré-definidos
 const tiposDemanda = [
   { value: 'adicional_insalubridade', label: 'Adicional de Insalubridade', texto: 'propor ação judicial visando o reconhecimento do direito ao adicional de insalubridade, bem como as diferenças remuneratórias decorrentes' },
@@ -59,11 +91,13 @@ const tiposDemanda = [
 interface FormData {
   nome: string
   cpf: string
-  rg: string
+  documento_identificacao: string
   data_nascimento: string
   estado_civil: string
   nacionalidade: string
   profissao: string
+  matricula_funcional: string
+  orgao_vinculacao: string
   endereco_completo: string
   email: string
   telefone: string
@@ -76,11 +110,13 @@ interface FormData {
 const initialFormData: FormData = {
   nome: '',
   cpf: '',
-  rg: '',
+  documento_identificacao: '',
   data_nascimento: '',
   estado_civil: '',
   nacionalidade: 'brasileiro(a)',
   profissao: '',
+  matricula_funcional: '',
+  orgao_vinculacao: '',
   endereco_completo: '',
   email: '',
   telefone: '',
@@ -161,9 +197,17 @@ export default function CadastroCliente() {
   const validateStep = (currentStep: number): boolean => {
     switch (currentStep) {
       case 1:
-        return !!(formData.nome && formData.cpf && formData.rg && formData.data_nascimento && 
-                  formData.estado_civil && formData.profissao && formData.endereco_completo && 
-                  formData.email && formData.telefone)
+        // Validar campos obrigatórios (documento_identificacao, matricula_funcional e orgao_vinculacao são opcionais)
+        if (!formData.nome || !formData.cpf || !formData.data_nascimento || 
+            !formData.estado_civil || !formData.profissao || !formData.endereco_completo || 
+            !formData.email || !formData.telefone) {
+          return false
+        }
+        // Validar CPF
+        if (!validarCPF(formData.cpf)) {
+          return false
+        }
+        return true
       case 2:
         return !!(formData.tipo_demanda && formData.objeto_contrato)
       case 3:
@@ -176,6 +220,20 @@ export default function CadastroCliente() {
   }
 
   const nextStep = () => {
+    if (step === 1) {
+      // Validações específicas com mensagens de erro detalhadas
+      if (!formData.nome || !formData.cpf || !formData.data_nascimento || 
+          !formData.estado_civil || !formData.profissao || !formData.endereco_completo || 
+          !formData.email || !formData.telefone) {
+        setErro('Por favor, preencha todos os campos obrigatórios.')
+        return
+      }
+      if (!validarCPF(formData.cpf)) {
+        setErro('CPF inválido. Por favor, verifique o número digitado.')
+        return
+      }
+    }
+    
     if (validateStep(step)) {
       setStep(prev => Math.min(prev + 1, 4))
       setErro('')
@@ -372,15 +430,17 @@ export default function CadastroCliente() {
 
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
-                    RG <span className="text-red-500">*</span>
+                    Documento de Identificação
+                    <span className="text-gray-400 text-xs ml-1">(opcional)</span>
                   </label>
                   <input
                     type="text"
-                    value={formData.rg}
-                    onChange={(e) => updateField('rg', e.target.value)}
+                    value={formData.documento_identificacao}
+                    onChange={(e) => updateField('documento_identificacao', e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
-                    placeholder="Digite seu RG"
+                    placeholder="RG, OAB, CRM, CRO, CREA, etc."
                   />
+                  <p className="text-xs text-gray-500 mt-1">RG, registro profissional ou outro documento</p>
                 </div>
 
                 <div>
@@ -438,6 +498,34 @@ export default function CadastroCliente() {
                     onChange={(e) => updateField('profissao', e.target.value)}
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
                     placeholder="Ex: Enfermeiro(a), Técnico(a) de Enfermagem"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Matrícula Funcional
+                    <span className="text-gray-400 text-xs ml-1">(opcional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.matricula_funcional}
+                    onChange={(e) => updateField('matricula_funcional', e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                    placeholder="Número da matrícula"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Órgão de Vinculação
+                    <span className="text-gray-400 text-xs ml-1">(opcional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.orgao_vinculacao}
+                    onChange={(e) => updateField('orgao_vinculacao', e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-800 focus:border-transparent"
+                    placeholder="Ex: SES-MT, Prefeitura de Cuiabá, etc."
                   />
                 </div>
 
@@ -639,10 +727,18 @@ export default function CadastroCliente() {
                   <div className="grid grid-cols-2 gap-3 text-sm">
                     <div><span className="text-gray-500">Nome:</span> <strong>{formData.nome}</strong></div>
                     <div><span className="text-gray-500">CPF:</span> <strong>{formData.cpf}</strong></div>
-                    <div><span className="text-gray-500">RG:</span> <strong>{formData.rg}</strong></div>
+                    {formData.documento_identificacao && (
+                      <div><span className="text-gray-500">Documento:</span> <strong>{formData.documento_identificacao}</strong></div>
+                    )}
                     <div><span className="text-gray-500">Nascimento:</span> <strong>{formData.data_nascimento}</strong></div>
                     <div><span className="text-gray-500">Estado Civil:</span> <strong className="capitalize">{formData.estado_civil}</strong></div>
                     <div><span className="text-gray-500">Profissão:</span> <strong>{formData.profissao}</strong></div>
+                    {formData.matricula_funcional && (
+                      <div><span className="text-gray-500">Matrícula:</span> <strong>{formData.matricula_funcional}</strong></div>
+                    )}
+                    {formData.orgao_vinculacao && (
+                      <div><span className="text-gray-500">Órgão:</span> <strong>{formData.orgao_vinculacao}</strong></div>
+                    )}
                     <div className="col-span-2"><span className="text-gray-500">Endereço:</span> <strong>{formData.endereco_completo}</strong></div>
                     <div><span className="text-gray-500">E-mail:</span> <strong>{formData.email}</strong></div>
                     <div><span className="text-gray-500">Telefone:</span> <strong>{formData.telefone}</strong></div>
