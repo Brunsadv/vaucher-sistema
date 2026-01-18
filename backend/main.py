@@ -1678,11 +1678,29 @@ def listar_documentos_demanda(cadastro_id: str) -> list:
             "nome_arquivo": row['nome_arquivo'],
             "nome_original": row['nome_original'],
             "descricao": row['descricao'],
+            "arquivo_path": row.get('arquivo_path', ''),
             "criado_em": row['criado_em'].isoformat() if row['criado_em'] else None
         } for row in rows]
     except Exception as e:
         logger.error(f"Erro ao listar documentos da demanda: {e}")
         return []
+
+def buscar_documento_demanda(doc_id: int) -> dict:
+    """Busca um documento da demanda específico."""
+    conn = get_db()
+    if not conn:
+        return None
+    
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM documentos_demanda WHERE id = %s", (doc_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar documento da demanda: {e}")
+        return None
 
 # ============================================
 # ROTAS DA API - BÁSICAS
@@ -4294,7 +4312,7 @@ async def portal_cliente_andamentos(cliente: dict = Depends(verificar_token_clie
 
 @app.get("/api/cliente/documentos")
 async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_cliente)):
-    """Lista documentos disponíveis para o cliente (recebidos e enviados)."""
+    """Lista documentos disponíveis para o cliente (recebidos, enviados e da demanda)."""
     cadastro = buscar_cadastro(cliente["cadastro_id"])
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
@@ -4315,7 +4333,7 @@ async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_clie
             "data": doc["criado_em"].isoformat() if doc.get("criado_em") else None
         })
     
-    # 2. Documentos ENVIADOS pelo Cliente (cliente -> escritório)
+    # 2. Documentos ENVIADOS pelo Cliente (documentos extras)
     docs_extras = listar_documentos_extras(cliente["cadastro_id"])
     for doc in docs_extras:
         documentos.append({
@@ -4327,6 +4345,33 @@ async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_clie
             "origem": "enviado",
             "disponivel": True,
             "data": doc["criado_em"].isoformat() if doc.get("criado_em") else None
+        })
+    
+    # 3. Documentos da DEMANDA (enviados pelo cliente no cadastro da demanda)
+    docs_demanda = listar_documentos_demanda(cliente["cadastro_id"])
+    for doc in docs_demanda:
+        # Traduzir tipo de documento para nome amigável
+        tipos_nomes = {
+            "processo_anterior": "Processo Anterior",
+            "historico_financeiro": "Histórico Financeiro",
+            "certificado_residencia": "Certificado de Residência",
+            "doc_pessoais": "Documento Pessoal",
+            "comprovante_residencia": "Comprovante de Residência",
+            "contracheque": "Contracheque",
+            "outros": "Outros"
+        }
+        tipo_nome = tipos_nomes.get(doc["tipo_documento"], doc["tipo_documento"])
+        
+        documentos.append({
+            "id": doc['id'],
+            "tipo": f"demanda_{doc['id']}",
+            "nome": doc["nome_original"],
+            "descricao": doc.get("descricao") or tipo_nome,
+            "categoria": "Documento da Demanda",
+            "origem": "enviado",
+            "tipo_documento": doc["tipo_documento"],
+            "disponivel": True,
+            "data": doc.get("criado_em")
         })
     
     # Ordenar por data (mais recente primeiro)
@@ -4450,7 +4495,7 @@ async def portal_cliente_download_documento(
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
-    # Documento do admin
+    # Documento do admin (recebido do escritório)
     if tipo.startswith("admin_"):
         doc_id = int(tipo.replace("admin_", ""))
         doc = buscar_documento_admin(doc_id)
@@ -4466,7 +4511,39 @@ async def portal_cliente_download_documento(
             media_type="application/octet-stream"
         )
     
-    # Documento gerado (contrato/procuração)
+    # Documento extra (enviado pelo cliente)
+    if tipo.startswith("extra_"):
+        doc_id = int(tipo.replace("extra_", ""))
+        doc = buscar_documento_extra(doc_id)
+        if not doc or doc["cadastro_id"] != cliente["cadastro_id"]:
+            raise HTTPException(status_code=404, detail="Documento não encontrado")
+        
+        if not os.path.exists(doc["arquivo_path"]):
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+        
+        return FileResponse(
+            doc["arquivo_path"],
+            filename=doc["nome_original"],
+            media_type="application/octet-stream"
+        )
+    
+    # Documento da demanda (enviado pelo cliente no cadastro)
+    if tipo.startswith("demanda_"):
+        doc_id = int(tipo.replace("demanda_", ""))
+        doc = buscar_documento_demanda(doc_id)
+        if not doc or doc["cadastro_id"] != cliente["cadastro_id"]:
+            raise HTTPException(status_code=404, detail="Documento não encontrado")
+        
+        if not doc.get("arquivo_path") or not os.path.exists(doc["arquivo_path"]):
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+        
+        return FileResponse(
+            doc["arquivo_path"],
+            filename=doc["nome_original"],
+            media_type="application/octet-stream"
+        )
+    
+    # Documento gerado (contrato/procuração) - mantido para compatibilidade
     arquivos_gerados = cadastro.get("arquivos_gerados", {})
     if tipo in ["contrato", "procuracao"]:
         arquivo_path = arquivos_gerados.get(tipo)
