@@ -3276,13 +3276,15 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                   </div>
 
                   {/* Documentos Específicos da Demanda */}
-                  {documentosDemanda.length > 0 && (
-                    <div className="bg-blue-50 rounded-xl p-6">
-                      <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                        <Briefcase className="w-5 h-5 text-blue-600" />
-                        Documentos Específicos da Demanda ({documentosDemanda.length})
-                      </h3>
-                      <div className="space-y-2">
+                  <div className="bg-blue-50 rounded-xl p-6">
+                    <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                      <Briefcase className="w-5 h-5 text-blue-600" />
+                      Documentos Específicos da Demanda ({documentosDemanda.length})
+                    </h3>
+                    
+                    {/* Lista de documentos existentes */}
+                    {documentosDemanda.length > 0 ? (
+                      <div className="space-y-2 mb-4">
                         {documentosDemanda.map((doc) => (
                           <div key={doc.id} className="flex items-center justify-between bg-white border border-blue-200 rounded-lg px-4 py-3">
                             <div className="flex items-center gap-3">
@@ -3292,6 +3294,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                                 {doc.descricao && (
                                   <p className="text-xs text-gray-500">{doc.descricao}</p>
                                 )}
+                                <p className="text-xs text-gray-400">Tipo: {doc.tipo_documento}</p>
                               </div>
                             </div>
                             <a 
@@ -3306,8 +3309,84 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                           </div>
                         ))}
                       </div>
+                    ) : (
+                      <p className="text-gray-500 text-sm mb-4">Nenhum documento específico da demanda cadastrado</p>
+                    )}
+                    
+                    {/* Upload de novos documentos da demanda */}
+                    <div className="border-t border-blue-200 pt-4 mt-4">
+                      <p className="text-sm text-gray-600 mb-3">Adicionar documento específico da demanda (contracheques, comprovantes de residência, etc.):</p>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <select
+                          id="tipo-doc-demanda"
+                          className="border border-blue-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                          defaultValue=""
+                        >
+                          <option value="" disabled>Tipo do documento</option>
+                          <option value="contracheque">Contracheque</option>
+                          <option value="comprovante_residencia">Comprovante de Residência</option>
+                          <option value="certificado_residencia">Certificado de Residência Médica</option>
+                          <option value="declaracao">Declaração</option>
+                          <option value="outro">Outro</option>
+                        </select>
+                        <input
+                          type="file"
+                          id="upload-doc-demanda"
+                          className="hidden"
+                          multiple
+                          onChange={async (e) => {
+                            if (!e.target.files || e.target.files.length === 0) return
+                            const tipoDoc = (document.getElementById('tipo-doc-demanda') as HTMLSelectElement).value
+                            if (!tipoDoc) {
+                              alert('Selecione o tipo do documento')
+                              return
+                            }
+                            
+                            for (const file of Array.from(e.target.files)) {
+                              const formData = new FormData()
+                              formData.append('arquivo', file)
+                              formData.append('descricao', tipoDoc === 'outro' ? 'Documento adicional' : tipoDoc)
+                              
+                              try {
+                                const response = await fetch(`${API_URL}/api/cadastros/${c.id}/documento-demanda/${tipoDoc}`, {
+                                  method: 'POST',
+                                  body: formData
+                                })
+                                const data = await response.json()
+                                if (!response.ok) {
+                                  alert(data.detail || 'Erro ao enviar documento')
+                                }
+                              } catch (error) {
+                                console.error('Erro:', error)
+                                alert('Erro ao enviar documento')
+                              }
+                            }
+                            
+                            // Recarregar documentos da demanda
+                            try {
+                              const response = await fetch(`${API_URL}/api/cadastros/${c.id}/documentos-demanda`)
+                              if (response.ok) {
+                                const data = await response.json()
+                                setDocumentosDemanda(data.documentos || [])
+                              }
+                            } catch (err) {
+                              console.error('Erro ao recarregar documentos:', err)
+                            }
+                            
+                            e.target.value = ''
+                            setMensagemSucesso('Documento(s) enviado(s) com sucesso!')
+                          }}
+                        />
+                        <label
+                          htmlFor="upload-doc-demanda"
+                          className="flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg cursor-pointer text-sm"
+                        >
+                          <Upload className="w-4 h-4" />
+                          Selecionar Arquivos
+                        </label>
+                      </div>
                     </div>
-                  )}
+                  </div>
 
                   {/* Documentos Gerados */}
                   {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao || c.arquivos_gerados.peticao_auxilio_moradia) && (
