@@ -2219,12 +2219,16 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   // Carregar dados específicos da demanda
   const carregarDadosDemanda = async (cadastroId: string, tipoDemanda: string) => {
     try {
-      const response = await fetch(`${API_URL}/api/cadastros/${cadastroId}/dados-demanda/${tipoDemanda}`, {
+      const response = await fetch(`${API_URL}/api/cadastros/${cadastroId}/demanda-especifica/${tipoDemanda}`, {
         headers: { 'Authorization': `Bearer ${user.token}` }
       })
       if (response.ok) {
         const data = await response.json()
-        setDadosDemanda(data)
+        if (data.success && data.dados) {
+          setDadosDemanda(data.dados)
+        } else {
+          setDadosDemanda(null)
+        }
       } else {
         setDadosDemanda(null)
       }
@@ -2343,8 +2347,10 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
     }
 
     // Carregar dados específicos da demanda (se for auxílio moradia)
-    const cadastro = cadastros.find(c => c.id === cadastroId)
-    if (cadastro?.dados.tipo_demanda === 'auxilio_moradia_residencia') {
+    // Usa selectedCadastro se disponível, senão busca no array
+    const cadastro = selectedCadastro?.id === cadastroId ? selectedCadastro : cadastros.find(c => c.id === cadastroId)
+    console.log('Tipo demanda:', cadastro?.dados?.tipo_demanda) // Debug
+    if (cadastro?.dados?.tipo_demanda === 'auxilio_moradia_residencia') {
       await carregarDadosDemanda(cadastroId, 'auxilio_moradia_residencia')
     } else {
       setDadosDemanda(null)
@@ -2780,112 +2786,121 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                   </div>
 
                   {/* Dados da Residência Médica - Apenas para Auxílio Moradia */}
-                  {c.dados.tipo_demanda === 'auxilio_moradia_residencia' && dadosDemanda && dadosDemanda.dados && (
+                  {c.dados.tipo_demanda === 'auxilio_moradia_residencia' && (
                     <div className="bg-blue-50 rounded-xl p-6">
                       <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
                         <Building className="w-5 h-5 text-blue-600" />
                         Dados da Residência Médica
                       </h3>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                        <div>
-                          <p className="text-gray-500">Instituição de Ensino</p>
-                          <p className="font-medium">{dadosDemanda.dados.instituicao_ensino}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Unidade Hospitalar</p>
-                          <p className="font-medium">{dadosDemanda.dados.unidade_hospitalar}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Especialidade</p>
-                          <p className="font-medium">{dadosDemanda.dados.especialidade_medica}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Início da Residência</p>
-                          <p className="font-medium">{dadosDemanda.dados.data_inicio_residencia}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Término da Residência</p>
-                          <p className="font-medium">{dadosDemanda.dados.data_termino_residencia}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Valor da Bolsa</p>
-                          <p className="font-medium">{dadosDemanda.dados.valor_bolsa_mensal}</p>
-                        </div>
-                        <div>
-                          <p className="text-gray-500">Recebeu Moradia?</p>
-                          <p className="font-medium">{dadosDemanda.dados.recebeu_moradia ? 'Sim' : 'Não'}</p>
-                        </div>
-                        {dadosDemanda.dados.processo_anterior && (
-                          <>
+                      {dadosDemanda && dadosDemanda.dados ? (
+                        <>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
                             <div>
-                              <p className="text-gray-500">Processo Anterior</p>
-                              <p className="font-medium">{dadosDemanda.dados.numero_processo_anterior}</p>
+                              <p className="text-gray-500">Instituição de Ensino</p>
+                              <p className="font-medium">{dadosDemanda.dados.instituicao_ensino || '-'}</p>
                             </div>
                             <div>
-                              <p className="text-gray-500">Vara/Juizado Anterior</p>
-                              <p className="font-medium">{dadosDemanda.dados.vara_juizado_anterior}</p>
+                              <p className="text-gray-500">Unidade Hospitalar</p>
+                              <p className="font-medium">{dadosDemanda.dados.unidade_hospitalar || '-'}</p>
                             </div>
-                          </>
-                        )}
-                        {dadosDemanda.dados.dados_bancarios && (
-                          <div className="md:col-span-3">
-                            <p className="text-gray-500">Dados Bancários</p>
-                            <p className="font-medium">{dadosDemanda.dados.dados_bancarios}</p>
+                            <div>
+                              <p className="text-gray-500">Especialidade</p>
+                              <p className="font-medium">{dadosDemanda.dados.especialidade_medica || '-'}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Início da Residência</p>
+                              <p className="font-medium">{dadosDemanda.dados.data_inicio_residencia || '-'}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Término da Residência</p>
+                              <p className="font-medium">{dadosDemanda.dados.data_termino_residencia || '-'}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Valor da Bolsa</p>
+                              <p className="font-medium">{dadosDemanda.dados.valor_bolsa_mensal || '-'}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Recebeu Moradia?</p>
+                              <p className="font-medium">{dadosDemanda.dados.recebeu_moradia ? 'Sim' : 'Não'}</p>
+                            </div>
+                            {dadosDemanda.dados.processo_anterior && (
+                              <>
+                                <div>
+                                  <p className="text-gray-500">Processo Anterior</p>
+                                  <p className="font-medium">{dadosDemanda.dados.numero_processo_anterior}</p>
+                                </div>
+                                <div>
+                                  <p className="text-gray-500">Vara/Juizado Anterior</p>
+                                  <p className="font-medium">{dadosDemanda.dados.vara_juizado_anterior}</p>
+                                </div>
+                              </>
+                            )}
+                            {dadosDemanda.dados.dados_bancarios && (
+                              <div className="md:col-span-3">
+                                <p className="text-gray-500">Dados Bancários</p>
+                                <p className="font-medium">{dadosDemanda.dados.dados_bancarios}</p>
+                              </div>
+                            )}
                           </div>
-                        )}
-                      </div>
-                      
-                      {/* Botão de Gerar Petição */}
-                      <div className="mt-6 pt-4 border-t border-blue-200">
-                        <div className="flex flex-wrap gap-3">
-                          {!c.arquivos_gerados?.peticao_auxilio_moradia ? (
-                            <button
-                              onClick={() => gerarPeticaoAuxilioMoradia(c.id)}
-                              disabled={gerandoPeticao}
-                              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
-                            >
-                              {gerandoPeticao ? (
-                                <>
-                                  <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                  Gerando Petição...
-                                </>
+                          
+                          {/* Botão de Gerar Petição */}
+                          <div className="mt-6 pt-4 border-t border-blue-200">
+                            <div className="flex flex-wrap gap-3">
+                              {!c.arquivos_gerados?.peticao_auxilio_moradia ? (
+                                <button
+                                  onClick={() => gerarPeticaoAuxilioMoradia(c.id)}
+                                  disabled={gerandoPeticao}
+                                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                                >
+                                  {gerandoPeticao ? (
+                                    <>
+                                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                      Gerando Petição...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Scale className="w-4 h-4" />
+                                      Gerar Petição Inicial
+                                    </>
+                                  )}
+                                </button>
                               ) : (
                                 <>
-                                  <Scale className="w-4 h-4" />
-                                  Gerar Petição Inicial
+                                  <button
+                                    onClick={() => baixarPeticaoAuxilioMoradia(c.id)}
+                                    className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium px-4 py-2 rounded-lg"
+                                  >
+                                    <Download className="w-4 h-4" />
+                                    Baixar Petição
+                                  </button>
+                                  <button
+                                    onClick={() => gerarPeticaoAuxilioMoradia(c.id)}
+                                    disabled={gerandoPeticao}
+                                    className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                                  >
+                                    {gerandoPeticao ? (
+                                      <>
+                                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                        Gerando...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <RefreshCw className="w-4 h-4" />
+                                        Regerar Petição
+                                      </>
+                                    )}
+                                  </button>
                                 </>
                               )}
-                            </button>
-                          ) : (
-                            <>
-                              <button
-                                onClick={() => baixarPeticaoAuxilioMoradia(c.id)}
-                                className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium px-4 py-2 rounded-lg"
-                              >
-                                <Download className="w-4 h-4" />
-                                Baixar Petição
-                              </button>
-                              <button
-                                onClick={() => gerarPeticaoAuxilioMoradia(c.id)}
-                                disabled={gerandoPeticao}
-                                className="flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
-                              >
-                                {gerandoPeticao ? (
-                                  <>
-                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                                    Gerando...
-                                  </>
-                                ) : (
-                                  <>
-                                    <RefreshCw className="w-4 h-4" />
-                                    Regerar Petição
-                                  </>
-                                )}
-                              </button>
-                            </>
-                          )}
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-center py-4">
+                          <p className="text-gray-500">Carregando dados da residência médica...</p>
+                          <p className="text-xs text-gray-400 mt-2">Se os dados não aparecerem, verifique se foram preenchidos no cadastro.</p>
                         </div>
-                      </div>
+                      )}
                     </div>
                   )}
 
