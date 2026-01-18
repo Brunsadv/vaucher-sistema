@@ -15,7 +15,11 @@ import os
 import json
 import zipfile
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:
+    from backports.zoneinfo import ZoneInfo
 import uuid
 import hashlib
 import logging
@@ -33,6 +37,24 @@ logger = logging.getLogger(__name__)
 # PostgreSQL
 import psycopg2
 from psycopg2.extras import RealDictCursor
+
+# Fuso horário de Cuiabá
+FUSO_CUIABA = ZoneInfo("America/Cuiaba")
+
+def converter_para_cuiaba(dt) -> str:
+    """Converte datetime para fuso horário de Cuiabá e retorna como ISO string."""
+    if not dt:
+        return None
+    try:
+        # Se o datetime não tem timezone, assume que é UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        # Converte para Cuiabá
+        dt_cuiaba = dt.astimezone(FUSO_CUIABA)
+        return dt_cuiaba.isoformat()
+    except Exception as e:
+        logger.warning(f"Erro ao converter timezone: {e}")
+        return dt.isoformat() if dt else None
 
 # ============================================
 # CONFIGURAÇÃO
@@ -3889,7 +3911,7 @@ def listar_mensagens(cadastro_id: str) -> list:
             "remetente": row["remetente"],
             "texto": row["texto"],
             "lida": row["lida"],
-            "criado_em": row["criado_em"].isoformat() if row["criado_em"] else None
+            "criado_em": converter_para_cuiaba(row["criado_em"])
         } for row in rows]
     except Exception as e:
         logger.error(f"Erro ao listar mensagens: {e}")
