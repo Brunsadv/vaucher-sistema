@@ -1068,7 +1068,6 @@ class GeradorDocumentos:
         self.modelo_contrato = os.path.join(MODELOS_DIR, 'CONTRATO_Modelo.docx')
         self.modelo_procuracao = os.path.join(MODELOS_DIR, 'Procuracao_Modelo.docx')
         self.modelo_prestacao = os.path.join(MODELOS_DIR, 'Prestacao_Contas_Modelo.docx')
-        self.modelo_peticao_auxilio_moradia = os.path.join(MODELOS_DIR, 'peticao_auxilio_moradia_modelo.docx')
     
     def _formatar_data(self, data_str: str) -> str:
         if not data_str:
@@ -1174,186 +1173,6 @@ class GeradorDocumentos:
         nome = dados.get('nome', 'Cliente').replace(' ', '_')
         nome_arquivo = f"Procuracao_{nome}.docx"
         return self._gerar_documento(self.modelo_procuracao, dados, nome_arquivo, cadastro_id)
-    
-    def _numero_por_extenso(self, valor: float) -> str:
-        """Converte número para extenso em português."""
-        try:
-            from num2words import num2words
-            inteiro = int(valor)
-            centavos = int(round((valor - inteiro) * 100))
-            
-            if inteiro == 0:
-                extenso_inteiro = "zero reais"
-            elif inteiro == 1:
-                extenso_inteiro = "um real"
-            else:
-                extenso_inteiro = num2words(inteiro, lang='pt_BR') + " reais"
-            
-            if centavos == 0:
-                return extenso_inteiro
-            elif centavos == 1:
-                return extenso_inteiro + " e um centavo"
-            else:
-                return extenso_inteiro + " e " + num2words(centavos, lang='pt_BR') + " centavos"
-        except Exception as e:
-            logger.warning(f"Erro ao converter número por extenso: {e}")
-            return f"{valor:.2f}"
-    
-    def _substituir_peticao_xml(self, xml_content: str, dados_cliente: dict, dados_residencia: dict) -> str:
-        """Substitui os placeholders específicos da petição de auxílio moradia."""
-        
-        # Formatar datas
-        def formatar_data(data_str):
-            if not data_str or data_str == '__/__/____':
-                return '__/__/____'
-            try:
-                if '-' in data_str:
-                    partes = data_str.split('-')
-                    return f"{partes[2]}/{partes[1]}/{partes[0]}"
-                return data_str
-            except:
-                return data_str
-        
-        # Calcular valores
-        data_inicio = dados_residencia.get('data_inicio_residencia', '')
-        data_termino = dados_residencia.get('data_termino_residencia', '')
-        valor_bolsa = float(dados_residencia.get('valor_bolsa_mensal', 0) or 0)
-        
-        # Calcular número de meses
-        try:
-            if data_inicio and data_termino and '-' in data_inicio and '-' in data_termino:
-                from datetime import datetime
-                dt_inicio = datetime.strptime(data_inicio, '%Y-%m-%d')
-                dt_termino = datetime.strptime(data_termino, '%Y-%m-%d')
-                meses = (dt_termino.year - dt_inicio.year) * 12 + (dt_termino.month - dt_inicio.month)
-                if meses < 0:
-                    meses = 0
-            else:
-                meses = 36  # Valor padrão
-        except:
-            meses = 36
-        
-        # Calcular valores
-        if valor_bolsa <= 0:
-            valor_bolsa = 3330.43  # Valor padrão da bolsa
-        
-        valor_total_bolsas = valor_bolsa * meses
-        valor_auxilio_moradia = valor_bolsa * 0.30 * meses
-        
-        # Formatar valores monetários
-        def formatar_moeda(valor):
-            return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        
-        # Determinar gênero baseado no nome (heurística simples)
-        nome = dados_cliente.get('nome', '').strip()
-        primeiro_nome = nome.split()[0] if nome else ''
-        eh_feminino = primeiro_nome.lower().endswith('a') if primeiro_nome else True
-        
-        # Período do auxílio (formato: "mês/ano a mês/ano")
-        periodo_auxilio = ""
-        try:
-            if data_inicio and data_termino and '-' in data_inicio and '-' in data_termino:
-                meses_pt = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
-                           'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
-                di = data_inicio.split('-')
-                dt = data_termino.split('-')
-                periodo_auxilio = f"{meses_pt[int(di[1])-1]}/{di[0]} a {meses_pt[int(dt[1])-1]}/{dt[0]}"
-        except:
-            periodo_auxilio = "[PERÍODO]"
-        
-        # Dicionário de substituições
-        substituicoes = {
-            # Dados do Autor
-            '{{NOME_AUTOR}}': dados_cliente.get('nome', '').upper(),
-            '{{ESTADO_CIVIL}}': dados_cliente.get('estado_civil', ''),
-            '{{CPF}}': dados_cliente.get('cpf', ''),
-            '{{ENDERECO_COMPLETO}}': dados_cliente.get('endereco_completo', ''),
-            
-            # Dados do Hospital
-            '{{HOSPITAL_NOME_COMPLETO}}': dados_residencia.get('unidade_hospitalar', '[HOSPITAL]'),
-            '{{HOSPITAL_NOME}}': dados_residencia.get('unidade_hospitalar', '[HOSPITAL]'),
-            '{{CNPJ_HOSPITAL}}': dados_residencia.get('cnpj_hospital', '[CNPJ]'),
-            '{{ENDERECO_HOSPITAL}}': dados_residencia.get('endereco_hospital', '[ENDEREÇO]'),
-            
-            # Dados da Universidade
-            '{{UNIVERSIDADE_NOME}}': dados_residencia.get('instituicao_ensino', '[UNIVERSIDADE]'),
-            '{{CNPJ_UNIVERSIDADE}}': dados_residencia.get('cnpj_universidade', '[CNPJ]'),
-            '{{ENDERECO_UNIVERSIDADE}}': dados_residencia.get('endereco_universidade', '[ENDEREÇO]'),
-            
-            # Dados da Residência
-            '{{ESPECIALIDADE}}': dados_residencia.get('especialidade_medica', '[ESPECIALIDADE]').upper(),
-            '{{DATA_INICIO_RESIDENCIA}}': formatar_data(data_inicio),
-            '{{DATA_FIM_RESIDENCIA}}': formatar_data(data_termino),
-            
-            # Processo Anterior
-            '{{NUMERO_PROCESSO_ANTERIOR_1}}': dados_residencia.get('numero_processo_anterior', '[NÚMERO]'),
-            '{{VARA_ANTERIOR_1}}': dados_residencia.get('vara_juizado_anterior', '[VARA]'),
-            '{{NUMERO_PROCESSO_ANTERIOR_2}}': dados_residencia.get('numero_processo_anterior_2', '[NÚMERO]'),
-            '{{VARA_ANTERIOR_2}}': dados_residencia.get('vara_juizado_anterior_2', '[VARA]'),
-            '{{DATA_AJUIZAMENTO_ANTERIOR}}': formatar_data(dados_residencia.get('data_protocolo_anterior', '')),
-            
-            # Valores
-            '{{VALOR_BOLSA_MENSAL}}': formatar_moeda(valor_bolsa),
-            '{{PERIODO_AUXILIO}}': periodo_auxilio,
-            '{{VALOR_TOTAL_BOLSAS}}': formatar_moeda(valor_total_bolsas),
-            '{{VALOR_AUXILIO_MORADIA}}': formatar_moeda(valor_auxilio_moradia),
-            '{{VALOR_AUXILIO_MORADIA_EXTENSO}}': self._numero_por_extenso(valor_auxilio_moradia),
-            
-            # Gênero (concordância gramatical)
-            '{{A_O}}': 'a' if eh_feminino else 'o',
-            '{{A_VAZIO}}': 'a' if eh_feminino else '',
-        }
-        
-        resultado = xml_content
-        for placeholder, valor in substituicoes.items():
-            resultado = resultado.replace(placeholder, str(valor))
-        
-        return resultado
-    
-    def gerar_peticao_auxilio_moradia(self, dados_cliente: dict, dados_residencia: dict, cadastro_id: str) -> str:
-        """Gera a petição de auxílio moradia usando o modelo template."""
-        
-        if not os.path.exists(self.modelo_peticao_auxilio_moradia):
-            raise FileNotFoundError(f"Modelo de petição não encontrado: {self.modelo_peticao_auxilio_moradia}")
-        
-        nome = dados_cliente.get('nome', 'Cliente').replace(' ', '_')
-        nome_arquivo = f"Peticao_Auxilio_Moradia_{nome}.docx"
-        
-        cliente_dir = os.path.join(GERADOS_DIR, cadastro_id)
-        os.makedirs(cliente_dir, exist_ok=True)
-        
-        temp_dir = os.path.join(cliente_dir, f'temp_{uuid.uuid4().hex[:8]}')
-        os.makedirs(temp_dir, exist_ok=True)
-        
-        try:
-            # Descompactar modelo
-            with zipfile.ZipFile(self.modelo_peticao_auxilio_moradia, 'r') as zip_ref:
-                zip_ref.extractall(temp_dir)
-            
-            # Ler e substituir no XML
-            doc_xml_path = os.path.join(temp_dir, 'word', 'document.xml')
-            with open(doc_xml_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            content = self._substituir_peticao_xml(content, dados_cliente, dados_residencia)
-            
-            with open(doc_xml_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            
-            # Reempacotar
-            saida_path = os.path.join(cliente_dir, nome_arquivo)
-            
-            with zipfile.ZipFile(saida_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, dirs, files in os.walk(temp_dir):
-                    for file in files:
-                        file_path = os.path.join(root, file)
-                        arcname = os.path.relpath(file_path, temp_dir)
-                        zipf.write(file_path, arcname)
-            
-            return saida_path
-        finally:
-            if os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
     
     def _format_money(self, value: float) -> str:
         """Formata valor para moeda brasileira."""
@@ -4475,70 +4294,43 @@ async def portal_cliente_andamentos(cliente: dict = Depends(verificar_token_clie
 
 @app.get("/api/cliente/documentos")
 async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_cliente)):
-    """Lista documentos disponíveis para o cliente."""
+    """Lista documentos disponíveis para o cliente (recebidos e enviados)."""
     cadastro = buscar_cadastro(cliente["cadastro_id"])
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
     documentos = []
     
-    # 1. Documentos Gerados pelo Sistema (Contrato e Procuração)
-    arquivos_gerados = cadastro.get("arquivos_gerados", {})
-    if arquivos_gerados:
-        # Contrato de Honorários
-        if arquivos_gerados.get("contrato"):
-            documentos.append({
-                "tipo": "contrato",
-                "nome": "Contrato de Honorários",
-                "categoria": "Documento Gerado",
-                "disponivel": True
-            })
-        
-        # Procuração
-        if arquivos_gerados.get("procuracao"):
-            documentos.append({
-                "tipo": "procuracao",
-                "nome": "Procuração",
-                "categoria": "Documento Gerado",
-                "disponivel": True
-            })
-    
-    # 2. Documentos Enviados pelo Escritório (admin)
+    # 1. Documentos RECEBIDOS do Escritório (admin -> cliente)
     docs_admin = listar_documentos_admin(cliente["cadastro_id"])
     for doc in docs_admin:
         documentos.append({
+            "id": doc['id'],
             "tipo": f"admin_{doc['id']}",
             "nome": doc["nome_original"],
             "descricao": doc.get("descricao", ""),
-            "categoria": "Enviado pelo Escritório",
+            "categoria": "Recebido do Escritório",
+            "origem": "recebido",
             "disponivel": True,
             "data": doc["criado_em"].isoformat() if doc.get("criado_em") else None
         })
     
-    # 3. Documentos Enviados pelo Cliente (uploads do cadastro)
-    documentos_cliente = cadastro.get("documentos", [])
-    if documentos_cliente:
-        for i, doc_path in enumerate(documentos_cliente):
-            # Extrair nome do arquivo do caminho
-            nome_arquivo = doc_path.split("/")[-1] if "/" in doc_path else doc_path
-            documentos.append({
-                "tipo": f"cliente_{i}",
-                "nome": nome_arquivo,
-                "categoria": "Enviado pelo Cliente",
-                "disponivel": True
-            })
+    # 2. Documentos ENVIADOS pelo Cliente (cliente -> escritório)
+    docs_extras = listar_documentos_extras(cliente["cadastro_id"])
+    for doc in docs_extras:
+        documentos.append({
+            "id": doc['id'],
+            "tipo": f"extra_{doc['id']}",
+            "nome": doc["nome_original"],
+            "descricao": doc.get("descricao", ""),
+            "categoria": "Enviado por Você",
+            "origem": "enviado",
+            "disponivel": True,
+            "data": doc["criado_em"].isoformat() if doc.get("criado_em") else None
+        })
     
-    # 4. Documentos Assinados (devolvidos pelo cliente)
-    documentos_assinados = cadastro.get("documentos_assinados", [])
-    if documentos_assinados:
-        for i, doc_path in enumerate(documentos_assinados):
-            nome_arquivo = doc_path.split("/")[-1] if "/" in doc_path else doc_path
-            documentos.append({
-                "tipo": f"assinado_{i}",
-                "nome": nome_arquivo,
-                "categoria": "Documento Assinado",
-                "disponivel": True
-            })
+    # Ordenar por data (mais recente primeiro)
+    documentos.sort(key=lambda x: x.get("data") or "", reverse=True)
     
     return {"documentos": documentos}
 
@@ -7265,6 +7057,323 @@ async def download_documento_demanda(cadastro_id: str, doc_id: int):
 
 
 # ============================================
+# FUNÇÃO PARA GERAR PETIÇÃO INICIAL - AUXÍLIO MORADIA
+# ============================================
+
+def gerar_peticao_auxilio_moradia(dados_cliente: dict, dados_residencia: dict, cadastro_id: str) -> str:
+    """Gera a petição inicial de auxílio moradia para residência médica."""
+    from docx import Document
+    from docx.shared import Pt, Cm, Inches
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.enum.style import WD_STYLE_TYPE
+    
+    doc = Document()
+    
+    # Configurar margens
+    for section in doc.sections:
+        section.top_margin = Cm(3)
+        section.bottom_margin = Cm(2)
+        section.left_margin = Cm(3)
+        section.right_margin = Cm(2)
+    
+    # Extrair dados
+    nome = dados_cliente.get('nome', '').upper()
+    cpf = dados_cliente.get('cpf', '')
+    endereco = dados_cliente.get('endereco_completo', '')
+    email = dados_cliente.get('email', '')
+    estado_civil = dados_cliente.get('estado_civil', '')
+    nacionalidade = dados_cliente.get('nacionalidade', 'brasileiro(a)')
+    profissao = dados_cliente.get('profissao', 'médico(a)')
+    
+    instituicao = dados_residencia.get('instituicao_ensino', '[INSTITUIÇÃO]')
+    unidade_hospitalar = dados_residencia.get('unidade_hospitalar', '[UNIDADE HOSPITALAR]')
+    especialidade = dados_residencia.get('especialidade_medica', '[ESPECIALIDADE]')
+    data_inicio = dados_residencia.get('data_inicio_residencia', '__/__/____')
+    data_termino = dados_residencia.get('data_termino_residencia', '__/__/____')
+    valor_bolsa = dados_residencia.get('valor_bolsa_mensal', 0)
+    processo_anterior = dados_residencia.get('processo_anterior', False)
+    
+    def formatar_data(data_str):
+        """Formata data de YYYY-MM-DD para DD/MM/YYYY."""
+        if not data_str or data_str == '__/__/____':
+            return '__/__/____'
+        try:
+            partes = data_str.split('-')
+            return f"{partes[2]}/{partes[1]}/{partes[0]}"
+        except:
+            return data_str
+    
+    data_inicio_fmt = formatar_data(data_inicio)
+    data_termino_fmt = formatar_data(data_termino)
+    
+    # Calcular valor da causa
+    try:
+        if data_inicio and data_termino and data_inicio != '__/__/____' and data_termino != '__/__/____':
+            from datetime import datetime
+            dt_inicio = datetime.strptime(data_inicio, '%Y-%m-%d')
+            dt_termino = datetime.strptime(data_termino, '%Y-%m-%d')
+            meses = (dt_termino.year - dt_inicio.year) * 12 + (dt_termino.month - dt_inicio.month)
+            if meses < 0:
+                meses = 0
+        else:
+            meses = 36
+        
+        valor_bolsa_float = float(valor_bolsa) if valor_bolsa else 3330.43
+        valor_causa = valor_bolsa_float * 0.30 * meses
+    except:
+        meses = 36
+        valor_causa = 3330.43 * 0.30 * 36
+    
+    def formatar_moeda(valor):
+        return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    # CABEÇALHO
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("AO JUÍZO DO JUIZADO ESPECIAL FEDERAL DA SEÇÃO JUDICIÁRIA DE MATO GROSSO")
+    run.bold = True
+    run.font.size = Pt(12)
+    
+    doc.add_paragraph()
+    doc.add_paragraph()
+    
+    # QUALIFICAÇÃO DO AUTOR
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    run = p.add_run(f"{nome}")
+    run.bold = True
+    p.add_run(f", {nacionalidade}, {estado_civil}, {profissao}, inscrito no CPF sob o nº {cpf}, ")
+    p.add_run(f"residente e domiciliado em {endereco}, ")
+    p.add_run(f"e-mail: {email} (doc. 01), ")
+    p.add_run("por seus procuradores judiciais que a presente subscrevem (doc. 02), ")
+    p.add_run("que informam possuir endereço profissional à Rua Lima, nº 106, ")
+    p.add_run("Bairro Jardim das Américas, em Cuiabá/MT, vem, à presença de Vossa Excelência, intentar a presente")
+    
+    doc.add_paragraph()
+    
+    # TÍTULO DA AÇÃO
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("AÇÃO INDENIZATÓRIA DE AUXÍLIO MORADIA DE RESIDÊNCIA MÉDICA")
+    run.bold = True
+    run.font.size = Pt(14)
+    
+    doc.add_paragraph()
+    
+    # RÉU
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Em face da ")
+    run = p.add_run(f"{instituicao.upper()}")
+    run.bold = True
+    p.add_run(f" e {unidade_hospitalar.upper()}, ")
+    p.add_run("pelas razões de fato e direito a seguir expostas:")
+    
+    doc.add_paragraph()
+    
+    # 1. DOS FATOS
+    p = doc.add_paragraph()
+    run = p.add_run("1. DOS FATOS")
+    run.bold = True
+    run.font.size = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Trata-se de ação de cobrança por indenização contra a requerida, tendo em vista ")
+    p.add_run("a ausência de auferimento do auxílio moradia durante a realização de residência ")
+    p.add_run("médica pelo requerente.")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run(f"O requerente foi devidamente matriculado no Programa de Residência Médica na ")
+    p.add_run(f"especialidade de ")
+    run = p.add_run(f"{especialidade}")
+    run.bold = True
+    p.add_run(f". O referido programa teve início em ")
+    run = p.add_run(f"{data_inicio_fmt}")
+    run.bold = True
+    p.add_run(" e término em ")
+    run = p.add_run(f"{data_termino_fmt}")
+    run.bold = True
+    p.add_run(" (doc. 03).")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Nesse ínterim, o residente deveria ter recebido auxílio moradia, conforme ")
+    p.add_run("redação prevista no art. 4º da Lei nº 6.932, de 7 de julho de 1981, dada pela ")
+    p.add_run("Lei nº 12.514/2011.")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Contudo, em que pese a imposição da lei nº 12.514/2011, que regulamenta os ")
+    p.add_run("cursos de Residência Médica, e determina a concessão dos benefícios como o ")
+    p.add_run("fornecimento de alojamento/moradia aos médicos residentes, o Requerente nunca ")
+    p.add_run("recebeu qualquer auxílio nesse sentido, seja in natura ou in pecúnia, conforme ")
+    p.add_run("se afere dos rendimentos pagos pela Requerida (doc. 04).")
+    
+    # Se houver processo anterior
+    if processo_anterior:
+        doc.add_paragraph()
+        p = doc.add_paragraph()
+        run = p.add_run("2. PRELIMINARMENTE - DA INTERRUPÇÃO DA PRESCRIÇÃO")
+        run.bold = True
+        run.font.size = Pt(12)
+        
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p.add_run("Cumpre ressaltar que o autor já ingressou anteriormente com ação idêntica ")
+        p.add_run(f"(Processo nº {dados_residencia.get('numero_processo_anterior', '[NÚMERO]')}), ")
+        p.add_run(f"distribuída para a {dados_residencia.get('vara_juizado_anterior', '[VARA]')}, ")
+        p.add_run("a qual foi extinta sem resolução do mérito.")
+        
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+        p.add_run("Nos termos do art. 240, §1º do CPC, a interrupção da prescrição, ")
+        p.add_run("operada pelo despacho que ordena a citação, ainda que proferido por juízo ")
+        p.add_run("incompetente, retroage à data da propositura da ação.")
+    
+    doc.add_paragraph()
+    
+    # DA CONCESSÃO DO AUXÍLIO MORADIA
+    num_topico = 3 if processo_anterior else 2
+    p = doc.add_paragraph()
+    run = p.add_run(f"{num_topico}. DA CONCESSÃO DO AUXÍLIO MORADIA")
+    run.bold = True
+    run.font.size = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("A lei nº 6.932/1981, alterada pela Lei nº 12.514/2011, determina, em seu ")
+    p.add_run("artigo 4º, alguns direitos dos médicos residentes, entre eles, moradia. Vejamos:")
+    
+    # Citação legal
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.paragraph_format.left_indent = Cm(2)
+    run = p.add_run("Art. 4º ")
+    run.italic = True
+    run = p.add_run("Ao médico-residente é assegurado bolsa [...] A instituição de saúde ")
+    run.italic = True
+    run = p.add_run("responsável por programas de residência médica oferecerá ao médico-residente, ")
+    run.italic = True
+    run = p.add_run("durante todo o período de residência: [...] III - ")
+    run.italic = True
+    run = p.add_run("moradia")
+    run.italic = True
+    run.bold = True
+    run = p.add_run(", conforme estabelecido em regulamento.")
+    run.italic = True
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("O Superior Tribunal de Justiça já firmou o entendimento de que às instituições ")
+    p.add_run("de saúde responsáveis por programas de residência médica cabe o dever de oferecer ")
+    p.add_run("aos residentes alimentação e moradia no decorrer do período de residência, e que ")
+    p.add_run("a impossibilidade da prestação da tutela específica autoriza medidas que assegurem ")
+    p.add_run("o resultado prático equivalente ou a conversão em perdas e danos.")
+    
+    # DO PEDIDO
+    doc.add_paragraph()
+    num_topico += 1
+    p = doc.add_paragraph()
+    run = p.add_run(f"{num_topico}. DO PEDIDO")
+    run.bold = True
+    run.font.size = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Ante o exposto, requer:")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("a) A citação da(s) ré(s) para, querendo, apresentar(em) contestação;")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("b) A procedência total dos pedidos para condenar a(s) ré(s) ao pagamento ")
+    p.add_run("de indenização correspondente ao auxílio-moradia não fornecido durante todo o ")
+    p.add_run("período de residência médica;")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("c) A correção monetária pelo IPCA-E desde o vencimento de cada parcela, ")
+    p.add_run("acrescidos de juros de mora de 1% ao mês a partir da citação;")
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("d) A condenação da(s) ré(s) ao pagamento das custas processuais e honorários advocatícios.")
+    
+    # VALOR DA CAUSA
+    doc.add_paragraph()
+    num_topico += 1
+    p = doc.add_paragraph()
+    run = p.add_run(f"{num_topico}. DO VALOR DA CAUSA")
+    run.bold = True
+    run.font.size = Pt(12)
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run(f"Dá-se à causa o valor de ")
+    run = p.add_run(f"{formatar_moeda(valor_causa)}")
+    run.bold = True
+    p.add_run(f" ({meses} meses x 30% de {formatar_moeda(float(valor_bolsa) if valor_bolsa else 3330.43)}).")
+    
+    # ENCERRAMENTO
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    p.add_run("Nestes termos,")
+    p.add_run("\nPede deferimento.")
+    
+    doc.add_paragraph()
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    data_atual = datetime.now()
+    meses_pt = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho',
+                'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro']
+    p.add_run(f"Cuiabá/MT, {data_atual.day} de {meses_pt[data_atual.month-1]} de {data_atual.year}.")
+    
+    doc.add_paragraph()
+    doc.add_paragraph()
+    
+    # ASSINATURAS DOS ADVOGADOS
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("_______________________________________")
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("BRUNO ALMEIDA ÁLVARES")
+    run.bold = True
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("OAB/MT 17.629")
+    
+    doc.add_paragraph()
+    
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("_______________________________________")
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run("JORDANA VAUCHER MORESCHI ÁLVARES")
+    run.bold = True
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.add_run("OAB/MT 18.173")
+    
+    # Salvar documento
+    cliente_dir = os.path.join(GERADOS_DIR, cadastro_id)
+    os.makedirs(cliente_dir, exist_ok=True)
+    
+    nome_arquivo = f"Peticao_Auxilio_Moradia_{nome.replace(' ', '_')}.docx"
+    caminho_arquivo = os.path.join(cliente_dir, nome_arquivo)
+    
+    doc.save(caminho_arquivo)
+    
+    return caminho_arquivo
+
+
+# ============================================
 # ENDPOINTS PARA GERAR PETIÇÃO INICIAL
 # ============================================
 
@@ -7282,8 +7391,7 @@ async def gerar_peticao_inicial(cadastro_id: str, tipo_demanda: str, usuario: di
     
     try:
         if tipo_demanda == "auxilio_moradia_residencia":
-            gerador = GeradorDocumentos()
-            caminho = gerador.gerar_peticao_auxilio_moradia(
+            caminho = gerar_peticao_auxilio_moradia(
                 cadastro.get('dados', {}),
                 dados_demanda.get('dados', {}),
                 cadastro_id
