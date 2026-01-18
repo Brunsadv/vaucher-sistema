@@ -459,14 +459,29 @@ const removeDocumentoDemanda = (docId: string, index: number) => {
 
       // 5. Upload de documentos específicos da demanda
       for (const [docId, arquivosDoc] of Object.entries(arquivosDemanda)) {
-  if (arquivosDoc && arquivosDoc.length > 0) {
-    for (const arquivo of arquivosDoc) {
-      const formDataUpload = new FormData()
-      formDataUpload.append('arquivo', arquivo)
-      // ...
-    }
-  }
-}
+        if (arquivosDoc && arquivosDoc.length > 0) {
+          for (const arquivo of arquivosDoc) {
+            const formDataUpload = new FormData()
+            formDataUpload.append('arquivo', arquivo)
+            formDataUpload.append('tipo_documento', docId) // Envia o tipo do documento!
+            
+            try {
+              const uploadResponse = await fetch(`${API_URL}/api/cadastros/${novoId}/upload`, {
+                method: 'POST',
+                body: formDataUpload
+              })
+              
+              if (!uploadResponse.ok) {
+                console.error(`Erro ao enviar documento ${docId}:`, await uploadResponse.text())
+              } else {
+                console.log(`Documento ${docId} enviado com sucesso: ${arquivo.name}`)
+              }
+            } catch (uploadErr) {
+              console.error(`Erro ao enviar documento ${docId}:`, uploadErr)
+            }
+          }
+        }
+      }
 
       // Limpar rascunho após envio bem-sucedido
       limparRascunho()
