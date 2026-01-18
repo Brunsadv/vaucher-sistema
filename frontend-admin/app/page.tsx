@@ -3277,10 +3277,46 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
 
                   {/* Documentos Específicos da Demanda */}
                   <div className="bg-blue-50 rounded-xl p-6">
-                    <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                      <Briefcase className="w-5 h-5 text-blue-600" />
-                      Documentos Específicos da Demanda ({documentosDemanda.length})
-                    </h3>
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                        <Briefcase className="w-5 h-5 text-blue-600" />
+                        Documentos Específicos da Demanda ({documentosDemanda.length})
+                      </h3>
+                      
+                      {/* Botão para importar documentos existentes */}
+                      {c.documentos && c.documentos.length > 0 && documentosDemanda.length === 0 && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm('Deseja importar os documentos existentes do cliente para a seção de Documentos da Demanda?')) return
+                            try {
+                              const response = await fetch(`${API_URL}/api/admin/clientes/${c.id}/importar-documentos-demanda`, {
+                                method: 'POST',
+                                headers: { 'Authorization': `Bearer ${user.token}` }
+                              })
+                              const data = await response.json()
+                              if (response.ok) {
+                                setMensagemSucesso(`${data.total_importados} documento(s) importado(s)!`)
+                                // Recarregar documentos da demanda
+                                const docsResponse = await fetch(`${API_URL}/api/cadastros/${c.id}/documentos-demanda`)
+                                if (docsResponse.ok) {
+                                  const docsData = await docsResponse.json()
+                                  setDocumentosDemanda(docsData.documentos || [])
+                                }
+                              } else {
+                                alert(data.detail || 'Erro ao importar documentos')
+                              }
+                            } catch (error) {
+                              console.error('Erro:', error)
+                              alert('Erro ao importar documentos')
+                            }
+                          }}
+                          className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          Importar Docs Existentes
+                        </button>
+                      )}
+                    </div>
                     
                     {/* Lista de documentos existentes */}
                     {documentosDemanda.length > 0 ? (
@@ -3323,9 +3359,11 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                           defaultValue=""
                         >
                           <option value="" disabled>Tipo do documento</option>
-                          <option value="contracheque">Contracheque</option>
-                          <option value="comprovante_residencia">Comprovante de Residência</option>
-                          <option value="certificado_residencia">Certificado de Residência Médica</option>
+                          <option value="documentos_pessoais">Documentos Pessoais (RG/CPF/CNH)</option>
+                          <option value="certificado_residencia">Certificado/Declaração de Residência Médica</option>
+                          <option value="contracheque">Contracheque/Holerite</option>
+                          <option value="comprovante_residencia">Comprovante de Endereço</option>
+                          <option value="processo_anterior">Cópia de Processo Anterior</option>
                           <option value="declaracao">Declaração</option>
                           <option value="outro">Outro</option>
                         </select>
