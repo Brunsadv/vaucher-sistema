@@ -2385,27 +2385,64 @@ async def receber_documentos_assinados(cadastro_id: str, arquivos: List[UploadFi
 # --- UPLOAD DE DOCUMENTOS DO CLIENTE ---
 
 @app.post("/api/cadastros/{cadastro_id}/upload")
-async def upload_documento(cadastro_id: str, arquivo: UploadFile = File(...)):
-    """Recebe upload de documento do cliente."""
-    logger.info(f"Upload recebido para cadastro {cadastro_id}: {arquivo.filename}")
+async def upload_documento(
+    cadastro_id: str, 
+    arquivo: UploadFile = File(...),
+    tipo_documento: str = Form(default=""),
+    categoria: str = Form(default="")
+):
+    """Recebe upload de documento do cliente.
+    
+    Se tipo_documento ou categoria for especificado, salva na tabela documentos_demanda.
+    Caso contrário, salva na lista de documentos genérica do cadastro.
+    """
+    logger.info(f"Upload recebido para cadastro {cadastro_id}: {arquivo.filename}, tipo: {tipo_documento}, categoria: {categoria}")
     
     cadastro = buscar_cadastro(cadastro_id)
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
-    cliente_dir = os.path.join(UPLOADS_DIR, cadastro_id)
-    os.makedirs(cliente_dir, exist_ok=True)
+    # Determinar o tipo do documento
+    tipo = tipo_documento or categoria
     
-    file_path = os.path.join(cliente_dir, arquivo.filename)
-    with open(file_path, "wb") as f:
+    if tipo:
+        # Salvar como documento específico da demanda
+        cliente_dir = os.path.join(UPLOADS_DIR, "documentos_demanda", cadastro_id)
+        os.makedirs(cliente_dir, exist_ok=True)
+        
+        ext = os.path.splitext(arquivo.filename)[1]
+        nome_arquivo = f"{tipo}_{uuid.uuid4().hex[:8]}{ext}"
+        arquivo_path = os.path.join(cliente_dir, nome_arquivo)
+        
         content = await arquivo.read()
-        f.write(content)
-    
-    if arquivo.filename not in cadastro["documentos"]:
-        cadastro["documentos"].append(arquivo.filename)
-    salvar_cadastro(cadastro)
-    
-    return {"success": True, "filename": arquivo.filename}
+        with open(arquivo_path, "wb") as f:
+            f.write(content)
+        
+        # Salvar na tabela documentos_demanda
+        sucesso = salvar_documento_demanda(
+            cadastro_id, tipo, nome_arquivo, 
+            arquivo.filename, arquivo_path, tipo
+        )
+        
+        if not sucesso:
+            logger.error(f"Erro ao salvar documento da demanda no banco: {arquivo.filename}")
+        
+        return {"success": True, "filename": arquivo.filename, "tipo": tipo, "modo": "demanda"}
+    else:
+        # Comportamento padrão - salva na pasta do cliente e lista genérica
+        cliente_dir = os.path.join(UPLOADS_DIR, cadastro_id)
+        os.makedirs(cliente_dir, exist_ok=True)
+        
+        file_path = os.path.join(cliente_dir, arquivo.filename)
+        content = await arquivo.read()
+        with open(file_path, "wb") as f:
+            f.write(content)
+        
+        if arquivo.filename not in cadastro["documentos"]:
+            cadastro["documentos"].append(arquivo.filename)
+        salvar_cadastro(cadastro)
+        
+        return {"success": True, "filename": arquivo.filename, "modo": "generico"}
 
 @app.get("/api/cadastros/{cadastro_id}/uploads/{filename}")
 def download_upload_cliente(cadastro_id: str, filename: str):
@@ -2416,6 +2453,75 @@ def download_upload_cliente(cadastro_id: str, filename: str):
         return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
     
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+
+@app.post("/api/cadastros/{cadastro_id}/uploads-categorizados")
+async def upload_documentos_categorizados(
+    cadastro_id: str,
+    arquivos: List[UploadFile] = File(...),
+    categorias: str = Form(default="")
+):
+    """Recebe múltiplos uploads com suas categorias.
+    
+    categorias deve ser uma string JSON com lista de categorias na mesma ordem dos arquivos.
+    Exemplo: ["documentos_pessoais", "certificado_residencia", "contracheques"]
+    
+    Todos os documentos são salvos na tabela documentos_demanda.
+    """
+    logger.info(f"Uploads categorizados para cadastro {cadastro_id}: {len(arquivos)} arquivo(s)")
+    
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    # Parse das categorias
+    try:
+        lista_categorias = json.loads(categorias) if categorias else []
+    except:
+        lista_categorias = []
+    
+    # Criar diretório
+    cliente_dir = os.path.join(UPLOADS_DIR, "documentos_demanda", cadastro_id)
+    os.makedirs(cliente_dir, exist_ok=True)
+    
+    salvos = []
+    erros = []
+    
+    for i, arquivo in enumerate(arquivos):
+        # Determinar categoria
+        categoria = lista_categorias[i] if i < len(lista_categorias) else "documento_geral"
+        
+        try:
+            ext = os.path.splitext(arquivo.filename)[1]
+            nome_arquivo = f"{categoria}_{uuid.uuid4().hex[:8]}{ext}"
+            arquivo_path = os.path.join(cliente_dir, nome_arquivo)
+            
+            content = await arquivo.read()
+            with open(arquivo_path, "wb") as f:
+                f.write(content)
+            
+            # Salvar na tabela documentos_demanda
+            sucesso = salvar_documento_demanda(
+                cadastro_id, categoria, nome_arquivo, 
+                arquivo.filename, arquivo_path, categoria
+            )
+            
+            if sucesso:
+                salvos.append({"nome": arquivo.filename, "categoria": categoria})
+            else:
+                erros.append({"nome": arquivo.filename, "erro": "Erro ao salvar no banco"})
+        except Exception as e:
+            logger.error(f"Erro ao processar arquivo {arquivo.filename}: {e}")
+            erros.append({"nome": arquivo.filename, "erro": str(e)})
+    
+    return {
+        "success": len(salvos) > 0,
+        "salvos": salvos,
+        "erros": erros,
+        "total_salvos": len(salvos),
+        "total_erros": len(erros)
+    }
+
 
 # ============================================
 # MÓDULO FINANCEIRO
@@ -6787,6 +6893,85 @@ async def exportar_aceites_cliente(
 # ============================================
 # ENDPOINTS - DEMANDA ESPECÍFICA E DOCUMENTOS
 # ============================================
+
+@app.post("/api/admin/clientes/{cadastro_id}/importar-documentos-demanda")
+async def importar_documentos_para_demanda(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Importa documentos existentes da pasta do cliente para a tabela documentos_demanda.
+    
+    Útil para migrar documentos de clientes que foram cadastrados antes da 
+    funcionalidade de documentos específicos da demanda.
+    """
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+    
+    # Verificar pastas de documentos
+    pasta_cliente = os.path.join(UPLOADS_DIR, cadastro_id)
+    pasta_demanda = os.path.join(UPLOADS_DIR, "documentos_demanda", cadastro_id)
+    
+    importados = []
+    ja_existentes = []
+    
+    # Verificar documentos na pasta genérica do cliente
+    if os.path.exists(pasta_cliente):
+        for arquivo in os.listdir(pasta_cliente):
+            arquivo_path = os.path.join(pasta_cliente, arquivo)
+            if os.path.isfile(arquivo_path):
+                # Determinar tipo baseado no nome do arquivo
+                nome_lower = arquivo.lower()
+                if 'contracheque' in nome_lower or 'holerite' in nome_lower or 'pagamento' in nome_lower:
+                    tipo = 'contracheque'
+                elif 'certificado' in nome_lower or 'residencia' in nome_lower or 'coreme' in nome_lower:
+                    tipo = 'certificado_residencia'
+                elif 'comprovante' in nome_lower or 'endereco' in nome_lower:
+                    tipo = 'comprovante_residencia'
+                elif 'rg' in nome_lower or 'cpf' in nome_lower or 'identidade' in nome_lower or 'cnh' in nome_lower:
+                    tipo = 'documentos_pessoais'
+                elif 'processo' in nome_lower or 'peticao' in nome_lower:
+                    tipo = 'processo_anterior'
+                else:
+                    tipo = 'documento_geral'
+                
+                # Copiar para pasta de demanda
+                os.makedirs(pasta_demanda, exist_ok=True)
+                ext = os.path.splitext(arquivo)[1]
+                novo_nome = f"{tipo}_{uuid.uuid4().hex[:8]}{ext}"
+                novo_path = os.path.join(pasta_demanda, novo_nome)
+                
+                try:
+                    shutil.copy2(arquivo_path, novo_path)
+                    
+                    # Salvar na tabela
+                    sucesso = salvar_documento_demanda(
+                        cadastro_id, tipo, novo_nome, 
+                        arquivo, novo_path, f"Importado de {arquivo}"
+                    )
+                    
+                    if sucesso:
+                        importados.append({"nome": arquivo, "tipo": tipo})
+                    else:
+                        ja_existentes.append(arquivo)
+                except Exception as e:
+                    logger.error(f"Erro ao importar {arquivo}: {e}")
+    
+    # Também verificar lista de documentos do cadastro que podem não estar na pasta
+    for doc_nome in cadastro.get("documentos", []):
+        doc_path = os.path.join(pasta_cliente, doc_nome)
+        if os.path.exists(doc_path) and doc_nome not in [d["nome"] for d in importados]:
+            # Já foi processado no loop acima
+            continue
+    
+    return {
+        "success": True,
+        "importados": importados,
+        "total_importados": len(importados),
+        "ja_existentes": ja_existentes,
+        "message": f"{len(importados)} documento(s) importado(s) para a demanda"
+    }
+
 
 @app.post("/api/cadastros/{cadastro_id}/demanda-especifica")
 async def salvar_rascunho_demanda(cadastro_id: str, dados: SalvarRascunhoDemanda):
