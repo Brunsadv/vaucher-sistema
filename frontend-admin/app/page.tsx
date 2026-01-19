@@ -2033,6 +2033,10 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const [showEnviarEmailModal, setShowEnviarEmailModal] = useState(false)
 // Estado do Modal de Backup
   const [showBackupModal, setShowBackupModal] = useState(false)
+
+  // Estados de Assinatura Digital
+  const [enviandoParaAssinatura, setEnviandoParaAssinatura] = useState(false)
+  const [statusAssinatura, setStatusAssinatura] = useState<{contrato?: string, procuracao?: string} | null>(null)
   
   // Estados de Atualização Cadastral
   const [atualizacoesPendentes, setAtualizacoesPendentes] = useState<AtualizacaoCadastral[]>([])
@@ -2600,6 +2604,72 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       console.error('Erro ao gerar:', err)
     } finally {
       setGerandoDocs(false)
+    }
+  }
+
+  // === Funções de Assinatura Digital ===
+  const handleEnviarParaAssinatura = async (id: string, tipoDocumento: 'contrato' | 'procuracao') => {
+    setEnviandoParaAssinatura(true)
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${id}/enviar-assinatura/${tipoDocumento}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      const data = await response.json()
+
+      if (data.success) {
+        setMensagemSucesso(`Documento enviado para assinatura! Link enviado para o cliente.`)
+        setTimeout(() => setMensagemSucesso(''), 5000)
+        // Atualizar status
+        await handleVerificarStatusAssinatura(id, tipoDocumento)
+      } else {
+        setMensagemErro(data.error || 'Erro ao enviar para assinatura')
+        setTimeout(() => setMensagemErro(''), 5000)
+      }
+    } catch (err) {
+      console.error('Erro ao enviar para assinatura:', err)
+      setMensagemErro('Erro de conexão. Tente novamente.')
+      setTimeout(() => setMensagemErro(''), 5000)
+    } finally {
+      setEnviandoParaAssinatura(false)
+    }
+  }
+
+  const handleVerificarStatusAssinatura = async (id: string, tipoDocumento: 'contrato' | 'procuracao') => {
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${id}/status-assinatura/${tipoDocumento}`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      const data = await response.json()
+
+      if (data.success) {
+        setStatusAssinatura(prev => ({
+          ...prev,
+          [tipoDocumento]: data.status
+        }))
+      }
+    } catch (err) {
+      console.error('Erro ao verificar status:', err)
+    }
+  }
+
+  const handleEnviarEmailAssinatura = async (id: string) => {
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${id}/enviar-email-assinatura`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      const data = await response.json()
+
+      if (data.success) {
+        setMensagemSucesso('E-mail com links de assinatura enviado!')
+        setTimeout(() => setMensagemSucesso(''), 5000)
+      } else {
+        setMensagemErro(data.error || 'Erro ao enviar e-mail')
+        setTimeout(() => setMensagemErro(''), 5000)
+      }
+    } catch (err) {
+      console.error('Erro ao enviar e-mail de assinatura:', err)
     }
   }
 
@@ -3242,7 +3312,81 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                         Enviar por E-mail
                       </button>
                     )}
+                    {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao) && (
+                      <button
+                        onClick={() => handleEnviarEmailAssinatura(c.id)}
+                        className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium px-4 py-2 rounded-lg"
+                      >
+                        <FileCheck className="w-4 h-4" />
+                        Enviar p/ Assinatura
+                      </button>
+                    )}
                   </div>
+
+                  {/* Seção de Assinatura Digital */}
+                  {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao) && (
+                    <div className="bg-green-50 rounded-xl p-6">
+                      <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <FileCheck className="w-5 h-5 text-green-600" />
+                        Assinatura Digital
+                      </h3>
+                      <p className="text-sm text-gray-600 mb-4">
+                        Envie os documentos para assinatura digital via ZapSign ou Gov.br.
+                      </p>
+                      <div className="flex flex-wrap gap-3">
+                        {c.arquivos_gerados.contrato && (
+                          <button
+                            onClick={() => handleEnviarParaAssinatura(c.id, 'contrato')}
+                            disabled={enviandoParaAssinatura}
+                            className="flex items-center gap-2 bg-red-800 hover:bg-red-900 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                          >
+                            {enviandoParaAssinatura ? (
+                              <>
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                Enviando...
+                              </>
+                            ) : (
+                              <>
+                                <FileCheck className="w-4 h-4" />
+                                Assinar Contrato (ZapSign)
+                              </>
+                            )}
+                          </button>
+                        )}
+                        {c.arquivos_gerados.procuracao && (
+                          <button
+                            onClick={() => handleEnviarParaAssinatura(c.id, 'procuracao')}
+                            disabled={enviandoParaAssinatura}
+                            className="flex items-center gap-2 bg-red-800 hover:bg-red-900 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                          >
+                            {enviandoParaAssinatura ? (
+                              <>
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                Enviando...
+                              </>
+                            ) : (
+                              <>
+                                <FileCheck className="w-4 h-4" />
+                                Assinar Procuração (ZapSign)
+                              </>
+                            )}
+                          </button>
+                        )}
+                        <a
+                          href="https://sso.acesso.gov.br/login?client_id=assinador.iti.br"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex items-center gap-2 bg-blue-700 hover:bg-blue-800 text-white font-medium px-4 py-2 rounded-lg"
+                        >
+                          <Shield className="w-4 h-4" />
+                          Assinar via Gov.br
+                        </a>
+                      </div>
+                      <p className="text-xs text-gray-500 mt-3">
+                        <strong>Gov.br:</strong> Requer conta nível Prata ou Ouro. O cliente faz upload do documento, assina e envia de volta.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Documentos do Cliente */}
                   <div className="bg-gray-50 rounded-xl p-6">
