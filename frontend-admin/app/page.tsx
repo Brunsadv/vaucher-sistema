@@ -67,6 +67,26 @@ interface Cadastro {
   }
   documentos_assinados?: string[]
   data_assinatura?: string
+  assinaturas_digitais?: {
+    contrato?: {
+      doc_id: string
+      signer_token: string
+      url_assinatura: string
+      status: string
+      data_envio: string
+    }
+    procuracao?: {
+      doc_id: string
+      signer_token: string
+      url_assinatura: string
+      status: string
+      data_envio: string
+    }
+  }
+  documentos_finais?: {
+    contrato?: string
+    procuracao?: string
+  }
 }
 
 interface DadosAuxilioMoradia {
@@ -2000,6 +2020,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   
   // Estados do Portal do Cliente
   const [activeTab, setActiveTab] = useState<'dados' | 'processos' | 'contratos' | 'documentos' | 'mensagens'>('dados')
+  const [activeDocTab, setActiveDocTab] = useState<'gerar' | 'cliente' | 'demanda' | 'assinados'>('gerar')
   const [acessoPortal, setAcessoPortal] = useState<AcessoPortal | null>(null)
   const [habilitandoAcesso, setHabilitandoAcesso] = useState(false)
   
@@ -3411,8 +3432,74 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
               {/* Tab: Documentos */}
               {activeTab === 'documentos' && (
                 <div className="space-y-6">
-                  {/* Ações */}
-                  <div className="flex flex-wrap gap-3">
+                  {/* Sub-abas horizontais de Documentos */}
+                  <div className="border-b border-gray-200">
+                    <nav className="flex space-x-1 -mb-px" aria-label="Sub-abas de documentos">
+                      <button
+                        onClick={() => setActiveDocTab('gerar')}
+                        className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
+                          activeDocTab === 'gerar'
+                            ? 'border-red-800 text-red-800 bg-red-50'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <FileCheck className="w-4 h-4" />
+                          Gerar / Assinar
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => setActiveDocTab('cliente')}
+                        className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
+                          activeDocTab === 'cliente'
+                            ? 'border-red-800 text-red-800 bg-red-50'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <FolderOpen className="w-4 h-4" />
+                          Do Cliente
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => setActiveDocTab('demanda')}
+                        className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
+                          activeDocTab === 'demanda'
+                            ? 'border-red-800 text-red-800 bg-red-50'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <Briefcase className="w-4 h-4" />
+                          Da Demanda
+                        </span>
+                      </button>
+                      <button
+                        onClick={() => setActiveDocTab('assinados')}
+                        className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
+                          activeDocTab === 'assinados'
+                            ? 'border-red-800 text-red-800 bg-red-50'
+                            : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                        }`}
+                      >
+                        <span className="flex items-center gap-2">
+                          <CheckCircle className="w-4 h-4" />
+                          Assinados
+                          {c.documentos_assinados && c.documentos_assinados.length > 0 && (
+                            <span className="bg-emerald-500 text-white text-xs rounded-full px-2 py-0.5">
+                              {c.documentos_assinados.length}
+                            </span>
+                          )}
+                        </span>
+                      </button>
+                    </nav>
+                  </div>
+
+                  {/* Sub-aba: Gerar / Assinar */}
+                  {activeDocTab === 'gerar' && (
+                    <div className="space-y-6">
+                      {/* Ações */}
+                      <div className="flex flex-wrap gap-3">
                     {c.status === 'validado' && (
                       <button
                         onClick={() => handleGerarDocumentos(c.id)}
@@ -3609,7 +3696,12 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       )}
                     </div>
                   )}
+                    </div>
+                  )}
 
+                  {/* Sub-aba: Do Cliente */}
+                  {activeDocTab === 'cliente' && (
+                    <div className="space-y-6">
                   {/* Documentos do Cliente */}
                   <div className="bg-gray-50 rounded-xl p-6">
                     <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
@@ -3640,7 +3732,12 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       <p className="text-gray-500 text-sm">Nenhum documento enviado pelo cliente</p>
                     )}
                   </div>
+                    </div>
+                  )}
 
+                  {/* Sub-aba: Da Demanda */}
+                  {activeDocTab === 'demanda' && (
+                    <div className="space-y-6">
                   {/* Documentos Específicos da Demanda */}
                   <div className="bg-blue-50 rounded-xl p-6">
                     <div className="flex items-center justify-between mb-4">
@@ -3791,9 +3888,11 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       </div>
                     </div>
                   </div>
+                    </div>
+                  )}
 
-                  {/* Documentos Gerados */}
-                  {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao || c.arquivos_gerados.peticao_auxilio_moradia) && (
+                  {/* Documentos Gerados - pertence à sub-aba Gerar/Assinar */}
+                  {activeDocTab === 'gerar' && c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao || c.arquivos_gerados.peticao_auxilio_moradia) && (
                     <div className="bg-purple-50 rounded-xl p-6">
                       <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
                         <FileCheck className="w-5 h-5 text-purple-600" />
@@ -3906,9 +4005,12 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                     </div>
                   )}
 
-                  {/* Documentos Assinados */}
-                  {c.documentos_assinados && c.documentos_assinados.length > 0 && (
-                    <div className="bg-emerald-50 rounded-xl p-6">
+                  {/* Sub-aba: Assinados */}
+                  {activeDocTab === 'assinados' && (
+                    <div className="space-y-6">
+                      {/* Documentos Assinados */}
+                      {c.documentos_assinados && c.documentos_assinados.length > 0 ? (
+                        <div className="bg-emerald-50 rounded-xl p-6">
                       <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
                         <CheckCircle className="w-5 h-5 text-emerald-600" />
                         Documentos Assinados Recebidos
@@ -3932,11 +4034,19 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                           </div>
                         ))}
                       </div>
+                        </div>
+                      ) : (
+                        <div className="bg-gray-50 rounded-xl p-6 text-center">
+                          <CheckCircle className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                          <p className="text-gray-500">Nenhum documento assinado recebido ainda</p>
+                          <p className="text-sm text-gray-400 mt-1">Os documentos assinados pelo cliente aparecerão aqui</p>
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {/* Documentos Extras Enviados pelo Cliente */}
-                  {documentosExtras.length > 0 && (
+                  {/* Documentos Extras - pertence à sub-aba Do Cliente */}
+                  {activeDocTab === 'cliente' && documentosExtras.length > 0 && (
                     <div className="bg-amber-50 rounded-xl p-6">
                       <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
                         <Upload className="w-5 h-5 text-amber-600" />
@@ -3971,12 +4081,14 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       </div>
                     </div>
                   )}
-                {/* Enviar Documentos Extras */}
-                  <div className="bg-blue-50 rounded-xl p-6">
-                    <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
-                      <Upload className="w-5 h-5 text-blue-600" />
-                      Enviar Documentos para o Cliente
-                    </h3>
+
+                  {/* Enviar Documentos - pertence à sub-aba Da Demanda */}
+                  {activeDocTab === 'demanda' && (
+                    <div className="bg-indigo-50 rounded-xl p-6">
+                      <h3 className="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <Upload className="w-5 h-5 text-indigo-600" />
+                        Enviar Documentos para o Cliente
+                      </h3>
                     <p className="text-sm text-gray-600 mb-4">
                       Envie documentos extras que ficarão disponíveis no portal do cliente.
                     </p>
@@ -4017,12 +4129,13 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                     />
                     <label
                       htmlFor="upload-docs-admin"
-                      className="flex items-center justify-center gap-2 cursor-pointer border-2 border-dashed border-blue-300 rounded-lg p-4 hover:border-blue-500 hover:bg-blue-100 transition-colors"
+                      className="flex items-center justify-center gap-2 cursor-pointer border-2 border-dashed border-indigo-300 rounded-lg p-4 hover:border-indigo-500 hover:bg-indigo-100 transition-colors"
                     >
-                      <Upload className="w-5 h-5 text-blue-600" />
-                      <span className="text-blue-700 font-medium">Clique para selecionar arquivos</span>
+                      <Upload className="w-5 h-5 text-indigo-600" />
+                      <span className="text-indigo-700 font-medium">Clique para selecionar arquivos</span>
                     </label>
-                  </div>
+                    </div>
+                  )}
                 </div>
               )}
 
