@@ -2037,7 +2037,13 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   // Estados de Assinatura Digital
   const [enviandoParaAssinatura, setEnviandoParaAssinatura] = useState(false)
   const [statusAssinatura, setStatusAssinatura] = useState<{contrato?: string, procuracao?: string} | null>(null)
-  
+
+  // Estados de Upload de Documentos Finais (editados)
+  const [documentosFinais, setDocumentosFinais] = useState<{contrato?: any, procuracao?: any}>({})
+  const [uploadandoDocumento, setUploadandoDocumento] = useState(false)
+  const contratoFinalRef = useRef<HTMLInputElement>(null)
+  const procuracaoFinalRef = useRef<HTMLInputElement>(null)
+
   // Estados de Atualização Cadastral
   const [atualizacoesPendentes, setAtualizacoesPendentes] = useState<AtualizacaoCadastral[]>([])
   const [showModalSolicitarAtualizacao, setShowModalSolicitarAtualizacao] = useState(false)
@@ -2359,6 +2365,9 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
     } else {
       setDadosDemanda(null)
     }
+
+    // Carregar documentos finais (editados) para assinatura
+    await carregarDocumentosFinais(cadastroId)
   }
 
   const carregarAndamentos = async (processoId: number) => {
@@ -2670,6 +2679,51 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       }
     } catch (err) {
       console.error('Erro ao enviar e-mail de assinatura:', err)
+    }
+  }
+
+  // === Funções de Upload de Documentos Finais ===
+  const carregarDocumentosFinais = async (id: string) => {
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${id}/documentos-finais`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      const data = await response.json()
+      if (data.success) {
+        setDocumentosFinais(data.documentos_finais || {})
+      }
+    } catch (err) {
+      console.error('Erro ao carregar documentos finais:', err)
+    }
+  }
+
+  const handleUploadDocumentoFinal = async (id: string, tipo: 'contrato' | 'procuracao', arquivo: File) => {
+    setUploadandoDocumento(true)
+    try {
+      const formData = new FormData()
+      formData.append('arquivo', arquivo)
+
+      const response = await fetch(`${API_URL}/api/admin/clientes/${id}/upload-documento-final/${tipo}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.token}` },
+        body: formData
+      })
+      const data = await response.json()
+
+      if (data.success) {
+        setMensagemSucesso(`${tipo === 'contrato' ? 'Contrato' : 'Procuração'} final enviado com sucesso!`)
+        setTimeout(() => setMensagemSucesso(''), 5000)
+        await carregarDocumentosFinais(id)
+      } else {
+        setMensagemErro(data.detail || 'Erro ao enviar documento')
+        setTimeout(() => setMensagemErro(''), 5000)
+      }
+    } catch (err) {
+      console.error('Erro ao fazer upload:', err)
+      setMensagemErro('Erro de conexão ao enviar documento')
+      setTimeout(() => setMensagemErro(''), 5000)
+    } finally {
+      setUploadandoDocumento(false)
     }
   }
 
@@ -3330,15 +3384,36 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                         <FileCheck className="w-5 h-5 text-green-600" />
                         Assinatura Digital
                       </h3>
+
+                      {/* Aviso se não tiver documentos finais */}
+                      {(!documentosFinais.contrato && c.arquivos_gerados.contrato) || (!documentosFinais.procuracao && c.arquivos_gerados.procuracao) ? (
+                        <div className="bg-amber-100 border border-amber-300 rounded-lg p-4 mb-4">
+                          <p className="text-amber-800 text-sm flex items-start gap-2">
+                            <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                            <span>
+                              <strong>Atenção:</strong> Antes de enviar para assinatura, você deve:
+                              <br />1. Baixar o documento gerado
+                              <br />2. Editar (preencher honorários, etc.)
+                              <br />3. Fazer upload da versão final na seção "Documentos Gerados" acima
+                            </span>
+                          </p>
+                        </div>
+                      ) : null}
+
                       <p className="text-sm text-gray-600 mb-4">
-                        Envie os documentos para assinatura digital via ZapSign ou Gov.br.
+                        Envie os documentos finais para assinatura digital via ZapSign.
                       </p>
                       <div className="flex flex-wrap gap-3">
                         {c.arquivos_gerados.contrato && (
                           <button
                             onClick={() => handleEnviarParaAssinatura(c.id, 'contrato')}
-                            disabled={enviandoParaAssinatura}
-                            className="flex items-center gap-2 bg-red-800 hover:bg-red-900 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                            disabled={enviandoParaAssinatura || !documentosFinais.contrato}
+                            title={!documentosFinais.contrato ? 'Faça upload da versão final do contrato primeiro' : 'Enviar contrato para assinatura'}
+                            className={`flex items-center gap-2 font-medium px-4 py-2 rounded-lg disabled:opacity-50 ${
+                              documentosFinais.contrato
+                                ? 'bg-red-800 hover:bg-red-900 text-white'
+                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            }`}
                           >
                             {enviandoParaAssinatura ? (
                               <>
@@ -3348,7 +3423,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                             ) : (
                               <>
                                 <FileCheck className="w-4 h-4" />
-                                Assinar Contrato (ZapSign)
+                                {documentosFinais.contrato ? 'Enviar Contrato (ZapSign)' : 'Contrato (aguardando upload)'}
                               </>
                             )}
                           </button>
@@ -3356,8 +3431,13 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                         {c.arquivos_gerados.procuracao && (
                           <button
                             onClick={() => handleEnviarParaAssinatura(c.id, 'procuracao')}
-                            disabled={enviandoParaAssinatura}
-                            className="flex items-center gap-2 bg-red-800 hover:bg-red-900 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                            disabled={enviandoParaAssinatura || !documentosFinais.procuracao}
+                            title={!documentosFinais.procuracao ? 'Faça upload da versão final da procuração primeiro' : 'Enviar procuração para assinatura'}
+                            className={`flex items-center gap-2 font-medium px-4 py-2 rounded-lg disabled:opacity-50 ${
+                              documentosFinais.procuracao
+                                ? 'bg-red-800 hover:bg-red-900 text-white'
+                                : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                            }`}
                           >
                             {enviandoParaAssinatura ? (
                               <>
@@ -3367,7 +3447,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                             ) : (
                               <>
                                 <FileCheck className="w-4 h-4" />
-                                Assinar Procuração (ZapSign)
+                                {documentosFinais.procuracao ? 'Enviar Procuração (ZapSign)' : 'Procuração (aguardando upload)'}
                               </>
                             )}
                           </button>
@@ -3577,35 +3657,108 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                         <FileCheck className="w-5 h-5 text-purple-600" />
                         Documentos Gerados
                       </h3>
-                      <div className="flex flex-wrap gap-3">
+                      <p className="text-sm text-gray-600 mb-4">
+                        1. Baixe o documento, 2. Edite (preencha honorários), 3. Faça upload da versão final
+                      </p>
+                      <div className="space-y-4">
+                        {/* Contrato */}
                         {c.arquivos_gerados.contrato && (
-                          <a
-                            href={`${API_URL}/api/cadastros/${c.id}/download/contrato`}
-                            className="flex items-center gap-2 bg-white border border-purple-200 text-purple-700 font-medium px-4 py-2 rounded-lg hover:bg-purple-100"
-                          >
-                            <Download className="w-4 h-4" />
-                            Baixar Contrato
-                          </a>
+                          <div className="bg-white border border-purple-200 rounded-lg p-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-gray-800">Contrato de Honorários</span>
+                              {documentosFinais.contrato ? (
+                                <span className="flex items-center gap-1 text-green-600 text-sm">
+                                  <CheckCircle className="w-4 h-4" /> Versão final enviada
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-amber-600 text-sm">
+                                  <AlertCircle className="w-4 h-4" /> Aguardando versão final
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <a
+                                href={`${API_URL}/api/cadastros/${c.id}/download/contrato`}
+                                className="flex items-center gap-2 bg-purple-100 text-purple-700 font-medium px-3 py-1.5 rounded text-sm hover:bg-purple-200"
+                              >
+                                <Download className="w-4 h-4" />
+                                1. Baixar
+                              </a>
+                              <input
+                                type="file"
+                                ref={contratoFinalRef}
+                                onChange={(e) => e.target.files?.[0] && handleUploadDocumentoFinal(c.id, 'contrato', e.target.files[0])}
+                                className="hidden"
+                                accept=".pdf,.docx,.doc"
+                              />
+                              <button
+                                onClick={() => contratoFinalRef.current?.click()}
+                                disabled={uploadandoDocumento}
+                                className="flex items-center gap-2 bg-amber-100 text-amber-700 font-medium px-3 py-1.5 rounded text-sm hover:bg-amber-200 disabled:opacity-50"
+                              >
+                                <Upload className="w-4 h-4" />
+                                {uploadandoDocumento ? 'Enviando...' : '3. Upload Final'}
+                              </button>
+                            </div>
+                          </div>
                         )}
+                        {/* Procuração */}
                         {c.arquivos_gerados.procuracao && (
-                          <a
-                            href={`${API_URL}/api/cadastros/${c.id}/download/procuracao`}
-                            className="flex items-center gap-2 bg-white border border-purple-200 text-purple-700 font-medium px-4 py-2 rounded-lg hover:bg-purple-100"
-                          >
-                            <Download className="w-4 h-4" />
-                            Baixar Procuração
-                          </a>
+                          <div className="bg-white border border-purple-200 rounded-lg p-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-gray-800">Procuração</span>
+                              {documentosFinais.procuracao ? (
+                                <span className="flex items-center gap-1 text-green-600 text-sm">
+                                  <CheckCircle className="w-4 h-4" /> Versão final enviada
+                                </span>
+                              ) : (
+                                <span className="flex items-center gap-1 text-amber-600 text-sm">
+                                  <AlertCircle className="w-4 h-4" /> Aguardando versão final
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <a
+                                href={`${API_URL}/api/cadastros/${c.id}/download/procuracao`}
+                                className="flex items-center gap-2 bg-purple-100 text-purple-700 font-medium px-3 py-1.5 rounded text-sm hover:bg-purple-200"
+                              >
+                                <Download className="w-4 h-4" />
+                                1. Baixar
+                              </a>
+                              <input
+                                type="file"
+                                ref={procuracaoFinalRef}
+                                onChange={(e) => e.target.files?.[0] && handleUploadDocumentoFinal(c.id, 'procuracao', e.target.files[0])}
+                                className="hidden"
+                                accept=".pdf,.docx,.doc"
+                              />
+                              <button
+                                onClick={() => procuracaoFinalRef.current?.click()}
+                                disabled={uploadandoDocumento}
+                                className="flex items-center gap-2 bg-amber-100 text-amber-700 font-medium px-3 py-1.5 rounded text-sm hover:bg-amber-200 disabled:opacity-50"
+                              >
+                                <Upload className="w-4 h-4" />
+                                {uploadandoDocumento ? 'Enviando...' : '3. Upload Final'}
+                              </button>
+                            </div>
+                          </div>
                         )}
+                        {/* Petição Auxílio Moradia */}
                         {c.arquivos_gerados.peticao_auxilio_moradia && (
-                          <a
-                            href={`${API_URL}/api/cadastros/${c.id}/download/peticao_auxilio_moradia`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="flex items-center gap-2 bg-white border border-purple-200 text-purple-700 font-medium px-4 py-2 rounded-lg hover:bg-purple-100"
-                          >
-                            <Download className="w-4 h-4" />
-                            Baixar Petição Auxílio Moradia
-                          </a>
+                          <div className="bg-white border border-purple-200 rounded-lg p-4">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-medium text-gray-800">Petição Auxílio Moradia</span>
+                            </div>
+                            <a
+                              href={`${API_URL}/api/cadastros/${c.id}/download/peticao_auxilio_moradia`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-center gap-2 bg-purple-100 text-purple-700 font-medium px-3 py-1.5 rounded text-sm hover:bg-purple-200"
+                            >
+                              <Download className="w-4 h-4" />
+                              Baixar Petição
+                            </a>
+                          </div>
                         )}
                       </div>
                     </div>

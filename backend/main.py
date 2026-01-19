@@ -113,7 +113,7 @@ from modules.documents import (
 )
 
 # Funções de e-mail (migrado em 19/01/2026)
-from modules.email import enviar_email_resend
+from modules.email import enviar_email_resend, enviar_email_assinatura_digital
 
 # Assinatura digital (criado em 19/01/2026)
 from modules.assinatura import (
@@ -5828,6 +5828,140 @@ async def obter_link_govbr():
     return gerar_link_govbr()
 
 
+@app.post("/api/admin/clientes/{cadastro_id}/upload-documento-final/{tipo_documento}")
+async def upload_documento_final(
+    cadastro_id: str,
+    tipo_documento: str,
+    arquivo: UploadFile = File(...),
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Faz upload do documento final (editado) para assinatura.
+    O admin deve baixar o documento gerado, editar (preencher honorários, etc),
+    e fazer upload da versão final aqui antes de enviar para assinatura.
+
+    tipo_documento: contrato, procuracao
+    """
+    if tipo_documento not in ["contrato", "procuracao"]:
+        raise HTTPException(status_code=400, detail="Tipo de documento deve ser 'contrato' ou 'procuracao'")
+
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+
+    # Verificar extensão do arquivo
+    extensao = os.path.splitext(arquivo.filename)[1].lower()
+    if extensao not in ['.pdf', '.docx', '.doc']:
+        raise HTTPException(status_code=400, detail="Arquivo deve ser PDF ou DOCX")
+
+    # Criar pasta para documentos finais
+    pasta_finais = f"/app/uploads/documentos_finais/{cadastro_id}"
+    os.makedirs(pasta_finais, exist_ok=True)
+
+    # Nome do arquivo final
+    nome_arquivo = f"{tipo_documento}_final{extensao}"
+    caminho_final = f"{pasta_finais}/{nome_arquivo}"
+
+    # Salvar arquivo
+    try:
+        conteudo = await arquivo.read()
+        with open(caminho_final, "wb") as f:
+            f.write(conteudo)
+        logger.info(f"Documento final salvo: {caminho_final}")
+    except Exception as e:
+        logger.error(f"Erro ao salvar documento final: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao salvar arquivo")
+
+    # Atualizar cadastro com caminho do documento final
+    conn = get_db()
+    if conn:
+        try:
+            cur = conn.cursor()
+
+            # Buscar documentos finais existentes ou criar novo dict
+            documentos_finais = cadastro.get('documentos_finais', {})
+            if not isinstance(documentos_finais, dict):
+                documentos_finais = {}
+
+            documentos_finais[tipo_documento] = {
+                "caminho": caminho_final,
+                "nome_original": arquivo.filename,
+                "upload_em": datetime.now().isoformat(),
+                "upload_por": usuario.get("email", "admin")
+            }
+
+            cur.execute("""
+                UPDATE cadastros
+                SET documentos_finais = %s,
+                    atualizado_em = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (json.dumps(documentos_finais), cadastro_id))
+            conn.commit()
+            cur.close()
+            conn.close()
+
+            return {
+                "success": True,
+                "message": f"Documento {tipo_documento} final enviado com sucesso!",
+                "arquivo": nome_arquivo
+            }
+        except Exception as e:
+            logger.error(f"Erro ao atualizar cadastro: {e}")
+            raise HTTPException(status_code=500, detail="Erro ao atualizar cadastro")
+
+    raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+
+
+@app.get("/api/admin/clientes/{cadastro_id}/documentos-finais")
+async def obter_documentos_finais(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Retorna status dos documentos finais (editados) do cliente."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+
+    documentos_finais = cadastro.get('documentos_finais', {})
+    if not isinstance(documentos_finais, dict):
+        documentos_finais = {}
+
+    return {
+        "success": True,
+        "documentos_finais": documentos_finais,
+        "tem_contrato_final": "contrato" in documentos_finais,
+        "tem_procuracao_final": "procuracao" in documentos_finais
+    }
+
+
+@app.get("/api/admin/clientes/{cadastro_id}/download-documento-final/{tipo_documento}")
+async def download_documento_final(
+    cadastro_id: str,
+    tipo_documento: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Baixa o documento final (editado)."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+
+    documentos_finais = cadastro.get('documentos_finais', {})
+    if tipo_documento not in documentos_finais:
+        raise HTTPException(status_code=404, detail="Documento final não encontrado")
+
+    caminho = documentos_finais[tipo_documento].get("caminho")
+    if not caminho or not os.path.exists(caminho):
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+    nome_original = documentos_finais[tipo_documento].get("nome_original", f"{tipo_documento}_final.pdf")
+
+    return FileResponse(
+        caminho,
+        filename=nome_original,
+        media_type="application/octet-stream"
+    )
+
+
 @app.post("/api/admin/clientes/{cadastro_id}/enviar-assinatura/{tipo_documento}")
 async def enviar_documento_assinatura(
     cadastro_id: str,
@@ -5837,6 +5971,9 @@ async def enviar_documento_assinatura(
     """
     Envia documento para assinatura digital via ZapSign.
 
+    IMPORTANTE: Para contrato e procuração, é necessário fazer upload do documento
+    final (editado com honorários preenchidos) antes de enviar para assinatura.
+
     tipo_documento: contrato, procuracao, peticao_auxilio_moradia
     """
     cadastro = buscar_cadastro(cadastro_id)
@@ -5844,26 +5981,49 @@ async def enviar_documento_assinatura(
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
 
     dados = cadastro.get('dados', {})
-    arquivos = cadastro.get('arquivos_gerados', {})
+    arquivos_gerados = cadastro.get('arquivos_gerados', {})
+    documentos_finais = cadastro.get('documentos_finais', {})
+    if not isinstance(documentos_finais, dict):
+        documentos_finais = {}
 
     # Determinar qual arquivo enviar
+    # PRIORIDADE: documento final (editado) > documento gerado automaticamente
+    caminho = None
+    nome_doc = ""
+
     if tipo_documento == "contrato":
-        caminho = arquivos.get('contrato')
+        # Para contrato, OBRIGATÓRIO ter documento final (com honorários preenchidos)
+        if "contrato" in documentos_finais:
+            caminho = documentos_finais["contrato"].get("caminho")
+        if not caminho or not os.path.exists(caminho):
+            raise HTTPException(
+                status_code=400,
+                detail="É necessário fazer upload do contrato editado (com honorários preenchidos) antes de enviar para assinatura. Baixe o contrato, edite e faça upload da versão final."
+            )
         nome_doc = f"Contrato de Honorários - {dados.get('nome', 'Cliente')}"
+
     elif tipo_documento == "procuracao":
-        caminho = arquivos.get('procuracao')
+        # Para procuração, OBRIGATÓRIO ter documento final
+        if "procuracao" in documentos_finais:
+            caminho = documentos_finais["procuracao"].get("caminho")
+        if not caminho or not os.path.exists(caminho):
+            raise HTTPException(
+                status_code=400,
+                detail="É necessário fazer upload da procuração editada antes de enviar para assinatura. Baixe a procuração, revise e faça upload da versão final."
+            )
         nome_doc = f"Procuração - {dados.get('nome', 'Cliente')}"
+
     elif tipo_documento == "peticao_auxilio_moradia":
-        caminho = arquivos.get('peticao_auxilio_moradia')
+        # Para petição, pode usar o gerado diretamente
+        caminho = arquivos_gerados.get('peticao_auxilio_moradia')
         nome_doc = f"Petição Auxílio Moradia - {dados.get('nome', 'Cliente')}"
+        if not caminho or not os.path.exists(caminho):
+            raise HTTPException(
+                status_code=404,
+                detail="Petição não encontrada. Gere a petição primeiro."
+            )
     else:
         raise HTTPException(status_code=400, detail="Tipo de documento não suportado")
-
-    if not caminho or not os.path.exists(caminho):
-        raise HTTPException(
-            status_code=404,
-            detail=f"Documento '{tipo_documento}' não encontrado. Gere o documento primeiro."
-        )
 
     # Preparar signatário (cliente)
     signatarios = [{
@@ -5882,6 +6042,8 @@ async def enviar_documento_assinatura(
     )
 
     if resultado.get("success"):
+        url_assinatura = resultado.get("signatarios", [{}])[0].get("url_assinatura")
+
         # Salvar token do documento no cadastro
         conn = get_db()
         if conn:
@@ -5893,7 +6055,7 @@ async def enviar_documento_assinatura(
                 assinaturas[tipo_documento] = {
                     "token": resultado.get("documento_token"),
                     "status": "pending",
-                    "url_assinatura": resultado.get("signatarios", [{}])[0].get("url_assinatura"),
+                    "url_assinatura": url_assinatura,
                     "enviado_em": datetime.now().isoformat(),
                     "plataforma": "zapsign"
                 }
@@ -5910,11 +6072,33 @@ async def enviar_documento_assinatura(
             except Exception as e:
                 logger.error(f"Erro ao salvar assinatura: {e}")
 
+        # Enviar e-mail para o cliente com link de assinatura
+        try:
+            documentos_email = [{
+                "tipo": tipo_documento,
+                "nome": nome_doc,
+                "url_assinatura": url_assinatura
+            }]
+
+            email_enviado = await enviar_email_assinatura_digital(
+                destinatario=dados.get('email', ''),
+                nome=dados.get('nome', 'Cliente'),
+                documentos=documentos_email
+            )
+
+            if email_enviado:
+                logger.info(f"E-mail de assinatura enviado para {dados.get('email')}")
+            else:
+                logger.warning(f"Falha ao enviar e-mail de assinatura para {dados.get('email')}")
+        except Exception as e:
+            logger.error(f"Erro ao enviar e-mail de assinatura: {e}")
+
         return {
             "success": True,
-            "message": "Documento enviado para assinatura",
-            "url_assinatura": resultado.get("signatarios", [{}])[0].get("url_assinatura"),
-            "documento_token": resultado.get("documento_token")
+            "message": "Documento enviado para assinatura e e-mail enviado ao cliente",
+            "url_assinatura": url_assinatura,
+            "documento_token": resultado.get("documento_token"),
+            "email_enviado": True
         }
     else:
         raise HTTPException(status_code=500, detail=resultado.get("error", "Erro ao enviar documento"))
@@ -6125,22 +6309,21 @@ async def cliente_minhas_assinaturas(cliente: dict = Depends(verificar_token_cli
     assinaturas = cadastro.get('assinaturas_digitais', {})
     govbr = gerar_link_govbr()
 
-    resultado = {
-        "assinaturas_zapsign": [],
+    # Lista de assinaturas pendentes para o frontend
+    lista_assinaturas = []
+    for tipo, info in assinaturas.items():
+        if info.get("status") == "pending" and info.get("url_assinatura"):
+            lista_assinaturas.append({
+                "tipo": tipo,
+                "url": info.get("url_assinatura"),
+                "status": info.get("status")
+            })
+
+    return {
+        "success": True,
+        "assinaturas": lista_assinaturas,
         "govbr": govbr
     }
-
-    for tipo, info in assinaturas.items():
-        nome_doc = tipo.replace("_", " ").title()
-        resultado["assinaturas_zapsign"].append({
-            "tipo": tipo,
-            "nome": nome_doc,
-            "status": info.get("status"),
-            "url_assinatura": info.get("url_assinatura") if info.get("status") == "pending" else None,
-            "enviado_em": info.get("enviado_em")
-        })
-
-    return resultado
 
 
 # ============================================

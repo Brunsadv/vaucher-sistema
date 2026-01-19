@@ -194,3 +194,102 @@ async def enviar_email_nova_mensagem(
     """
 
     return await enviar_email_resend(destinatario, assunto, corpo_html)
+
+
+async def enviar_email_assinatura_digital(
+    destinatario: str,
+    nome: str,
+    documentos: list,
+    portal_url: str = "https://portal-cliente-vaucher.onrender.com"
+) -> bool:
+    """
+    Envia e-mail com links para assinatura digital dos documentos.
+
+    Args:
+        destinatario: E-mail do cliente
+        nome: Nome do cliente
+        documentos: Lista de dicts com {tipo, nome, url_assinatura}
+        portal_url: URL do portal do cliente
+
+    Returns:
+        bool: True se enviado com sucesso
+    """
+    assunto = "Documentos para Assinatura Digital - Vaucher e Álvares"
+
+    # Gerar HTML dos botões de assinatura
+    botoes_html = ""
+    for doc in documentos:
+        if doc.get("url_assinatura"):
+            botoes_html += f"""
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #8B1538;">
+                <p style="font-weight: bold; color: #333; margin: 0 0 15px 0; font-size: 16px;">
+                    {doc.get('nome', 'Documento')}
+                </p>
+                <a href="{doc['url_assinatura']}"
+                   style="display: inline-block; background-color: #8B1538; color: white;
+                          padding: 12px 30px; text-decoration: none; border-radius: 5px;
+                          font-weight: bold; font-size: 14px;">
+                    ASSINAR DOCUMENTO
+                </a>
+            </div>
+            """
+
+    corpo_html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background-color: #8B1538; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0; font-size: 24px;">Vaucher e Alvares</h1>
+            <p style="color: #f0f0f0; margin: 5px 0 0 0; font-size: 14px;">Sociedade de Advogados</p>
+        </div>
+
+        <div style="padding: 30px 20px;">
+            <h2 style="color: #2c3e50; margin-top: 0;">Ola, {nome}!</h2>
+
+            <p style="font-size: 16px; color: #333; line-height: 1.6;">
+                Seus documentos estao prontos para assinatura digital.
+                Clique nos botoes abaixo para assinar cada documento de forma rapida e segura.
+            </p>
+
+            {botoes_html}
+
+            <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin: 25px 0;">
+                <p style="margin: 0; color: #1565c0; font-size: 14px;">
+                    <strong>Dica:</strong> Voce tambem pode acessar seus documentos pelo Portal do Cliente:
+                </p>
+                <p style="margin: 10px 0 0 0; text-align: center;">
+                    <a href="{portal_url}"
+                       style="display: inline-block; background-color: #1565c0; color: white;
+                              padding: 10px 25px; text-decoration: none; border-radius: 5px;
+                              font-size: 14px;">
+                        Acessar Portal do Cliente
+                    </a>
+                </p>
+            </div>
+
+            <div style="background-color: #fff3e0; padding: 15px; border-radius: 8px; margin: 25px 0;">
+                <p style="margin: 0; color: #e65100; font-size: 14px;">
+                    <strong>Alternativa gratuita:</strong> Voce tambem pode assinar via
+                    <a href="https://sso.acesso.gov.br/login?client_id=assinador.iti.br" style="color: #1565c0;">Gov.br</a>
+                    (requer conta nivel Prata ou Ouro). Neste caso, baixe o documento,
+                    assine pelo Gov.br e envie de volta pelo Portal.
+                </p>
+            </div>
+
+            <p style="font-size: 14px; color: #666; margin-top: 30px;">
+                Em caso de duvidas, entre em contato conosco.
+            </p>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 0;">
+
+        <div style="padding: 20px; background-color: #f8f9fa;">
+            <p style="color: #666; font-size: 12px; margin: 0; text-align: center;">
+                Vaucher e Alvares Sociedade de Advogados<br>
+                OAB/MT 669 | CNPJ 21.336.697/0001-46<br>
+                Rua Lima, n. 106, Jardim das Americas - Cuiaba/MT<br>
+                <a href="mailto:atendimento@vaucherealvares.com" style="color: #8B1538;">atendimento@vaucherealvares.com</a>
+            </p>
+        </div>
+    </div>
+    """
+
+    return await enviar_email_resend(destinatario, assunto, corpo_html)
