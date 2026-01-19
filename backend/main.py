@@ -16,10 +16,11 @@ import json
 import zipfile
 import shutil
 from datetime import datetime, timezone
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:
-    from backports.zoneinfo import ZoneInfo
+# MIGRADO PARA modules/config.py
+# try:
+#     from zoneinfo import ZoneInfo
+# except ImportError:
+#     from backports.zoneinfo import ZoneInfo
 import uuid
 import hashlib
 import logging
@@ -30,31 +31,54 @@ from io import BytesIO
 from dateutil.relativedelta import relativedelta
 from decimal import Decimal
 
-# Configurar logging detalhado
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# ============================================
+# MIGRAÇÃO MODULAR - 18/01/2026
+# Importar configurações do módulo config.py
+# ============================================
+from modules.config import (
+    FUSO_CUIABA,
+    converter_para_cuiaba,
+    BASE_DIR,
+    MODELOS_DIR,
+    UPLOADS_DIR,
+    GERADOS_DIR,
+    STATIC_DIR,
+    DATABASE_URL,
+    RESEND_API_KEY,
+    FROM_EMAIL,
+    ADMIN_INICIAL_SENHA,
+    TOKEN_SECRET,
+    LOGO_URL,
+    ALLOWED_ORIGINS,
+    logger,
+)
+
+# Configurar logging detalhado (MIGRADO PARA modules/config.py)
+# logging.basicConfig(level=logging.INFO)
+# logger = logging.getLogger(__name__)
 
 # PostgreSQL
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-# Fuso horário de Cuiabá
-FUSO_CUIABA = ZoneInfo("America/Cuiaba")
-
-def converter_para_cuiaba(dt) -> str:
-    """Converte datetime para fuso horário de Cuiabá e retorna como ISO string."""
-    if not dt:
-        return None
-    try:
-        # Se o datetime não tem timezone, assume que é UTC
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        # Converte para Cuiabá
-        dt_cuiaba = dt.astimezone(FUSO_CUIABA)
-        return dt_cuiaba.isoformat()
-    except Exception as e:
-        logger.warning(f"Erro ao converter timezone: {e}")
-        return dt.isoformat() if dt else None
+# MIGRADO PARA modules/config.py
+# # Fuso horário de Cuiabá
+# FUSO_CUIABA = ZoneInfo("America/Cuiaba")
+#
+# def converter_para_cuiaba(dt) -> str:
+#     """Converte datetime para fuso horário de Cuiabá e retorna como ISO string."""
+#     if not dt:
+#         return None
+#     try:
+#         # Se o datetime não tem timezone, assume que é UTC
+#         if dt.tzinfo is None:
+#             dt = dt.replace(tzinfo=timezone.utc)
+#         # Converte para Cuiabá
+#         dt_cuiaba = dt.astimezone(FUSO_CUIABA)
+#         return dt_cuiaba.isoformat()
+#     except Exception as e:
+#         logger.warning(f"Erro ao converter timezone: {e}")
+#         return dt.isoformat() if dt else None
 
 # ============================================
 # CONFIGURAÇÃO
@@ -90,12 +114,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Diretórios
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODELOS_DIR = os.path.join(BASE_DIR, "modelos")
-UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
-GERADOS_DIR = os.path.join(UPLOADS_DIR, "documentos_gerados")
-STATIC_DIR = os.path.join(BASE_DIR, "static")
+# MIGRADO PARA modules/config.py
+# # Diretórios
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# MODELOS_DIR = os.path.join(BASE_DIR, "modelos")
+# UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
+# GERADOS_DIR = os.path.join(UPLOADS_DIR, "documentos_gerados")
+# STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 # Criar diretórios se não existirem
 for dir_path in [MODELOS_DIR, UPLOADS_DIR, GERADOS_DIR, STATIC_DIR]:
@@ -104,19 +129,20 @@ for dir_path in [MODELOS_DIR, UPLOADS_DIR, GERADOS_DIR, STATIC_DIR]:
 # Servir arquivos estáticos (logo)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# Banco de dados e E-mail
-DATABASE_URL = os.getenv("DATABASE_URL")
-RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
-
-# Senha inicial do admin (deve ser alterada após primeiro login)
-ADMIN_INICIAL_SENHA = os.getenv("ADMIN_INICIAL_SENHA", "VaucherAdmin2024!")
-
-# Chave secreta para tokens (em produção, usar variável de ambiente)
-TOKEN_SECRET = os.getenv("TOKEN_SECRET", "vaucher_alvares_secret_key_2024")
-
-# URL da logo
-LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher_e_Alvares-06.jpg"
+# MIGRADO PARA modules/config.py
+# # Banco de dados e E-mail
+# DATABASE_URL = os.getenv("DATABASE_URL")
+# RESEND_API_KEY = os.getenv("RESEND_API_KEY")
+# FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
+#
+# # Senha inicial do admin (deve ser alterada após primeiro login)
+# ADMIN_INICIAL_SENHA = os.getenv("ADMIN_INICIAL_SENHA", "VaucherAdmin2024!")
+#
+# # Chave secreta para tokens (em produção, usar variável de ambiente)
+# TOKEN_SECRET = os.getenv("TOKEN_SECRET", "vaucher_alvares_secret_key_2024")
+#
+# # URL da logo
+# LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher_e_Alvares-06.jpg"
 
 # ============================================
 # FUNÇÕES DE SEGURANÇA
