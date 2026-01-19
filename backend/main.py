@@ -115,35 +115,12 @@ from modules.documents import (
 # Funções de e-mail (migrado em 19/01/2026)
 from modules.email import enviar_email_resend
 
-# Configurar logging detalhado (MIGRADO PARA modules/config.py)
-# logging.basicConfig(level=logging.INFO)
-# logger = logging.getLogger(__name__)
-
 # PostgreSQL
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
-# MIGRADO PARA modules/config.py
-# # Fuso horário de Cuiabá
-# FUSO_CUIABA = ZoneInfo("America/Cuiaba")
-#
-# def converter_para_cuiaba(dt) -> str:
-#     """Converte datetime para fuso horário de Cuiabá e retorna como ISO string."""
-#     if not dt:
-#         return None
-#     try:
-#         # Se o datetime não tem timezone, assume que é UTC
-#         if dt.tzinfo is None:
-#             dt = dt.replace(tzinfo=timezone.utc)
-#         # Converte para Cuiabá
-#         dt_cuiaba = dt.astimezone(FUSO_CUIABA)
-#         return dt_cuiaba.isoformat()
-#     except Exception as e:
-#         logger.warning(f"Erro ao converter timezone: {e}")
-#         return dt.isoformat() if dt else None
-
 # ============================================
-# CONFIGURAÇÃO
+# CONFIGURAÇÃO DA APLICAÇÃO
 # ============================================
 
 app = FastAPI(
@@ -176,14 +153,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# MIGRADO PARA modules/config.py
-# # Diretórios
-# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# MODELOS_DIR = os.path.join(BASE_DIR, "modelos")
-# UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
-# GERADOS_DIR = os.path.join(UPLOADS_DIR, "documentos_gerados")
-# STATIC_DIR = os.path.join(BASE_DIR, "static")
-
 # Criar diretórios se não existirem
 for dir_path in [MODELOS_DIR, UPLOADS_DIR, GERADOS_DIR, STATIC_DIR]:
     os.makedirs(dir_path, exist_ok=True)
@@ -191,64 +160,9 @@ for dir_path in [MODELOS_DIR, UPLOADS_DIR, GERADOS_DIR, STATIC_DIR]:
 # Servir arquivos estáticos (logo)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# MIGRADO PARA modules/config.py
-# # Banco de dados e E-mail
-# DATABASE_URL = os.getenv("DATABASE_URL")
-# RESEND_API_KEY = os.getenv("RESEND_API_KEY")
-# FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
-#
-# # Senha inicial do admin (deve ser alterada após primeiro login)
-# ADMIN_INICIAL_SENHA = os.getenv("ADMIN_INICIAL_SENHA", "VaucherAdmin2024!")
-#
-# # Chave secreta para tokens (em produção, usar variável de ambiente)
-# TOKEN_SECRET = os.getenv("TOKEN_SECRET", "vaucher_alvares_secret_key_2024")
-#
-# # URL da logo
-# LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher_e_Alvares-06.jpg"
-
 # ============================================
-# FUNÇÕES DE SEGURANÇA
-# MIGRADO PARA modules/security.py
+# VERIFICAÇÃO DE AUTENTICAÇÃO
 # ============================================
-
-# def hash_senha(senha: str) -> str:
-#     """Cria hash da senha usando SHA-256 com salt."""
-#     salt = "vaucher_alvares_2024"
-#     return hashlib.sha256(f"{senha}{salt}".encode()).hexdigest()
-#
-# def verificar_senha(senha: str, hash_armazenado: str) -> bool:
-#     """Verifica se a senha corresponde ao hash."""
-#     return hash_senha(senha) == hash_armazenado
-#
-# def gerar_token(user_id: int, email: str, is_admin: bool) -> str:
-#     """Gera um token que contém informações do usuário."""
-#     payload = f"{user_id}:{email}:{is_admin}"
-#     signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
-#     token_data = base64.b64encode(f"{payload}:{signature}".encode()).decode()
-#     return token_data
-#
-# def decodificar_token(token: str) -> dict:
-#     """Decodifica e valida um token."""
-#     try:
-#         decoded = base64.b64decode(token.encode()).decode()
-#         parts = decoded.rsplit(":", 1)
-#         if len(parts) != 2:
-#             return None
-#
-#         payload, signature = parts
-#
-#         expected_signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
-#         if signature != expected_signature:
-#             return None
-#
-#         user_id, email, is_admin = payload.split(":")
-#         return {
-#             "id": int(user_id),
-#             "email": email,
-#             "is_admin": is_admin == "True"
-#         }
-#     except Exception:
-#         return None
 
 def verificar_token(authorization: str = Header(None)) -> dict:
     """Verifica se o token é válido e retorna o usuário."""
@@ -280,45 +194,8 @@ def verificar_admin(authorization: str = Header(None)) -> dict:
     return usuario
 
 # ============================================
-# TEMPLATE DE E-MAIL COM LOGO
-# MIGRADO PARA modules/security.py
+# INICIALIZAÇÃO DA APLICAÇÃO
 # ============================================
-
-# def criar_email_html(conteudo: str) -> str:
-#     """Cria o HTML do e-mail com logo e rodapé padrão."""
-#     return f"""
-#     <html>
-#     <body style="font-family: Arial, sans-serif; color: #333; background-color: #f5f5f5; margin: 0; padding: 20px;">
-#         <div style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
-#             <!-- Cabeçalho com Logo -->
-#             <div style="background-color: #ffffff; padding: 30px; text-align: center; border-bottom: 3px solid #8B1538;">
-#                 <img src="{LOGO_URL}" alt="Vaucher e Álvares Advogados" style="max-width: 300px; height: auto;" />
-#             </div>
-#
-#             <!-- Conteúdo -->
-#             <div style="padding: 30px;">
-#                 {conteudo}
-#             </div>
-#
-#             <!-- Rodapé -->
-#             <div style="background-color: #f8f8f8; padding: 20px; text-align: center; border-top: 1px solid #eee;">
-#                 <p style="font-size: 12px; color: #666; margin: 0;">
-#                     <strong>Vaucher e Álvares Sociedade de Advogados</strong><br>
-#                     Rua Lima, nº 106, Bairro Jardim das Américas, Cuiabá-MT<br>
-#                     (65) 3025-1223 – email: atendimento@vaucherealvares.com
-#                 </p>
-#             </div>
-#         </div>
-#     </body>
-#     </html>
-#     """
-
-# ============================================
-# BANCO DE DADOS
-# MIGRADO PARA modules/database.py em 19/01/2026
-# ============================================
-# As funções get_db, init_db, e demais funções CRUD
-# foram migradas para modules/database.py
 
 @app.on_event("startup")
 def startup():
@@ -326,26 +203,6 @@ def startup():
     logger.info(f"RESEND_API_KEY configurada: {bool(RESEND_API_KEY)}")
     logger.info(f"FROM_EMAIL: {FROM_EMAIL}")
     init_db()
-
-# ============================================
-# FUNÇÕES DO BANCO - USUÁRIOS, CADASTROS, FINANCEIRO
-# MIGRADO PARA modules/database.py em 19/01/2026
-# ============================================
-
-# ============================================
-# MODELOS DE DADOS
-# MIGRADO PARA modules/models.py em 19/01/2026
-# ============================================
-
-# ============================================
-# GERADOR DE DOCUMENTOS
-# MIGRADO PARA modules/documents.py em 19/01/2026
-# ============================================
-
-# A classe GeradorDocumentos, a instância gerador e a função
-# gerar_peticao_auxilio_moradia foram movidas para modules/documents.py
-
-# A função enviar_email_resend foi movida para modules/email.py
 
 # ============================================
 # FUNÇÕES DO BANCO - DEMANDAS ESPECÍFICAS
@@ -2744,42 +2601,8 @@ def contar_mensagens_nao_lidas(cadastro_id: str = None, remetente: str = None) -
 
 
 # ============================================
-# PORTAL DO CLIENTE - TOKENS
-# MIGRADO PARA modules/security.py (exceto verificar_token_cliente)
+# VERIFICAÇÃO DE TOKEN DO CLIENTE
 # ============================================
-
-# def gerar_token_cliente(cadastro_id: str, email: str) -> str:
-#     """Gera um token específico para clientes."""
-#     payload = f"cliente:{cadastro_id}:{email}"
-#     signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
-#     token_data = base64.b64encode(f"{payload}:{signature}".encode()).decode()
-#     return token_data
-#
-# def decodificar_token_cliente(token: str) -> dict:
-#     """Decodifica e valida um token de cliente."""
-#     try:
-#         decoded = base64.b64decode(token.encode()).decode()
-#         parts = decoded.rsplit(":", 1)
-#         if len(parts) != 2:
-#             return None
-#
-#         payload, signature = parts
-#
-#         expected_signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
-#         if signature != expected_signature:
-#             return None
-#
-#         tipo, cadastro_id, email = payload.split(":")
-#         if tipo != "cliente":
-#             return None
-#
-#         return {
-#             "cadastro_id": cadastro_id,
-#             "email": email,
-#             "tipo": "cliente"
-#         }
-#     except Exception:
-#         return None
 
 def verificar_token_cliente(authorization: str = Header(None)) -> dict:
     """Verifica se o token de cliente é válido."""
