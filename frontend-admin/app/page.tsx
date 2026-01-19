@@ -3441,15 +3441,6 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                         Enviar por E-mail
                       </button>
                     )}
-                    {c.arquivos_gerados && (c.arquivos_gerados.contrato || c.arquivos_gerados.procuracao) && (
-                      <button
-                        onClick={() => handleEnviarEmailAssinatura(c.id)}
-                        className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-medium px-4 py-2 rounded-lg"
-                      >
-                        <FileCheck className="w-4 h-4" />
-                        Enviar p/ Assinatura
-                      </button>
-                    )}
                   </div>
 
                   {/* Seção de Assinatura Digital */}
