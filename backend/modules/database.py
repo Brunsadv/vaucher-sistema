@@ -601,7 +601,9 @@ def carregar_cadastros() -> List[dict]:
                 "documentos": row["documentos"] if isinstance(row["documentos"], list) else json.loads(row["documentos"] or "[]"),
                 "arquivos_gerados": row["arquivos_gerados"] if isinstance(row["arquivos_gerados"], dict) else json.loads(row["arquivos_gerados"] or "{}"),
                 "documentos_assinados": row.get("documentos_assinados") if isinstance(row.get("documentos_assinados"), list) else json.loads(row.get("documentos_assinados") or "[]"),
-                "data_assinatura": row.get("data_assinatura").isoformat() if row.get("data_assinatura") else None
+                "data_assinatura": row.get("data_assinatura").isoformat() if row.get("data_assinatura") else None,
+                "assinaturas_digitais": row.get("assinaturas_digitais") if isinstance(row.get("assinaturas_digitais"), dict) else json.loads(row.get("assinaturas_digitais") or "{}"),
+                "documentos_finais": row.get("documentos_finais") if isinstance(row.get("documentos_finais"), dict) else json.loads(row.get("documentos_finais") or "{}")
             })
         return cadastros
     except Exception as e:
