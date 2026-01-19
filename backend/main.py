@@ -6078,7 +6078,7 @@ async def enviar_documento_assinatura(
             except Exception as e:
                 logger.error(f"Erro ao salvar assinatura: {e}")
 
-        # Enviar e-mail para o cliente com link de assinatura
+        # Enviar e-mail para o cliente com link de assinatura E anexo
         email_enviado = False
         try:
             documentos_email = [{
@@ -6089,10 +6089,30 @@ async def enviar_documento_assinatura(
 
             logger.info(f"Enviando e-mail com documentos: {documentos_email}")
 
+            # Preparar anexo do documento
+            anexos_email = []
+            if caminho and os.path.exists(caminho):
+                try:
+                    with open(caminho, "rb") as f:
+                        conteudo_base64 = base64.b64encode(f.read()).decode("utf-8")
+
+                    # Determinar nome do arquivo
+                    extensao = os.path.splitext(caminho)[1]
+                    nome_anexo = f"{tipo_documento}{extensao}"
+
+                    anexos_email.append({
+                        "filename": nome_anexo,
+                        "content": conteudo_base64
+                    })
+                    logger.info(f"Anexo preparado: {nome_anexo}")
+                except Exception as e:
+                    logger.error(f"Erro ao preparar anexo: {e}")
+
             email_enviado = await enviar_email_assinatura_digital(
                 destinatario=dados.get('email', ''),
                 nome=dados.get('nome', 'Cliente'),
-                documentos=documentos_email
+                documentos=documentos_email,
+                anexos=anexos_email if anexos_email else None
             )
 
             if email_enviado:

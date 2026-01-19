@@ -200,6 +200,7 @@ async def enviar_email_assinatura_digital(
     destinatario: str,
     nome: str,
     documentos: list,
+    anexos: Optional[List[dict]] = None,
     portal_url: str = "https://portal-cliente-vaucher.onrender.com"
 ) -> bool:
     """
@@ -209,6 +210,7 @@ async def enviar_email_assinatura_digital(
         destinatario: E-mail do cliente
         nome: Nome do cliente
         documentos: Lista de dicts com {tipo, nome, url_assinatura}
+        anexos: Lista de anexos em base64 (opcional)
         portal_url: URL do portal do cliente
 
     Returns:
@@ -217,40 +219,48 @@ async def enviar_email_assinatura_digital(
     assunto = "Documentos para Assinatura Digital - Vaucher e Álvares"
 
     logger.info(f"Gerando e-mail de assinatura para {destinatario} com documentos: {documentos}")
+    logger.info(f"Anexos: {len(anexos) if anexos else 0}")
 
-    # Gerar HTML dos botões de assinatura
+    # Gerar HTML dos botões de assinatura - AMBOS ZapSign e Gov.br
     botoes_html = ""
     for doc in documentos:
-        url = doc.get("url_assinatura")
+        url_zapsign = doc.get("url_assinatura")
         nome_doc = doc.get('nome', 'Documento')
-        logger.info(f"Processando documento: {nome_doc}, URL: {url}")
+        logger.info(f"Processando documento: {nome_doc}, URL ZapSign: {url_zapsign}")
 
-        if url:
+        botoes_html += f"""
+        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #8B1538;">
+            <p style="font-weight: bold; color: #333; margin: 0 0 15px 0; font-size: 16px;">
+                {nome_doc}
+            </p>
+            <p style="color: #666; margin: 0 0 15px 0; font-size: 14px;">
+                Escolha uma das opcoes abaixo para assinar:
+            </p>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        """
+
+        # Botão ZapSign (se tiver URL)
+        if url_zapsign:
             botoes_html += f"""
-            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #8B1538;">
-                <p style="font-weight: bold; color: #333; margin: 0 0 15px 0; font-size: 16px;">
-                    {nome_doc}
-                </p>
-                <a href="{url}"
+                <a href="{url_zapsign}"
                    style="display: inline-block; background-color: #8B1538; color: white;
-                          padding: 12px 30px; text-decoration: none; border-radius: 5px;
+                          padding: 12px 25px; text-decoration: none; border-radius: 5px;
+                          font-weight: bold; font-size: 14px; margin-right: 10px;">
+                    ASSINAR via ZapSign
+                </a>
+            """
+
+        # Botão Gov.br (sempre)
+        botoes_html += f"""
+                <a href="https://sso.acesso.gov.br/login?client_id=assinador.iti.br"
+                   style="display: inline-block; background-color: #1351B4; color: white;
+                          padding: 12px 25px; text-decoration: none; border-radius: 5px;
                           font-weight: bold; font-size: 14px;">
-                    ASSINAR DOCUMENTO (ZapSign)
+                    ASSINAR via Gov.br
                 </a>
             </div>
-            """
-        else:
-            # Se não tem URL do ZapSign, mostrar opção do portal
-            botoes_html += f"""
-            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #8B1538;">
-                <p style="font-weight: bold; color: #333; margin: 0 0 15px 0; font-size: 16px;">
-                    {nome_doc}
-                </p>
-                <p style="color: #666; margin: 0 0 15px 0;">
-                    Acesse o Portal do Cliente para assinar este documento.
-                </p>
-            </div>
-            """
+        </div>
+        """
 
     corpo_html = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -264,14 +274,18 @@ async def enviar_email_assinatura_digital(
 
             <p style="font-size: 16px; color: #333; line-height: 1.6;">
                 Seus documentos estao prontos para assinatura digital.
-                Clique nos botoes abaixo para assinar cada documento de forma rapida e segura.
+                Voce pode assinar de duas formas: via <strong>ZapSign</strong> (mais rapido) ou via <strong>Gov.br</strong> (gratuito, requer conta nivel Prata ou Ouro).
+            </p>
+
+            <p style="font-size: 14px; color: #666; margin-bottom: 20px;">
+                <strong>Os documentos tambem estao anexados neste e-mail.</strong>
             </p>
 
             {botoes_html}
 
             <div style="background-color: #e3f2fd; padding: 15px; border-radius: 8px; margin: 25px 0;">
                 <p style="margin: 0; color: #1565c0; font-size: 14px;">
-                    <strong>Dica:</strong> Voce tambem pode acessar seus documentos pelo Portal do Cliente:
+                    <strong>Portal do Cliente:</strong> Voce tambem pode acessar seus documentos pelo portal:
                 </p>
                 <p style="margin: 10px 0 0 0; text-align: center;">
                     <a href="{portal_url}"
@@ -285,10 +299,8 @@ async def enviar_email_assinatura_digital(
 
             <div style="background-color: #fff3e0; padding: 15px; border-radius: 8px; margin: 25px 0;">
                 <p style="margin: 0; color: #e65100; font-size: 14px;">
-                    <strong>Alternativa gratuita:</strong> Voce tambem pode assinar via
-                    <a href="https://sso.acesso.gov.br/login?client_id=assinador.iti.br" style="color: #1565c0;">Gov.br</a>
-                    (requer conta nivel Prata ou Ouro). Neste caso, baixe o documento,
-                    assine pelo Gov.br e envie de volta pelo Portal.
+                    <strong>Instrucoes Gov.br:</strong> Se optar pelo Gov.br, baixe o documento anexo,
+                    acesse o assinador Gov.br, faca upload do documento, assine e envie de volta pelo Portal do Cliente.
                 </p>
             </div>
 
@@ -310,4 +322,4 @@ async def enviar_email_assinatura_digital(
     </div>
     """
 
-    return await enviar_email_resend(destinatario, assunto, corpo_html)
+    return await enviar_email_resend(destinatario, assunto, corpo_html, anexos)
