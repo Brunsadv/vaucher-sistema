@@ -78,6 +78,9 @@ def init_db():
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cadastros' AND column_name='documentos_finais') THEN
                     ALTER TABLE cadastros ADD COLUMN documentos_finais JSONB DEFAULT '{}';
                 END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cadastros' AND column_name='atualizado_em') THEN
+                    ALTER TABLE cadastros ADD COLUMN atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
+                END IF;
             END $$;
         """)
 
