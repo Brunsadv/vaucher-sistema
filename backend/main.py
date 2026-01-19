@@ -112,6 +112,9 @@ from modules.documents import (
     gerar_peticao_auxilio_moradia,
 )
 
+# Funções de e-mail (migrado em 19/01/2026)
+from modules.email import enviar_email_resend
+
 # Configurar logging detalhado (MIGRADO PARA modules/config.py)
 # logging.basicConfig(level=logging.INFO)
 # logger = logging.getLogger(__name__)
@@ -342,52 +345,8 @@ def startup():
 # A classe GeradorDocumentos, a instância gerador e a função
 # gerar_peticao_auxilio_moradia foram movidas para modules/documents.py
 
-# ============================================
-# ENVIO DE E-MAIL COM RESEND
-# ============================================
+# A função enviar_email_resend foi movida para modules/email.py
 
-async def enviar_email_resend(destinatario: str, assunto: str, corpo_html: str, anexos: List[dict] = None) -> bool:
-    """Envia e-mail usando a API do Resend."""
-    if not RESEND_API_KEY:
-        logger.error("RESEND_API_KEY não configurada!")
-        return False
-    
-    logger.info(f"Enviando e-mail via Resend para {destinatario}")
-    
-    payload = {
-        "from": f"Vaucher e Álvares <{FROM_EMAIL}>",
-        "to": [destinatario],
-        "subject": assunto,
-        "html": corpo_html
-    }
-    
-    if anexos:
-        payload["attachments"] = anexos
-    
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://api.resend.com/emails",
-                headers={
-                    "Authorization": f"Bearer {RESEND_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json=payload,
-                timeout=30.0
-            )
-            
-            logger.info(f"Resend response status: {response.status_code}")
-            logger.info(f"Resend response body: {response.text}")
-            
-            if response.status_code == 200:
-                logger.info(f"E-mail enviado com sucesso para {destinatario}")
-                return True
-            else:
-                logger.error(f"Erro do Resend: {response.text}")
-                return False
-    except Exception as e:
-        logger.error(f"Erro ao enviar e-mail: {e}")
-        return False
 # ============================================
 # FUNÇÕES DO BANCO - DEMANDAS ESPECÍFICAS
 # ============================================
