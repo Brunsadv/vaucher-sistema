@@ -6044,6 +6044,12 @@ async def enviar_documento_assinatura(
     if resultado.get("success"):
         url_assinatura = resultado.get("signatarios", [{}])[0].get("url_assinatura")
 
+        logger.info(f"ZapSign resultado: {resultado}")
+        logger.info(f"URL de assinatura obtida: {url_assinatura}")
+
+        if not url_assinatura:
+            logger.warning("URL de assinatura não retornada pelo ZapSign!")
+
         # Salvar token do documento no cadastro
         conn = get_db()
         if conn:
@@ -6073,12 +6079,15 @@ async def enviar_documento_assinatura(
                 logger.error(f"Erro ao salvar assinatura: {e}")
 
         # Enviar e-mail para o cliente com link de assinatura
+        email_enviado = False
         try:
             documentos_email = [{
                 "tipo": tipo_documento,
                 "nome": nome_doc,
                 "url_assinatura": url_assinatura
             }]
+
+            logger.info(f"Enviando e-mail com documentos: {documentos_email}")
 
             email_enviado = await enviar_email_assinatura_digital(
                 destinatario=dados.get('email', ''),
@@ -6470,15 +6479,23 @@ async def cliente_minhas_assinaturas(cliente: dict = Depends(verificar_token_cli
     assinaturas = cadastro.get('assinaturas_digitais', {})
     govbr = gerar_link_govbr()
 
+    logger.info(f"Buscando assinaturas para cadastro {cadastro_id}: {assinaturas}")
+
     # Lista de assinaturas pendentes para o frontend
     lista_assinaturas = []
     for tipo, info in assinaturas.items():
-        if info.get("status") == "pending" and info.get("url_assinatura"):
-            lista_assinaturas.append({
-                "tipo": tipo,
-                "url": info.get("url_assinatura"),
-                "status": info.get("status")
-            })
+        # Incluir assinaturas pendentes que tenham URL
+        if isinstance(info, dict) and info.get("status") == "pending":
+            url = info.get("url_assinatura")
+            if url:
+                lista_assinaturas.append({
+                    "tipo": tipo,
+                    "url": url,
+                    "status": info.get("status")
+                })
+                logger.info(f"Assinatura pendente encontrada: {tipo} - {url}")
+
+    logger.info(f"Total de assinaturas pendentes: {len(lista_assinaturas)}")
 
     return {
         "success": True,

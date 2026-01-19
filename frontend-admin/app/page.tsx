@@ -2631,12 +2631,23 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       const data = await response.json()
 
       if (data.success) {
-        setMensagemSucesso(`Documento enviado para assinatura! Link enviado para o cliente.`)
+        setMensagemSucesso(`Documento enviado para assinatura! Link enviado para o cliente por e-mail.`)
         setTimeout(() => setMensagemSucesso(''), 5000)
-        // Atualizar status
-        await handleVerificarStatusAssinatura(id, tipoDocumento)
+
+        // Recarregar cadastro completo para atualizar todos os estados
+        const cadastroResponse = await fetch(`${API_URL}/api/cadastros/${id}`, {
+          headers: { 'Authorization': `Bearer ${user.token}` }
+        })
+        if (cadastroResponse.ok) {
+          const cadastroData = await cadastroResponse.json()
+          setSelectedCadastro(cadastroData)
+          setCadastros(prev => prev.map(c => c.id === id ? cadastroData : c))
+        }
+
+        // Também atualizar documentos finais
+        await carregarDocumentosFinais(id)
       } else {
-        setMensagemErro(data.error || 'Erro ao enviar para assinatura')
+        setMensagemErro(data.detail || data.error || 'Erro ao enviar para assinatura')
         setTimeout(() => setMensagemErro(''), 5000)
       }
     } catch (err) {
@@ -2715,9 +2726,21 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       const data = await response.json()
 
       if (data.success) {
-        setMensagemSucesso(`${tipo === 'contrato' ? 'Contrato' : 'Procuração'} final enviado com sucesso!`)
+        setMensagemSucesso(`${tipo === 'contrato' ? 'Contrato' : 'Procuração'} final enviado com sucesso! Agora você pode enviar para assinatura.`)
         setTimeout(() => setMensagemSucesso(''), 5000)
+
+        // Recarregar documentos finais
         await carregarDocumentosFinais(id)
+
+        // Recarregar cadastro completo para atualizar a UI
+        const cadastroResponse = await fetch(`${API_URL}/api/cadastros/${id}`, {
+          headers: { 'Authorization': `Bearer ${user.token}` }
+        })
+        if (cadastroResponse.ok) {
+          const cadastroData = await cadastroResponse.json()
+          setSelectedCadastro(cadastroData)
+          setCadastros(prev => prev.map(c => c.id === id ? cadastroData : c))
+        }
       } else {
         setMensagemErro(data.detail || 'Erro ao enviar documento')
         setTimeout(() => setMensagemErro(''), 5000)

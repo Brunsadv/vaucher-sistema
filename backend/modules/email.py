@@ -216,21 +216,39 @@ async def enviar_email_assinatura_digital(
     """
     assunto = "Documentos para Assinatura Digital - Vaucher e Álvares"
 
+    logger.info(f"Gerando e-mail de assinatura para {destinatario} com documentos: {documentos}")
+
     # Gerar HTML dos botões de assinatura
     botoes_html = ""
     for doc in documentos:
-        if doc.get("url_assinatura"):
+        url = doc.get("url_assinatura")
+        nome_doc = doc.get('nome', 'Documento')
+        logger.info(f"Processando documento: {nome_doc}, URL: {url}")
+
+        if url:
             botoes_html += f"""
             <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #8B1538;">
                 <p style="font-weight: bold; color: #333; margin: 0 0 15px 0; font-size: 16px;">
-                    {doc.get('nome', 'Documento')}
+                    {nome_doc}
                 </p>
-                <a href="{doc['url_assinatura']}"
+                <a href="{url}"
                    style="display: inline-block; background-color: #8B1538; color: white;
                           padding: 12px 30px; text-decoration: none; border-radius: 5px;
                           font-weight: bold; font-size: 14px;">
-                    ASSINAR DOCUMENTO
+                    ASSINAR DOCUMENTO (ZapSign)
                 </a>
+            </div>
+            """
+        else:
+            # Se não tem URL do ZapSign, mostrar opção do portal
+            botoes_html += f"""
+            <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #8B1538;">
+                <p style="font-weight: bold; color: #333; margin: 0 0 15px 0; font-size: 16px;">
+                    {nome_doc}
+                </p>
+                <p style="color: #666; margin: 0 0 15px 0;">
+                    Acesse o Portal do Cliente para assinar este documento.
+                </p>
             </div>
             """
 
