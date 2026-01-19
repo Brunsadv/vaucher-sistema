@@ -6025,6 +6025,17 @@ async def enviar_documento_assinatura(
     else:
         raise HTTPException(status_code=400, detail="Tipo de documento não suportado")
 
+    # Verificar se o arquivo existe
+    logger.info(f"=== ENVIO PARA ZAPSIGN ===")
+    logger.info(f"Tipo documento: {tipo_documento}")
+    logger.info(f"Caminho arquivo: {caminho}")
+    logger.info(f"Arquivo existe: {os.path.exists(caminho) if caminho else 'N/A'}")
+    if caminho and os.path.exists(caminho):
+        file_size = os.path.getsize(caminho)
+        logger.info(f"Tamanho arquivo: {file_size} bytes")
+    else:
+        logger.error(f"ARQUIVO NÃO ENCONTRADO: {caminho}")
+
     # Preparar signatário (cliente)
     signatarios = [{
         "nome": dados.get('nome', ''),
@@ -6032,6 +6043,8 @@ async def enviar_documento_assinatura(
         "telefone": dados.get('telefone', ''),
         "auth_mode": "assinaturaTela"
     }]
+
+    logger.info(f"Signatário: {dados.get('nome')} - {dados.get('email')}")
 
     # Enviar para ZapSign
     resultado = await criar_documento_zapsign(
@@ -6041,96 +6054,101 @@ async def enviar_documento_assinatura(
         enviar_email_automatico=True
     )
 
-    if resultado.get("success"):
-        url_assinatura = resultado.get("signatarios", [{}])[0].get("url_assinatura")
+    if not resultado.get("success"):
+        error_msg = resultado.get("error", "Erro desconhecido ao enviar para ZapSign")
+        logger.error(f"FALHA ao enviar para ZapSign: {error_msg}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao enviar para ZapSign: {error_msg}"
+        )
 
-        logger.info(f"ZapSign resultado: {resultado}")
-        logger.info(f"URL de assinatura obtida: {url_assinatura}")
+    url_assinatura = resultado.get("signatarios", [{}])[0].get("url_assinatura")
 
-        if not url_assinatura:
-            logger.warning("URL de assinatura não retornada pelo ZapSign!")
+    logger.info(f"ZapSign resultado: {resultado}")
+    logger.info(f"URL de assinatura obtida: {url_assinatura}")
 
-        # Salvar token do documento no cadastro
-        conn = get_db()
-        if conn:
-            try:
-                cur = conn.cursor()
+    if not url_assinatura:
+        logger.warning("URL de assinatura não retornada pelo ZapSign!")
 
-                # Buscar assinaturas existentes ou criar novo dict
-                assinaturas = cadastro.get('assinaturas_digitais', {})
-                assinaturas[tipo_documento] = {
-                    "token": resultado.get("documento_token"),
-                    "status": "pending",
-                    "url_assinatura": url_assinatura,
-                    "enviado_em": datetime.now().isoformat(),
-                    "plataforma": "zapsign"
-                }
-
-                cur.execute("""
-                    UPDATE cadastros
-                    SET assinaturas_digitais = %s,
-                        atualizado_em = CURRENT_TIMESTAMP
-                    WHERE id = %s
-                """, (json.dumps(assinaturas), cadastro_id))
-                conn.commit()
-                cur.close()
-                conn.close()
-            except Exception as e:
-                logger.error(f"Erro ao salvar assinatura: {e}")
-
-        # Enviar e-mail para o cliente com link de assinatura E anexo
-        email_enviado = False
+    # Salvar token do documento no cadastro
+    conn = get_db()
+    if conn:
         try:
-            documentos_email = [{
-                "tipo": tipo_documento,
-                "nome": nome_doc,
-                "url_assinatura": url_assinatura
-            }]
+            cur = conn.cursor()
 
-            logger.info(f"Enviando e-mail com documentos: {documentos_email}")
+            # Buscar assinaturas existentes ou criar novo dict
+            assinaturas = cadastro.get('assinaturas_digitais', {})
+            assinaturas[tipo_documento] = {
+                "token": resultado.get("documento_token"),
+                "status": "pending",
+                "url_assinatura": url_assinatura,
+                "enviado_em": datetime.now().isoformat(),
+                "plataforma": "zapsign"
+            }
 
-            # Preparar anexo do documento
-            anexos_email = []
-            if caminho and os.path.exists(caminho):
-                try:
-                    with open(caminho, "rb") as f:
-                        conteudo_base64 = base64.b64encode(f.read()).decode("utf-8")
-
-                    # Determinar nome do arquivo
-                    extensao = os.path.splitext(caminho)[1]
-                    nome_anexo = f"{tipo_documento}{extensao}"
-
-                    anexos_email.append({
-                        "filename": nome_anexo,
-                        "content": conteudo_base64
-                    })
-                    logger.info(f"Anexo preparado: {nome_anexo}")
-                except Exception as e:
-                    logger.error(f"Erro ao preparar anexo: {e}")
-
-            email_enviado = await enviar_email_assinatura_digital(
-                destinatario=dados.get('email', ''),
-                nome=dados.get('nome', 'Cliente'),
-                documentos=documentos_email,
-                anexos=anexos_email if anexos_email else None
-            )
-
-            if email_enviado:
-                logger.info(f"E-mail de assinatura enviado para {dados.get('email')}")
-            else:
-                logger.warning(f"Falha ao enviar e-mail de assinatura para {dados.get('email')}")
+            cur.execute("""
+                UPDATE cadastros
+                SET assinaturas_digitais = %s,
+                    atualizado_em = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (json.dumps(assinaturas), cadastro_id))
+            conn.commit()
+            cur.close()
+            conn.close()
         except Exception as e:
-            logger.error(f"Erro ao enviar e-mail de assinatura: {e}")
+            logger.error(f"Erro ao salvar assinatura: {e}")
 
-        return {
-            "success": True,
-            "message": "Documento enviado para assinatura e e-mail enviado ao cliente",
-            "url_assinatura": url_assinatura,
-            "documento_token": resultado.get("documento_token"),
-            "email_enviado": True
-        }
-    else:
-        raise HTTPException(status_code=500, detail=resultado.get("error", "Erro ao enviar documento"))
+    # Enviar e-mail para o cliente com link de assinatura E anexo
+    email_enviado = False
+    try:
+        documentos_email = [{
+            "tipo": tipo_documento,
+            "nome": nome_doc,
+            "url_assinatura": url_assinatura
+        }]
+
+        logger.info(f"Enviando e-mail com documentos: {documentos_email}")
+
+        # Preparar anexo do documento
+        anexos_email = []
+        if caminho and os.path.exists(caminho):
+            try:
+                with open(caminho, "rb") as f:
+                    conteudo_base64 = base64.b64encode(f.read()).decode("utf-8")
+
+                # Determinar nome do arquivo
+                extensao = os.path.splitext(caminho)[1]
+                nome_anexo = f"{tipo_documento}{extensao}"
+
+                anexos_email.append({
+                    "filename": nome_anexo,
+                    "content": conteudo_base64
+                })
+                logger.info(f"Anexo preparado: {nome_anexo}")
+            except Exception as e:
+                logger.error(f"Erro ao preparar anexo: {e}")
+
+        email_enviado = await enviar_email_assinatura_digital(
+            destinatario=dados.get('email', ''),
+            nome=dados.get('nome', 'Cliente'),
+            documentos=documentos_email,
+            anexos=anexos_email if anexos_email else None
+        )
+
+        if email_enviado:
+            logger.info(f"E-mail de assinatura enviado para {dados.get('email')}")
+        else:
+            logger.warning(f"Falha ao enviar e-mail de assinatura para {dados.get('email')}")
+    except Exception as e:
+        logger.error(f"Erro ao enviar e-mail de assinatura: {e}")
+
+    return {
+        "success": True,
+        "message": "Documento enviado para assinatura e e-mail enviado ao cliente",
+        "url_assinatura": url_assinatura,
+        "documento_token": resultado.get("documento_token"),
+        "email_enviado": email_enviado
+    }
 
 
 @app.get("/api/admin/clientes/{cadastro_id}/status-assinatura/{tipo_documento}")

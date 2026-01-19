@@ -28,8 +28,13 @@ GOVBR_VALIDADOR_URL = "https://validar.iti.gov.br/"
 def get_zapsign_url() -> str:
     """Retorna a URL da API ZapSign (sandbox ou produção)."""
     # Se não há token ou é token de sandbox, usa sandbox
-    if not ZAPSIGN_API_TOKEN or ZAPSIGN_API_TOKEN.startswith("sandbox_"):
+    if not ZAPSIGN_API_TOKEN:
+        logger.warning("ZAPSIGN_API_TOKEN não configurado! Usando sandbox.")
         return ZAPSIGN_SANDBOX_URL
+    if ZAPSIGN_API_TOKEN.startswith("sandbox_"):
+        logger.info("Usando ZapSign em modo SANDBOX")
+        return ZAPSIGN_SANDBOX_URL
+    logger.info("Usando ZapSign em modo PRODUÇÃO")
     return ZAPSIGN_API_URL
 
 
@@ -134,10 +139,16 @@ async def criar_documento_zapsign(
         payload["external_id"] = f"vaucher_{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
     # Fazer requisição
+    api_url = get_zapsign_url()
+    logger.info(f"Enviando documento para ZapSign: {api_url}/docs/")
+    logger.info(f"Nome do documento: {nome_documento}")
+    logger.info(f"Signatários: {signatarios}")
+    logger.info(f"Arquivo em base64: {'Sim' if pdf_data else 'Não'} ({len(pdf_data) if pdf_data else 0} chars)")
+
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                f"{get_zapsign_url()}/docs/",
+                f"{api_url}/docs/",
                 headers={
                     "Authorization": f"Bearer {ZAPSIGN_API_TOKEN}",
                     "Content-Type": "application/json"
@@ -147,6 +158,7 @@ async def criar_documento_zapsign(
             )
 
             logger.info(f"ZapSign response status: {response.status_code}")
+            logger.info(f"ZapSign response body: {response.text[:500] if response.text else 'empty'}")
 
             if response.status_code in [200, 201]:
                 data = response.json()
