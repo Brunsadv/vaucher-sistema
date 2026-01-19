@@ -115,6 +115,15 @@ from modules.documents import (
 # Funções de e-mail (migrado em 19/01/2026)
 from modules.email import enviar_email_resend
 
+# Assinatura digital (criado em 19/01/2026)
+from modules.assinatura import (
+    gerar_link_govbr,
+    criar_documento_zapsign,
+    verificar_status_documento,
+    obter_documento_assinado,
+    gerar_html_botoes_assinatura,
+)
+
 # PostgreSQL
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -5808,6 +5817,331 @@ async def download_peticao(cadastro_id: str, tipo_demanda: str, usuario: dict = 
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         filename=os.path.basename(caminho)
     )
+
+# ============================================
+# ASSINATURA DIGITAL - GOV.BR E ZAPSIGN
+# ============================================
+
+@app.get("/api/assinatura/govbr")
+async def obter_link_govbr():
+    """Retorna informações para assinatura via Gov.br."""
+    return gerar_link_govbr()
+
+
+@app.post("/api/admin/clientes/{cadastro_id}/enviar-assinatura/{tipo_documento}")
+async def enviar_documento_assinatura(
+    cadastro_id: str,
+    tipo_documento: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Envia documento para assinatura digital via ZapSign.
+
+    tipo_documento: contrato, procuracao, peticao_auxilio_moradia
+    """
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+
+    dados = cadastro.get('dados', {})
+    arquivos = cadastro.get('arquivos_gerados', {})
+
+    # Determinar qual arquivo enviar
+    if tipo_documento == "contrato":
+        caminho = arquivos.get('contrato')
+        nome_doc = f"Contrato de Honorários - {dados.get('nome', 'Cliente')}"
+    elif tipo_documento == "procuracao":
+        caminho = arquivos.get('procuracao')
+        nome_doc = f"Procuração - {dados.get('nome', 'Cliente')}"
+    elif tipo_documento == "peticao_auxilio_moradia":
+        caminho = arquivos.get('peticao_auxilio_moradia')
+        nome_doc = f"Petição Auxílio Moradia - {dados.get('nome', 'Cliente')}"
+    else:
+        raise HTTPException(status_code=400, detail="Tipo de documento não suportado")
+
+    if not caminho or not os.path.exists(caminho):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Documento '{tipo_documento}' não encontrado. Gere o documento primeiro."
+        )
+
+    # Preparar signatário (cliente)
+    signatarios = [{
+        "nome": dados.get('nome', ''),
+        "email": dados.get('email', ''),
+        "telefone": dados.get('telefone', ''),
+        "auth_mode": "assinaturaTela"
+    }]
+
+    # Enviar para ZapSign
+    resultado = await criar_documento_zapsign(
+        nome_documento=nome_doc,
+        arquivo_path=caminho,
+        signatarios=signatarios,
+        enviar_email_automatico=True
+    )
+
+    if resultado.get("success"):
+        # Salvar token do documento no cadastro
+        conn = get_db()
+        if conn:
+            try:
+                cur = conn.cursor()
+
+                # Buscar assinaturas existentes ou criar novo dict
+                assinaturas = cadastro.get('assinaturas_digitais', {})
+                assinaturas[tipo_documento] = {
+                    "token": resultado.get("documento_token"),
+                    "status": "pending",
+                    "url_assinatura": resultado.get("signatarios", [{}])[0].get("url_assinatura"),
+                    "enviado_em": datetime.now().isoformat(),
+                    "plataforma": "zapsign"
+                }
+
+                cur.execute("""
+                    UPDATE cadastros
+                    SET assinaturas_digitais = %s,
+                        atualizado_em = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (json.dumps(assinaturas), cadastro_id))
+                conn.commit()
+                cur.close()
+                conn.close()
+            except Exception as e:
+                logger.error(f"Erro ao salvar assinatura: {e}")
+
+        return {
+            "success": True,
+            "message": "Documento enviado para assinatura",
+            "url_assinatura": resultado.get("signatarios", [{}])[0].get("url_assinatura"),
+            "documento_token": resultado.get("documento_token")
+        }
+    else:
+        raise HTTPException(status_code=500, detail=resultado.get("error", "Erro ao enviar documento"))
+
+
+@app.get("/api/admin/clientes/{cadastro_id}/status-assinatura/{tipo_documento}")
+async def verificar_status_assinatura(
+    cadastro_id: str,
+    tipo_documento: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Verifica o status de assinatura de um documento."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+
+    assinaturas = cadastro.get('assinaturas_digitais', {})
+    assinatura = assinaturas.get(tipo_documento)
+
+    if not assinatura:
+        return {"status": "nao_enviado", "message": "Documento não foi enviado para assinatura"}
+
+    if assinatura.get("plataforma") == "zapsign":
+        token = assinatura.get("token")
+        if token:
+            resultado = await verificar_status_documento(token)
+            if resultado.get("success"):
+                # Atualizar status no banco se mudou
+                if resultado.get("todos_assinaram") and assinatura.get("status") != "signed":
+                    conn = get_db()
+                    if conn:
+                        try:
+                            cur = conn.cursor()
+                            assinaturas[tipo_documento]["status"] = "signed"
+                            cur.execute("""
+                                UPDATE cadastros
+                                SET assinaturas_digitais = %s
+                                WHERE id = %s
+                            """, (json.dumps(assinaturas), cadastro_id))
+                            conn.commit()
+                            cur.close()
+                            conn.close()
+                        except Exception as e:
+                            logger.error(f"Erro ao atualizar status: {e}")
+
+                return resultado
+
+    return assinatura
+
+
+@app.get("/api/admin/clientes/{cadastro_id}/documento-assinado/{tipo_documento}")
+async def download_documento_assinado(
+    cadastro_id: str,
+    tipo_documento: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Obtém URL do documento assinado."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+
+    assinaturas = cadastro.get('assinaturas_digitais', {})
+    assinatura = assinaturas.get(tipo_documento)
+
+    if not assinatura:
+        raise HTTPException(status_code=404, detail="Documento não foi enviado para assinatura")
+
+    if assinatura.get("plataforma") == "zapsign":
+        token = assinatura.get("token")
+        if token:
+            resultado = await obter_documento_assinado(token)
+            if resultado.get("success"):
+                return resultado
+            else:
+                raise HTTPException(status_code=400, detail=resultado.get("error"))
+
+    raise HTTPException(status_code=400, detail="Não foi possível obter documento assinado")
+
+
+@app.post("/api/admin/clientes/{cadastro_id}/enviar-email-assinatura")
+async def enviar_email_com_assinatura(
+    cadastro_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Envia e-mail com links para assinatura digital (ZapSign + Gov.br)."""
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+
+    dados = cadastro.get('dados', {})
+    email = dados.get('email')
+    nome = dados.get('nome', 'Cliente')
+
+    if not email:
+        raise HTTPException(status_code=400, detail="Cliente não possui e-mail cadastrado")
+
+    assinaturas = cadastro.get('assinaturas_digitais', {})
+
+    # Montar corpo do e-mail
+    corpo_html = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background-color: #8B1538; padding: 20px; text-align: center;">
+            <h1 style="color: white; margin: 0;">Vaucher e Álvares</h1>
+            <p style="color: white; margin: 5px 0;">Sociedade de Advogados</p>
+        </div>
+
+        <div style="padding: 30px; background-color: #f9f9f9;">
+            <h2 style="color: #333;">Olá, {nome}!</h2>
+
+            <p style="color: #555; line-height: 1.6;">
+                Seus documentos estão prontos para assinatura digital.
+                Você pode assinar de duas formas:
+            </p>
+    """
+
+    # Adicionar links de assinatura ZapSign se existirem
+    docs_pendentes = []
+    for tipo, info in assinaturas.items():
+        if info.get("status") == "pending" and info.get("url_assinatura"):
+            nome_doc = tipo.replace("_", " ").title()
+            docs_pendentes.append({
+                "nome": nome_doc,
+                "url": info.get("url_assinatura")
+            })
+
+    if docs_pendentes:
+        corpo_html += """
+            <h3 style="color: #8B1538; margin-top: 30px;">Opção 1: Assinatura Rápida (ZapSign)</h3>
+            <p style="color: #555;">Clique nos links abaixo para assinar cada documento:</p>
+        """
+        for doc in docs_pendentes:
+            corpo_html += f"""
+            <p style="margin: 10px 0;">
+                <a href="{doc['url']}"
+                   style="display: inline-block;
+                          background-color: #8B1538;
+                          color: white;
+                          padding: 12px 25px;
+                          text-decoration: none;
+                          border-radius: 5px;
+                          font-weight: bold;">
+                    Assinar {doc['nome']}
+                </a>
+            </p>
+            """
+
+    # Adicionar opção Gov.br
+    corpo_html += f"""
+            <h3 style="color: #1351B4; margin-top: 30px;">Opção 2: Assinatura via Gov.br</h3>
+            <p style="color: #555;">
+                Se preferir usar sua conta Gov.br (nível Prata ou Ouro):
+            </p>
+            <ol style="color: #555; line-height: 1.8;">
+                <li>Baixe os documentos no Portal do Cliente</li>
+                <li>Acesse o Assinador Gov.br clicando no botão abaixo</li>
+                <li>Faça login com sua conta Gov.br</li>
+                <li>Faça upload e assine cada documento</li>
+                <li>Envie os documentos assinados pelo Portal do Cliente</li>
+            </ol>
+
+            <p style="margin: 20px 0;">
+                <a href="https://sso.acesso.gov.br/login?client_id=assinador.iti.br"
+                   style="display: inline-block;
+                          background-color: #1351B4;
+                          color: white;
+                          padding: 12px 25px;
+                          text-decoration: none;
+                          border-radius: 5px;
+                          font-weight: bold;">
+                    Acessar Assinador Gov.br
+                </a>
+            </p>
+        </div>
+
+        <div style="background-color: #333; padding: 20px; text-align: center;">
+            <p style="color: #999; font-size: 12px; margin: 0;">
+                Vaucher e Álvares Sociedade de Advogados<br>
+                OAB/MT 669 | CNPJ 21.336.697/0001-46<br>
+                Rua Lima, n. 106, Jardim das Américas - Cuiabá/MT
+            </p>
+        </div>
+    </div>
+    """
+
+    # Enviar e-mail
+    sucesso = await enviar_email_resend(
+        destinatario=email,
+        assunto="Documentos para Assinatura Digital - Vaucher e Álvares",
+        corpo_html=corpo_html
+    )
+
+    if sucesso:
+        return {"success": True, "message": f"E-mail enviado para {email}"}
+    else:
+        raise HTTPException(status_code=500, detail="Erro ao enviar e-mail")
+
+
+# Endpoint para cliente obter seus links de assinatura
+@app.get("/api/cliente/minhas-assinaturas")
+async def cliente_minhas_assinaturas(cliente: dict = Depends(verificar_token_cliente)):
+    """Retorna links de assinatura pendentes do cliente."""
+    cadastro_id = cliente.get("cadastro_id")
+    cadastro = buscar_cadastro(cadastro_id)
+
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+
+    assinaturas = cadastro.get('assinaturas_digitais', {})
+    govbr = gerar_link_govbr()
+
+    resultado = {
+        "assinaturas_zapsign": [],
+        "govbr": govbr
+    }
+
+    for tipo, info in assinaturas.items():
+        nome_doc = tipo.replace("_", " ").title()
+        resultado["assinaturas_zapsign"].append({
+            "tipo": tipo,
+            "nome": nome_doc,
+            "status": info.get("status"),
+            "url_assinatura": info.get("url_assinatura") if info.get("status") == "pending" else None,
+            "enviado_em": info.get("enviado_em")
+        })
+
+    return resultado
+
 
 # ============================================
 # INICIALIZAÇÃO

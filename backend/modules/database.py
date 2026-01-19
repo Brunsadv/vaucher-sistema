@@ -72,6 +72,9 @@ def init_db():
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cadastros' AND column_name='data_assinatura') THEN
                     ALTER TABLE cadastros ADD COLUMN data_assinatura TIMESTAMP;
                 END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='cadastros' AND column_name='assinaturas_digitais') THEN
+                    ALTER TABLE cadastros ADD COLUMN assinaturas_digitais JSONB DEFAULT '{}';
+                END IF;
             END $$;
         """)
 
@@ -626,7 +629,8 @@ def buscar_cadastro(cadastro_id: str) -> Optional[dict]:
                 "documentos": row["documentos"] if isinstance(row["documentos"], list) else json.loads(row["documentos"] or "[]"),
                 "arquivos_gerados": row["arquivos_gerados"] if isinstance(row["arquivos_gerados"], dict) else json.loads(row["arquivos_gerados"] or "{}"),
                 "documentos_assinados": row.get("documentos_assinados") if isinstance(row.get("documentos_assinados"), list) else json.loads(row.get("documentos_assinados") or "[]"),
-                "data_assinatura": row.get("data_assinatura").isoformat() if row.get("data_assinatura") else None
+                "data_assinatura": row.get("data_assinatura").isoformat() if row.get("data_assinatura") else None,
+                "assinaturas_digitais": row.get("assinaturas_digitais") if isinstance(row.get("assinaturas_digitais"), dict) else json.loads(row.get("assinaturas_digitais") or "{}")
             }
         return None
     except Exception as e:
