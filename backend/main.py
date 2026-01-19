@@ -6178,6 +6178,167 @@ async def download_documento_assinado(
     raise HTTPException(status_code=400, detail="Não foi possível obter documento assinado")
 
 
+@app.post("/api/admin/clientes/{cadastro_id}/verificar-e-baixar-assinatura/{tipo_documento}")
+async def verificar_e_baixar_assinatura(
+    cadastro_id: str,
+    tipo_documento: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Verifica status da assinatura no ZapSign.
+    Se assinado, baixa o documento e salva localmente.
+    """
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
+
+    assinaturas = cadastro.get('assinaturas_digitais', {})
+    assinatura = assinaturas.get(tipo_documento)
+
+    if not assinatura:
+        return {
+            "success": False,
+            "status": "nao_enviado",
+            "message": "Documento nao foi enviado para assinatura"
+        }
+
+    if assinatura.get("plataforma") != "zapsign":
+        return {
+            "success": False,
+            "status": "erro",
+            "message": "Plataforma nao suportada"
+        }
+
+    token = assinatura.get("token")
+    if not token:
+        return {
+            "success": False,
+            "status": "erro",
+            "message": "Token nao encontrado"
+        }
+
+    # Verificar status no ZapSign
+    resultado = await verificar_status_documento(token)
+
+    if not resultado.get("success"):
+        return {
+            "success": False,
+            "status": "erro",
+            "message": resultado.get("error", "Erro ao verificar status")
+        }
+
+    status_atual = resultado.get("status")
+    todos_assinaram = resultado.get("todos_assinaram", False)
+
+    # Se ainda nao assinado
+    if not todos_assinaram:
+        return {
+            "success": True,
+            "status": "pending",
+            "message": "Documento ainda nao foi assinado",
+            "detalhes": resultado.get("signatarios", [])
+        }
+
+    # Documento foi assinado! Vamos baixar
+    logger.info(f"Documento {tipo_documento} do cadastro {cadastro_id} foi assinado! Baixando...")
+
+    # Obter URL do documento assinado
+    doc_assinado = await obter_documento_assinado(token)
+
+    if not doc_assinado.get("success"):
+        return {
+            "success": False,
+            "status": "signed",
+            "message": "Documento assinado mas erro ao obter URL: " + doc_assinado.get("error", "")
+        }
+
+    url_documento = doc_assinado.get("url_documento_assinado")
+
+    if not url_documento:
+        return {
+            "success": False,
+            "status": "signed",
+            "message": "URL do documento assinado nao disponivel"
+        }
+
+    # Baixar o documento
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url_documento, timeout=60.0)
+
+            if response.status_code != 200:
+                return {
+                    "success": False,
+                    "status": "signed",
+                    "message": f"Erro ao baixar documento: HTTP {response.status_code}"
+                }
+
+            # Criar pasta para documentos assinados
+            pasta_assinados = f"/app/uploads/documentos_assinados/{cadastro_id}"
+            os.makedirs(pasta_assinados, exist_ok=True)
+
+            # Nome do arquivo
+            nome_arquivo = f"{tipo_documento}_assinado.pdf"
+            caminho_completo = f"{pasta_assinados}/{nome_arquivo}"
+
+            # Salvar arquivo
+            with open(caminho_completo, "wb") as f:
+                f.write(response.content)
+
+            logger.info(f"Documento assinado salvo: {caminho_completo}")
+
+            # Atualizar banco de dados
+            conn = get_db()
+            if conn:
+                try:
+                    cur = conn.cursor()
+
+                    # Atualizar assinaturas_digitais
+                    assinaturas[tipo_documento]["status"] = "signed"
+                    assinaturas[tipo_documento]["arquivo_assinado"] = caminho_completo
+                    assinaturas[tipo_documento]["assinado_em"] = datetime.now().isoformat()
+
+                    # Atualizar documentos_assinados (lista)
+                    docs_assinados = cadastro.get("documentos_assinados", [])
+                    if not isinstance(docs_assinados, list):
+                        docs_assinados = []
+                    if nome_arquivo not in docs_assinados:
+                        docs_assinados.append(nome_arquivo)
+
+                    cur.execute("""
+                        UPDATE cadastros
+                        SET assinaturas_digitais = %s,
+                            documentos_assinados = %s,
+                            data_assinatura = CURRENT_TIMESTAMP,
+                            atualizado_em = CURRENT_TIMESTAMP
+                        WHERE id = %s
+                    """, (json.dumps(assinaturas), json.dumps(docs_assinados), cadastro_id))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+
+                    logger.info(f"Banco atualizado para cadastro {cadastro_id}")
+
+                except Exception as e:
+                    logger.error(f"Erro ao atualizar banco: {e}")
+
+            return {
+                "success": True,
+                "status": "signed",
+                "message": "Documento assinado baixado com sucesso!",
+                "arquivo": nome_arquivo,
+                "caminho": caminho_completo
+            }
+
+    except Exception as e:
+        logger.error(f"Erro ao baixar documento assinado: {e}")
+        return {
+            "success": False,
+            "status": "signed",
+            "message": f"Erro ao baixar: {str(e)}"
+        }
+
+
 @app.post("/api/admin/clientes/{cadastro_id}/enviar-email-assinatura")
 async def enviar_email_com_assinatura(
     cadastro_id: str,

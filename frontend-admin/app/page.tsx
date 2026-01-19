@@ -2044,6 +2044,10 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const contratoFinalRef = useRef<HTMLInputElement>(null)
   const procuracaoFinalRef = useRef<HTMLInputElement>(null)
 
+  // Estados de Verificação de Assinatura
+  const [verificandoAssinatura, setVerificandoAssinatura] = useState(false)
+  const [statusAssinaturaDetalhado, setStatusAssinaturaDetalhado] = useState<{contrato?: {status: string, assinado?: boolean}, procuracao?: {status: string, assinado?: boolean}}>({})
+
   // Estados de Atualização Cadastral
   const [atualizacoesPendentes, setAtualizacoesPendentes] = useState<AtualizacaoCadastral[]>([])
   const [showModalSolicitarAtualizacao, setShowModalSolicitarAtualizacao] = useState(false)
@@ -2724,6 +2728,54 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       setTimeout(() => setMensagemErro(''), 5000)
     } finally {
       setUploadandoDocumento(false)
+    }
+  }
+
+  const handleVerificarEBaixarAssinatura = async (id: string, tipo: 'contrato' | 'procuracao') => {
+    setVerificandoAssinatura(true)
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes/${id}/verificar-e-baixar-assinatura/${tipo}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        const assinado = data.status === 'signed'
+        setStatusAssinaturaDetalhado(prev => ({
+          ...prev,
+          [tipo]: { status: data.status, assinado }
+        }))
+
+        if (assinado && data.arquivo) {
+          setMensagemSucesso(`${tipo === 'contrato' ? 'Contrato' : 'Procuração'} assinado(a)! Documento salvo com sucesso.`)
+          setTimeout(() => setMensagemSucesso(''), 5000)
+          // Recarregar cadastro para atualizar lista de arquivos
+          const cadastroResponse = await fetch(`${API_URL}/api/cadastros/${id}`, {
+            headers: { 'Authorization': `Bearer ${user.token}` }
+          })
+          if (cadastroResponse.ok) {
+            const cadastroData = await cadastroResponse.json()
+            setSelectedCadastro(cadastroData)
+            setCadastros(prev => prev.map(c => c.id === id ? cadastroData : c))
+          }
+        } else if (assinado) {
+          setMensagemSucesso(`${tipo === 'contrato' ? 'Contrato' : 'Procuração'} foi assinado(a)!`)
+          setTimeout(() => setMensagemSucesso(''), 5000)
+        } else {
+          setMensagemErro(`Documento ainda não foi assinado. Status: ${data.status}`)
+          setTimeout(() => setMensagemErro(''), 5000)
+        }
+      } else {
+        setMensagemErro(data.message || data.detail || 'Erro ao verificar status da assinatura')
+        setTimeout(() => setMensagemErro(''), 5000)
+      }
+    } catch (err) {
+      console.error('Erro ao verificar assinatura:', err)
+      setMensagemErro('Erro de conexão ao verificar assinatura')
+      setTimeout(() => setMensagemErro(''), 5000)
+    } finally {
+      setVerificandoAssinatura(false)
     }
   }
 
@@ -3465,6 +3517,82 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       <p className="text-xs text-gray-500 mt-3">
                         <strong>Gov.br:</strong> Requer conta nível Prata ou Ouro. O cliente faz upload do documento, assina e envia de volta.
                       </p>
+
+                      {/* Seção de Verificação de Assinatura */}
+                      {(c.assinaturas_digitais?.contrato || c.assinaturas_digitais?.procuracao) && (
+                        <div className="mt-6 pt-6 border-t border-green-200">
+                          <h4 className="font-medium text-gray-700 mb-3 flex items-center gap-2">
+                            <RefreshCw className="w-4 h-4" />
+                            Verificar Status da Assinatura
+                          </h4>
+                          <p className="text-sm text-gray-600 mb-3">
+                            Clique para verificar se o cliente já assinou. Se assinado, o documento será baixado automaticamente.
+                          </p>
+                          <div className="flex flex-wrap gap-3">
+                            {c.assinaturas_digitais?.contrato && (
+                              <button
+                                onClick={() => handleVerificarEBaixarAssinatura(c.id, 'contrato')}
+                                disabled={verificandoAssinatura}
+                                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                              >
+                                {verificandoAssinatura ? (
+                                  <>
+                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    Verificando...
+                                  </>
+                                ) : (
+                                  <>
+                                    <RefreshCw className="w-4 h-4" />
+                                    Verificar Contrato
+                                  </>
+                                )}
+                              </button>
+                            )}
+                            {c.assinaturas_digitais?.procuracao && (
+                              <button
+                                onClick={() => handleVerificarEBaixarAssinatura(c.id, 'procuracao')}
+                                disabled={verificandoAssinatura}
+                                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-4 py-2 rounded-lg disabled:opacity-50"
+                              >
+                                {verificandoAssinatura ? (
+                                  <>
+                                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                    Verificando...
+                                  </>
+                                ) : (
+                                  <>
+                                    <RefreshCw className="w-4 h-4" />
+                                    Verificar Procuração
+                                  </>
+                                )}
+                              </button>
+                            )}
+                          </div>
+                          {/* Mostrar status se disponível */}
+                          {(statusAssinaturaDetalhado.contrato || statusAssinaturaDetalhado.procuracao) && (
+                            <div className="mt-3 space-y-2">
+                              {statusAssinaturaDetalhado.contrato && (
+                                <p className={`text-sm flex items-center gap-2 ${statusAssinaturaDetalhado.contrato.assinado ? 'text-green-700' : 'text-amber-600'}`}>
+                                  {statusAssinaturaDetalhado.contrato.assinado ? (
+                                    <><CheckCircle className="w-4 h-4" /> Contrato: Assinado</>
+                                  ) : (
+                                    <><Clock className="w-4 h-4" /> Contrato: {statusAssinaturaDetalhado.contrato.status}</>
+                                  )}
+                                </p>
+                              )}
+                              {statusAssinaturaDetalhado.procuracao && (
+                                <p className={`text-sm flex items-center gap-2 ${statusAssinaturaDetalhado.procuracao.assinado ? 'text-green-700' : 'text-amber-600'}`}>
+                                  {statusAssinaturaDetalhado.procuracao.assinado ? (
+                                    <><CheckCircle className="w-4 h-4" /> Procuração: Assinado</>
+                                  ) : (
+                                    <><Clock className="w-4 h-4" /> Procuração: {statusAssinaturaDetalhado.procuracao.status}</>
+                                  )}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
