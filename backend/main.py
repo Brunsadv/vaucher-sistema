@@ -6320,13 +6320,14 @@ async def verificar_e_baixar_assinatura(
                     "message": f"Erro ao baixar documento: HTTP {response.status_code}"
                 }
 
-            # Criar pasta para documentos assinados
-            pasta_assinados = f"/app/uploads/documentos_assinados/{cadastro_id}"
+            # Criar pasta para documentos assinados (mesmo caminho usado no download)
+            pasta_assinados = os.path.join(UPLOADS_DIR, cadastro_id, "assinados")
             os.makedirs(pasta_assinados, exist_ok=True)
 
             # Nome do arquivo
             nome_arquivo = f"{tipo_documento}_assinado.pdf"
-            caminho_completo = f"{pasta_assinados}/{nome_arquivo}"
+            caminho_completo = os.path.join(pasta_assinados, nome_arquivo)
+            logger.info(f"Salvando documento assinado em: {caminho_completo}")
 
             # Salvar arquivo
             with open(caminho_completo, "wb") as f:
