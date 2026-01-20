@@ -3898,9 +3898,15 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                         <FileCheck className="w-5 h-5 text-purple-600" />
                         Documentos Gerados
                       </h3>
-                      <p className="text-sm text-gray-600 mb-4">
+                      <p className="text-sm text-gray-600 mb-2">
                         1. Baixe o documento, 2. Edite (preencha honorários), 3. Faça upload da versão final
                       </p>
+                      <div className="bg-amber-100 border border-amber-300 rounded-lg p-3 mb-4">
+                        <p className="text-amber-800 text-sm flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                          <span><strong>Importante:</strong> O documento final deve estar em formato <strong>PDF</strong> para assinatura via ZapSign.</span>
+                        </p>
+                      </div>
                       <div className="space-y-4">
                         {/* Contrato */}
                         {c.arquivos_gerados.contrato && (
