@@ -82,6 +82,7 @@ ALLOWED_ORIGINS = [
     "https://cadastro.vaucherealvares.com",
     "https://painel.vaucherealvares.com",
     "https://portal.vaucherealvares.com",
+    "https://appcliente.vaucherealvares.com",
     # Vercel
     "https://vaucher-cliente.vercel.app",
     "https://vaucher-admin.vercel.app",
