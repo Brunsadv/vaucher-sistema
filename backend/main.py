@@ -138,25 +138,10 @@ app = FastAPI(
     version="3.0.0"
 )
 
-# CORS - permitir acesso dos frontends
+# CORS - permitir acesso dos frontends (usando ALLOWED_ORIGINS do config.py)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://localhost:3002",
-        "https://cadastro.vaucherealvares.com",
-        "https://painel.vaucherealvares.com",
-        "https://portal.vaucherealvares.com",
-        "https://cadastro.vaucherealvares.com",
-        "https://painel.vaucherealvares.com",
-        "https://portal.vaucherealvares.com",
-        "https://vaucher-cliente.vercel.app",
-        "https://vaucher-admin.vercel.app",
-        "https://vaucher-portal.vercel.app",
-        "https://portal-cliente-five.vercel.app",
-        "https://portal-cliente-git-main-brunsadvs-projects.vercel.app",
-    ],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
