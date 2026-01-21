@@ -88,4 +88,6 @@ ALLOWED_ORIGINS = [
     "https://vaucher-portal.vercel.app",
     "https://portal-cliente-five.vercel.app",
     "https://portal-cliente-git-main-brunsadvs-projects.vercel.app",
+    # Portal Cliente V2 (novo design)
+    "https://portal-cliente-v2-liard.vercel.app",
 ]
