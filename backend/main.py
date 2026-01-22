@@ -7519,6 +7519,35 @@ async def listar_historico_importacoes(admin = Depends(verificar_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/emergencia/limpar-processos-12345")
+async def limpar_processos_emergencia():
+    """TEMPORÁRIO: Endpoint sem autenticação para limpar processos. REMOVER DEPOIS!"""
+    try:
+        conn = get_db()
+        if not conn:
+            return {"erro": "Sem conexão com banco"}
+
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM processos")
+        total_processos = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM processo_andamentos")
+        total_andamentos = cur.fetchone()[0]
+
+        cur.execute("DELETE FROM processo_andamentos")
+        cur.execute("DELETE FROM processos")
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return {
+            "sucesso": True,
+            "processos_deletados": total_processos,
+            "andamentos_deletados": total_andamentos
+        }
+    except Exception as e:
+        return {"erro": str(e)}
+
+
 @app.get("/api/admin/processos/limpar-todos-agora")
 async def limpar_todos_processos_get(admin = Depends(verificar_admin)):
     """Versão GET para limpar todos os processos (mais compatível)."""
