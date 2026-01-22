@@ -4893,15 +4893,29 @@ async def admin_listar_todos_documentos(
             }
             
             # 1. Documentos enviados pelo cliente no cadastro inicial
+            # Os documentos podem ser strings (nome do arquivo) ou objetos com campo "arquivo"
             docs_cadastro = cadastro["documentos"] if isinstance(cadastro["documentos"], list) else json.loads(cadastro["documentos"] or "[]")
             for doc in docs_cadastro:
-                if isinstance(doc, dict) and doc.get("arquivo"):
-                    caminho = os.path.join(UPLOADS_DIR, doc["arquivo"])
+                arquivo = None
+                nome = None
+
+                if isinstance(doc, str):
+                    # Formato: apenas nome do arquivo (string)
+                    arquivo = doc
+                    nome = doc
+                elif isinstance(doc, dict) and doc.get("arquivo"):
+                    # Formato: objeto com campo "arquivo"
+                    arquivo = doc.get("arquivo")
+                    nome = doc.get("nome", arquivo)
+
+                if arquivo:
+                    # Arquivos estão em UPLOADS_DIR/cadastro_id/filename
+                    caminho = os.path.join(UPLOADS_DIR, cadastro_id, arquivo)
                     documentos_cliente["documentos"].append({
-                        "id": f"cadastro_{cadastro_id}_{doc.get('arquivo', '')}",
+                        "id": f"cadastro_{cadastro_id}_{arquivo}",
                         "tipo": "cadastro_inicial",
-                        "nome": doc.get("nome", doc.get("arquivo", "Documento")),
-                        "arquivo": doc.get("arquivo"),
+                        "nome": nome,
+                        "arquivo": arquivo,
                         "caminho": caminho,
                         "existe": os.path.exists(caminho),
                         "tamanho": os.path.getsize(caminho) if os.path.exists(caminho) else 0
@@ -5282,17 +5296,26 @@ async def admin_deletar_documentos_selecionados(
                     # Documentos do cadastro inicial - remover do JSON
                     cadastro_id = partes[1]
                     arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
-                    caminho = os.path.join(UPLOADS_DIR, arquivo)
-                    
+                    # Arquivos do cliente estão em UPLOADS_DIR/cadastro_id/filename
+                    caminho = os.path.join(UPLOADS_DIR, cadastro_id, arquivo)
+
                     # Remover arquivo físico
                     if os.path.exists(caminho):
                         os.remove(caminho)
-                    
+
                     # Atualizar JSON no banco
                     cadastro = buscar_cadastro(cadastro_id)
                     if cadastro:
                         docs = cadastro.get("documentos", [])
-                        docs_atualizados = [d for d in docs if d.get("arquivo") != arquivo]
+                        # Filtrar - docs podem ser strings ou dicts
+                        docs_atualizados = []
+                        for d in docs:
+                            if isinstance(d, str):
+                                if d != arquivo:
+                                    docs_atualizados.append(d)
+                            elif isinstance(d, dict):
+                                if d.get("arquivo") != arquivo:
+                                    docs_atualizados.append(d)
                         cur.execute(
                             "UPDATE cadastros SET documentos = %s WHERE id = %s",
                             (json.dumps(docs_atualizados), cadastro_id)
@@ -5432,7 +5455,8 @@ async def admin_download_documento_backup(
         if tipo == "cadastro":
             cadastro_id = partes[1]
             arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
-            caminho = os.path.join(UPLOADS_DIR, arquivo)
+            # Arquivos do cliente estão em UPLOADS_DIR/cadastro_id/filename
+            caminho = os.path.join(UPLOADS_DIR, cadastro_id, arquivo)
             nome_arquivo = arquivo
 
         elif tipo == "gerado":
