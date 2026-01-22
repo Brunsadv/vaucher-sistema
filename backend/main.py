@@ -7113,15 +7113,20 @@ def normalizar_nome(nome: str) -> str:
     return ' '.join(nome_norm.upper().split())
 
 
-def buscar_cliente_por_nome(nome: str) -> dict:
-    """Busca cliente pelo nome (correspondência exata normalizada)."""
+def buscar_cliente_por_nome_fuzzy(nome: str, threshold: int = 80) -> dict:
+    """
+    Busca cliente usando fuzzy matching com rapidfuzz.
+    threshold: mínimo de similaridade (0-100) para considerar match.
+    """
+    from rapidfuzz import fuzz, process
+
     conn = get_db()
     if not conn:
         return None
 
     try:
         nome_normalizado = normalizar_nome(nome)
-        if not nome_normalizado:
+        if not nome_normalizado or len(nome_normalizado) < 3:
             return None
 
         cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -7133,26 +7138,49 @@ def buscar_cliente_por_nome(nome: str) -> dict:
         cur.close()
         conn.close()
 
-        # Busca por correspondência exata normalizada
-        for row in rows:
-            nome_cliente = normalizar_nome(row.get("nome", ""))
-            if nome_cliente == nome_normalizado:
-                return dict(row)
+        if not rows:
+            return None
 
-        # Busca por correspondência parcial (nome contido)
+        # Criar dicionário de nomes normalizados -> cliente
+        clientes_map = {}
         for row in rows:
             nome_cliente = normalizar_nome(row.get("nome", ""))
-            if nome_normalizado in nome_cliente or nome_cliente in nome_normalizado:
-                return dict(row)
+            if nome_cliente:
+                clientes_map[nome_cliente] = dict(row)
+
+        if not clientes_map:
+            return None
+
+        # Usar rapidfuzz para encontrar melhor match
+        resultado = process.extractOne(
+            nome_normalizado,
+            clientes_map.keys(),
+            scorer=fuzz.token_sort_ratio  # Ignora ordem das palavras
+        )
+
+        if resultado:
+            nome_match, score, _ = resultado
+            logger.info(f"Fuzzy match: '{nome}' -> '{nome_match}' (score: {score})")
+            if score >= threshold:
+                cliente = clientes_map[nome_match]
+                cliente["match_score"] = score
+                return cliente
 
         return None
     except Exception as e:
-        logger.error(f"Erro ao buscar cliente por nome: {e}")
+        logger.error(f"Erro ao buscar cliente por nome (fuzzy): {e}")
         return None
 
 
+def buscar_cliente_por_nome(nome: str) -> dict:
+    """Busca cliente pelo nome usando fuzzy matching."""
+    return buscar_cliente_por_nome_fuzzy(nome, threshold=75)
+
+
 def buscar_clientes_similares(nome: str, limite: int = 5) -> list:
-    """Busca clientes com nomes similares usando distância de similaridade."""
+    """Busca clientes com nomes similares usando rapidfuzz."""
+    from rapidfuzz import fuzz, process
+
     conn = get_db()
     if not conn:
         return []
@@ -7171,29 +7199,36 @@ def buscar_clientes_similares(nome: str, limite: int = 5) -> list:
         cur.close()
         conn.close()
 
-        # Calcular similaridade simples (palavras em comum)
-        palavras_busca = set(nome_normalizado.split())
-        resultados = []
+        if not rows:
+            return []
 
-        for row in rows:
-            nome_cliente = normalizar_nome(row.get("nome", ""))
-            palavras_cliente = set(nome_cliente.split())
+        # Criar lista de (nome_normalizado, cliente_original)
+        clientes = [(normalizar_nome(r.get("nome", "")), dict(r)) for r in rows if r.get("nome")]
 
-            # Conta palavras em comum
-            palavras_comum = palavras_busca & palavras_cliente
-            if palavras_comum:
-                # Score baseado em palavras em comum
-                score = len(palavras_comum) / max(len(palavras_busca), len(palavras_cliente))
-                if score >= 0.3:  # Mínimo 30% de similaridade
-                    resultados.append({
-                        **dict(row),
-                        "score": score,
-                        "palavras_comum": len(palavras_comum)
-                    })
+        if not clientes:
+            return []
 
-        # Ordenar por score e retornar top N
-        resultados.sort(key=lambda x: x["score"], reverse=True)
-        return resultados[:limite]
+        # Usar rapidfuzz para encontrar top matches
+        nomes_normalizados = [c[0] for c in clientes]
+        resultados = process.extract(
+            nome_normalizado,
+            nomes_normalizados,
+            scorer=fuzz.token_sort_ratio,
+            limit=limite
+        )
+
+        # Montar resultado com scores
+        matches = []
+        for nome_match, score, idx in resultados:
+            if score >= 30:  # Mínimo 30% para aparecer como sugestão
+                cliente = clientes[idx][1]
+                matches.append({
+                    **cliente,
+                    "score": score / 100,  # Converter para 0-1
+                    "score_percent": score
+                })
+
+        return matches
     except Exception as e:
         logger.error(f"Erro ao buscar clientes similares: {e}")
         return []
@@ -7532,6 +7567,23 @@ async def debug_clientes():
         cur.close()
         conn.close()
         return {"clientes": [dict(r) for r in rows]}
+    except Exception as e:
+        return {"erro": str(e)}
+
+
+@app.get("/api/debug/testar-match/{nome}")
+async def debug_testar_match(nome: str):
+    """TEMPORÁRIO: Testar matching de nome."""
+    try:
+        nome_normalizado = normalizar_nome(nome)
+        cliente_exato = buscar_cliente_por_nome_fuzzy(nome, threshold=75)
+        similares = buscar_clientes_similares(nome, 5)
+        return {
+            "nome_original": nome,
+            "nome_normalizado": nome_normalizado,
+            "match_encontrado": cliente_exato,
+            "similares": similares
+        }
     except Exception as e:
         return {"erro": str(e)}
 
