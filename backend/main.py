@@ -7250,7 +7250,7 @@ async def preview_importacao_astrea(
                 processo["processo_id_existente"] = processo_existente["id"]
                 processo["cadastro_id_existente"] = processo_existente["cadastro_id"]
 
-            # Tentar vincular cliente pelo CPF ou Nome
+            # Tentar vincular cliente pelo CPF ou Nome (APENAS CORRESPONDÊNCIA EXATA)
             cliente = None
             processo["cliente_encontrado"] = False
 
@@ -7260,20 +7260,12 @@ async def preview_importacao_astrea(
                 if cliente:
                     processo["match_tipo"] = "cpf"
 
-            # 2. Se não encontrou por CPF, tentar por nome
+            # 2. Se não encontrou por CPF, tentar por nome EXATO
             if not cliente and processo.get("cliente_nome"):
                 cliente = buscar_cliente_por_nome(processo["cliente_nome"])
                 if cliente:
                     processo["match_tipo"] = "nome_exato"
-                else:
-                    # 3. Buscar clientes similares
-                    similares = buscar_clientes_similares(processo["cliente_nome"], 3)
-                    if similares:
-                        processo["clientes_similares"] = similares
-                        # Se tiver alta similaridade (>70%), sugerir automaticamente
-                        if similares[0]["score"] >= 0.7:
-                            cliente = similares[0]
-                            processo["match_tipo"] = "nome_similar"
+                # NÃO auto-vincular por similaridade - muito propenso a erros
 
             if cliente:
                 processo["cliente_encontrado"] = True
