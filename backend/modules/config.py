@@ -94,4 +94,5 @@ ALLOWED_ORIGINS = [
     # Admin V2 (novo painel administrativo)
     "https://appadmin.vaucherealvares.com",
     "https://admin-v2-brunsadvs-projects.vercel.app",
+    "https://admin-v2-two.vercel.app",
 ]
