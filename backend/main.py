@@ -5381,6 +5381,97 @@ async def admin_deletar_documentos_selecionados(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/admin/backup/download-documento")
+async def admin_download_documento_backup(
+    doc_id: str,
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Faz download de um documento específico pelo seu ID de backup.
+    """
+    try:
+        partes = doc_id.split("_", 2)
+        if len(partes) < 2:
+            raise HTTPException(status_code=400, detail="ID de documento inválido")
+
+        tipo = partes[0]
+        caminho = None
+        nome_arquivo = None
+
+        if tipo == "cadastro":
+            cadastro_id = partes[1]
+            arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
+            caminho = os.path.join(UPLOADS_DIR, arquivo)
+            nome_arquivo = arquivo
+
+        elif tipo == "gerado":
+            cadastro_id = partes[1]
+            tipo_doc = "_".join(partes[2:]) if len(partes) > 2 else ""
+            cadastro = buscar_cadastro(cadastro_id)
+            if cadastro and cadastro.get("arquivos_gerados"):
+                caminho_rel = cadastro["arquivos_gerados"].get(tipo_doc)
+                if caminho_rel:
+                    caminho = caminho_rel if os.path.isabs(caminho_rel) else os.path.join(BASE_DIR, caminho_rel)
+                    nome_arquivo = os.path.basename(caminho)
+
+        elif tipo == "assinado":
+            cadastro_id = partes[1]
+            arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
+            caminho = os.path.join(UPLOADS_DIR, arquivo)
+            nome_arquivo = arquivo
+
+        elif tipo == "extra":
+            db_id = int(partes[1])
+            conn = get_db()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT arquivo_path, nome_original FROM documentos_extras WHERE id = %s", (db_id,))
+            doc = cur.fetchone()
+            cur.close()
+            conn.close()
+            if doc:
+                caminho = doc["arquivo_path"]
+                nome_arquivo = doc["nome_original"]
+
+        elif tipo == "admin":
+            db_id = int(partes[1])
+            conn = get_db()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT arquivo_path, nome_original FROM documentos_admin WHERE id = %s", (db_id,))
+            doc = cur.fetchone()
+            cur.close()
+            conn.close()
+            if doc:
+                caminho = doc["arquivo_path"]
+                nome_arquivo = doc["nome_original"]
+
+        elif tipo == "comprovante":
+            db_id = int(partes[1])
+            conn = get_db()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT arquivo_path, arquivo_nome FROM comprovantes WHERE id = %s", (db_id,))
+            doc = cur.fetchone()
+            cur.close()
+            conn.close()
+            if doc:
+                caminho = doc["arquivo_path"]
+                nome_arquivo = doc["arquivo_nome"]
+
+        if not caminho or not os.path.exists(caminho):
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+        return FileResponse(
+            path=caminho,
+            filename=nome_arquivo or os.path.basename(caminho),
+            media_type="application/octet-stream"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao baixar documento: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/admin/backup/download-completo")
 async def admin_download_backup_completo(
     usuario: dict = Depends(verificar_admin)
