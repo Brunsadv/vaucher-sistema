@@ -7519,8 +7519,19 @@ async def listar_historico_importacoes(admin = Depends(verificar_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/admin/processos/limpar-todos-agora")
+async def limpar_todos_processos_get(admin = Depends(verificar_admin)):
+    """Versão GET para limpar todos os processos (mais compatível)."""
+    return await limpar_todos_processos_impl(admin)
+
+
 @app.delete("/api/admin/processos/limpar-todos")
 async def limpar_todos_processos(admin = Depends(verificar_admin)):
+    """Versão DELETE para limpar todos os processos."""
+    return await limpar_todos_processos_impl(admin)
+
+
+async def limpar_todos_processos_impl(admin):
     """
     CUIDADO: Deleta TODOS os processos e andamentos do sistema.
     Usar apenas para limpar importações incorretas.
