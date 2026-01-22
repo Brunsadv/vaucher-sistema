@@ -454,6 +454,32 @@ def init_db():
 
         logger.info("Tabela de histórico de importações verificada/criada!")
 
+        # ========== BANNERS E NOTÍCIAS ==========
+
+        # Tabela de banners/notícias para o portal do cliente
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS banners (
+                id SERIAL PRIMARY KEY,
+                tipo VARCHAR(20) NOT NULL DEFAULT 'info',
+                titulo VARCHAR(255) NOT NULL,
+                conteudo TEXT NOT NULL,
+                link_url VARCHAR(500),
+                link_texto VARCHAR(100),
+                ativo BOOLEAN DEFAULT TRUE,
+                data_inicio DATE,
+                data_fim DATE,
+                ordem INTEGER DEFAULT 0,
+                criado_por VARCHAR(255),
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_banners_ativo ON banners(ativo)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_banners_ordem ON banners(ordem)")
+
+        logger.info("Tabela de banners verificada/criada!")
+
         conn.commit()
 
         # Criar usuário admin inicial se não existir
@@ -856,4 +882,139 @@ def marcar_prestacao_assinada(cadastro_id: str) -> bool:
         return True
     except Exception as e:
         logger.error(f"Erro ao marcar prestação assinada: {e}")
+        return False
+
+
+# ============================================
+# FUNÇÕES CRUD - BANNERS/NOTÍCIAS
+# ============================================
+
+def listar_banners(apenas_ativos: bool = False) -> List[dict]:
+    """Lista todos os banners."""
+    conn = get_db()
+    if not conn:
+        return []
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        if apenas_ativos:
+            cur.execute("""
+                SELECT * FROM banners
+                WHERE ativo = TRUE
+                AND (data_inicio IS NULL OR data_inicio <= CURRENT_DATE)
+                AND (data_fim IS NULL OR data_fim >= CURRENT_DATE)
+                ORDER BY ordem ASC, criado_em DESC
+            """)
+        else:
+            cur.execute("SELECT * FROM banners ORDER BY ordem ASC, criado_em DESC")
+        banners = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(b) for b in banners]
+    except Exception as e:
+        logger.error(f"Erro ao listar banners: {e}")
+        return []
+
+
+def buscar_banner(banner_id: int) -> Optional[dict]:
+    """Busca um banner pelo ID."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM banners WHERE id = %s", (banner_id,))
+        banner = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(banner) if banner else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar banner: {e}")
+        return None
+
+
+def criar_banner(dados: dict) -> Optional[int]:
+    """Cria um novo banner."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO banners (tipo, titulo, conteudo, link_url, link_texto, ativo, data_inicio, data_fim, ordem, criado_por)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            dados.get("tipo", "info"),
+            dados.get("titulo"),
+            dados.get("conteudo"),
+            dados.get("link_url"),
+            dados.get("link_texto"),
+            dados.get("ativo", True),
+            dados.get("data_inicio"),
+            dados.get("data_fim"),
+            dados.get("ordem", 0),
+            dados.get("criado_por")
+        ))
+        banner_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return banner_id
+    except Exception as e:
+        logger.error(f"Erro ao criar banner: {e}")
+        return None
+
+
+def atualizar_banner(banner_id: int, dados: dict) -> bool:
+    """Atualiza um banner."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE banners
+            SET tipo = %s, titulo = %s, conteudo = %s, link_url = %s, link_texto = %s,
+                ativo = %s, data_inicio = %s, data_fim = %s, ordem = %s, atualizado_em = CURRENT_TIMESTAMP
+            WHERE id = %s
+        """, (
+            dados.get("tipo", "info"),
+            dados.get("titulo"),
+            dados.get("conteudo"),
+            dados.get("link_url"),
+            dados.get("link_texto"),
+            dados.get("ativo", True),
+            dados.get("data_inicio"),
+            dados.get("data_fim"),
+            dados.get("ordem", 0),
+            banner_id
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao atualizar banner: {e}")
+        return False
+
+
+def deletar_banner(banner_id: int) -> bool:
+    """Deleta um banner."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM banners WHERE id = %s", (banner_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar banner: {e}")
         return False

@@ -81,6 +81,12 @@ from modules.database import (
     buscar_financeiro,
     atualizar_status_prestacao,
     marcar_prestacao_assinada,
+    # Banners/Notícias
+    listar_banners,
+    buscar_banner,
+    criar_banner,
+    atualizar_banner,
+    deletar_banner,
 )
 
 # Modelos Pydantic (migrado em 19/01/2026)
@@ -8151,6 +8157,126 @@ async def listar_clientes_para_importacao(admin = Depends(verificar_admin)):
         return {"clientes": clientes}
     except Exception as e:
         logger.error(f"Erro ao listar clientes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# BANNERS E NOTÍCIAS
+# ============================================
+
+class BannerModel(BaseModel):
+    tipo: str = "info"  # info, warning, alert, success
+    titulo: str
+    conteudo: str
+    link_url: Optional[str] = None
+    link_texto: Optional[str] = None
+    ativo: bool = True
+    data_inicio: Optional[str] = None
+    data_fim: Optional[str] = None
+    ordem: int = 0
+
+
+@app.get("/api/admin/banners")
+async def listar_banners_admin(admin = Depends(verificar_admin)):
+    """Lista todos os banners (admin)."""
+    try:
+        banners = listar_banners(apenas_ativos=False)
+        return {"banners": banners}
+    except Exception as e:
+        logger.error(f"Erro ao listar banners: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/banners/{banner_id}")
+async def obter_banner_admin(banner_id: int, admin = Depends(verificar_admin)):
+    """Obtém um banner específico (admin)."""
+    banner = buscar_banner(banner_id)
+    if not banner:
+        raise HTTPException(status_code=404, detail="Banner não encontrado")
+    return {"banner": banner}
+
+
+@app.post("/api/admin/banners")
+async def criar_banner_endpoint(banner: BannerModel, admin = Depends(verificar_admin)):
+    """Cria um novo banner."""
+    try:
+        dados = banner.dict()
+        dados["criado_por"] = admin.get("nome", "Admin")
+
+        banner_id = criar_banner(dados)
+        if not banner_id:
+            raise HTTPException(status_code=500, detail="Erro ao criar banner")
+
+        logger.info(f"Banner '{banner.titulo}' criado por {admin.get('nome')}")
+        return {"sucesso": True, "id": banner_id, "mensagem": "Banner criado com sucesso"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao criar banner: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/admin/banners/{banner_id}")
+async def atualizar_banner_endpoint(banner_id: int, banner: BannerModel, admin = Depends(verificar_admin)):
+    """Atualiza um banner existente."""
+    try:
+        banner_existente = buscar_banner(banner_id)
+        if not banner_existente:
+            raise HTTPException(status_code=404, detail="Banner não encontrado")
+
+        dados = banner.dict()
+        sucesso = atualizar_banner(banner_id, dados)
+
+        if not sucesso:
+            raise HTTPException(status_code=500, detail="Erro ao atualizar banner")
+
+        logger.info(f"Banner {banner_id} atualizado por {admin.get('nome')}")
+        return {"sucesso": True, "mensagem": "Banner atualizado com sucesso"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao atualizar banner: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/admin/banners/{banner_id}")
+async def deletar_banner_endpoint(banner_id: int, admin = Depends(verificar_admin)):
+    """Deleta um banner."""
+    try:
+        banner_existente = buscar_banner(banner_id)
+        if not banner_existente:
+            raise HTTPException(status_code=404, detail="Banner não encontrado")
+
+        sucesso = deletar_banner(banner_id)
+        if not sucesso:
+            raise HTTPException(status_code=500, detail="Erro ao deletar banner")
+
+        logger.info(f"Banner {banner_id} deletado por {admin.get('nome')}")
+        return {"sucesso": True, "mensagem": "Banner deletado com sucesso"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao deletar banner: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/cliente/banners")
+async def listar_banners_cliente(authorization: str = Header(None)):
+    """Lista banners ativos para o portal do cliente."""
+    # Verificar autenticação do cliente
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Token não fornecido")
+
+    token = authorization.replace("Bearer ", "")
+    cliente = decodificar_token_cliente(token)
+    if not cliente:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+    try:
+        banners = listar_banners(apenas_ativos=True)
+        return {"banners": banners}
+    except Exception as e:
+        logger.error(f"Erro ao listar banners para cliente: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
