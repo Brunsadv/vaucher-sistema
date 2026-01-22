@@ -7189,8 +7189,8 @@ def buscar_cliente_por_nome_fuzzy(nome: str, threshold: int = 80) -> dict:
 
 
 def buscar_cliente_por_nome(nome: str) -> dict:
-    """Busca cliente pelo nome usando fuzzy matching."""
-    return buscar_cliente_por_nome_fuzzy(nome, threshold=75)
+    """Busca cliente pelo nome usando fuzzy matching com threshold alto (quase exato)."""
+    return buscar_cliente_por_nome_fuzzy(nome, threshold=95)
 
 
 def buscar_clientes_similares(nome: str, limite: int = 5) -> list:
@@ -7319,8 +7319,8 @@ async def preview_importacao_astrea(
                     processo["match_tipo"] = "nome_exato"
                     processo["match_score"] = 100
                 else:
-                    # Tentar fuzzy matching com threshold de 75%
-                    cliente = buscar_cliente_por_nome_fuzzy(processo["cliente_nome"], threshold=75)
+                    # Tentar fuzzy matching com threshold de 90% (mais rigoroso)
+                    cliente = buscar_cliente_por_nome_fuzzy(processo["cliente_nome"], threshold=90)
                     if cliente:
                         processo["match_tipo"] = "nome_fuzzy"
                         processo["match_score"] = cliente.get("match_score", 0)
