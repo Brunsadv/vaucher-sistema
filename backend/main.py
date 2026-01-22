@@ -7295,12 +7295,20 @@ async def preview_importacao_astrea(
                 if cliente:
                     processo["match_tipo"] = "cpf"
 
-            # 2. Se não encontrou por CPF, tentar por nome EXATO
+            # 2. Se não encontrou por CPF, tentar por nome com FUZZY MATCHING
             if not cliente and processo.get("cliente_nome"):
+                # Primeiro tenta exato
                 cliente = buscar_cliente_por_nome(processo["cliente_nome"])
                 if cliente:
                     processo["match_tipo"] = "nome_exato"
-                # NÃO auto-vincular por similaridade - muito propenso a erros
+                    processo["match_score"] = 100
+                else:
+                    # Tentar fuzzy matching com threshold de 75%
+                    cliente = buscar_cliente_por_nome_fuzzy(processo["cliente_nome"], threshold=75)
+                    if cliente:
+                        processo["match_tipo"] = "nome_fuzzy"
+                        processo["match_score"] = cliente.get("match_score", 0)
+                        logger.info(f"Fuzzy match: '{processo['cliente_nome']}' -> '{cliente.get('nome')}' (score: {processo['match_score']})")
 
             if cliente:
                 processo["cliente_encontrado"] = True
@@ -7585,6 +7593,67 @@ async def debug_testar_match(nome: str):
             "similares": similares
         }
     except Exception as e:
+        return {"erro": str(e)}
+
+
+@app.post("/api/debug/analisar-excel-clientes")
+async def debug_analisar_excel_clientes(arquivo: UploadFile = File(...)):
+    """
+    DEBUG: Analisa o Excel e mostra todos os nomes únicos de clientes encontrados,
+    junto com os resultados de matching.
+    """
+    try:
+        conteudo = await arquivo.read()
+        resultado = parsear_excel_astrea(conteudo)
+
+        if "erro" in resultado:
+            return {"erro": resultado["erro"]}
+
+        # Coletar todos os nomes únicos de clientes
+        nomes_unicos = set()
+        for processo in resultado.get("processos", []):
+            nome = processo.get("cliente_nome", "")
+            if nome:
+                nomes_unicos.add(nome)
+
+        # Para cada nome, verificar se encontra correspondência
+        analise = []
+        for nome in sorted(nomes_unicos):
+            nome_normalizado = normalizar_nome(nome)
+
+            # Buscar match fuzzy
+            cliente_match = buscar_cliente_por_nome_fuzzy(nome, threshold=75)
+
+            # Buscar similares (mesmo sem threshold)
+            similares = buscar_clientes_similares(nome, 3)
+
+            analise.append({
+                "nome_excel": nome,
+                "nome_normalizado": nome_normalizado,
+                "encontrou_match": cliente_match is not None,
+                "match": {
+                    "id": cliente_match.get("id") if cliente_match else None,
+                    "nome": cliente_match.get("nome") if cliente_match else None,
+                    "score": cliente_match.get("match_score") if cliente_match else None
+                } if cliente_match else None,
+                "similares": similares[:3] if similares else []
+            })
+
+        # Contar matches
+        total_nomes = len(nomes_unicos)
+        total_matches = sum(1 for a in analise if a["encontrou_match"])
+
+        return {
+            "total_processos": len(resultado.get("processos", [])),
+            "total_nomes_unicos": total_nomes,
+            "total_matches": total_matches,
+            "percentual_match": round(total_matches / max(total_nomes, 1) * 100, 1),
+            "headers_excel": resultado.get("headers_encontrados", [])[:15],
+            "coluna_cliente_detectada": "cliente_nome" in resultado.get("colunas_encontradas", []),
+            "analise_detalhada": analise
+        }
+    except Exception as e:
+        logger.error(f"Erro ao analisar Excel: {e}")
         return {"erro": str(e)}
 
 
