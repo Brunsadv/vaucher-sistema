@@ -3683,11 +3683,53 @@ async def admin_enviar_mensagem(
     """Admin envia mensagem para o cliente."""
     if not dados.texto.strip():
         raise HTTPException(status_code=400, detail="Mensagem não pode ser vazia")
-    
+
     msg_id = criar_mensagem(cadastro_id, "escritorio", dados.texto.strip())
     if msg_id:
+        # Enviar notificação por e-mail para o cliente
+        try:
+            cadastro = buscar_cadastro(cadastro_id)
+            if cadastro and cadastro.get("dados"):
+                cliente_dados = cadastro["dados"]
+                email_cliente = cliente_dados.get("email")
+                nome_cliente = cliente_dados.get("nome", "Cliente")
+
+                if email_cliente:
+                    assunto = "Nova mensagem do escritório Vaucher e Álvares"
+                    corpo_html = f"""
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <div style="background: linear-gradient(135deg, #8B0000 0%, #5C0000 100%); padding: 30px; text-align: center;">
+                            <h1 style="color: white; margin: 0; font-size: 24px;">Vaucher e Álvares</h1>
+                            <p style="color: rgba(255,255,255,0.8); margin: 10px 0 0 0;">Sociedade de Advogados</p>
+                        </div>
+                        <div style="padding: 30px; background: #f9f9f9;">
+                            <h2 style="color: #333; margin-top: 0;">Olá, {nome_cliente}!</h2>
+                            <p style="color: #666; font-size: 16px; line-height: 1.6;">
+                                Você recebeu uma nova mensagem do escritório Vaucher e Álvares.
+                            </p>
+                            <div style="background: white; border-left: 4px solid #8B0000; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                                <p style="color: #333; margin: 0; white-space: pre-wrap;">{dados.texto.strip()[:500]}{'...' if len(dados.texto.strip()) > 500 else ''}</p>
+                            </div>
+                            <p style="color: #666; font-size: 14px;">
+                                Para responder ou ver todas as mensagens, acesse o Portal do Cliente:
+                            </p>
+                            <a href="https://portal-cliente-v2-three.vercel.app/portal/mensagens"
+                               style="display: inline-block; background: #8B0000; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 10px;">
+                                Acessar Portal
+                            </a>
+                        </div>
+                        <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">
+                            <p>Este é um e-mail automático. Por favor, não responda diretamente.</p>
+                        </div>
+                    </div>
+                    """
+                    await enviar_email_resend(email_cliente, assunto, corpo_html)
+                    logger.info(f"E-mail de nova mensagem enviado para {email_cliente}")
+        except Exception as e:
+            logger.error(f"Erro ao enviar e-mail de notificação de mensagem: {e}")
+
         return {"success": True, "message_id": msg_id}
-    
+
     raise HTTPException(status_code=500, detail="Erro ao enviar mensagem")
 
 @app.get("/api/admin/mensagens/nao-lidas")
@@ -4113,12 +4155,54 @@ async def admin_upload_documento(
     )
     
     if doc_id:
+        # Enviar notificação por e-mail para o cliente
+        try:
+            if cadastro.get("dados"):
+                cliente_dados = cadastro["dados"]
+                email_cliente = cliente_dados.get("email")
+                nome_cliente = cliente_dados.get("nome", "Cliente")
+
+                if email_cliente:
+                    assunto = "Novo documento disponível - Vaucher e Álvares"
+                    corpo_html = f"""
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <div style="background: linear-gradient(135deg, #8B0000 0%, #5C0000 100%); padding: 30px; text-align: center;">
+                            <h1 style="color: white; margin: 0; font-size: 24px;">Vaucher e Álvares</h1>
+                            <p style="color: rgba(255,255,255,0.8); margin: 10px 0 0 0;">Sociedade de Advogados</p>
+                        </div>
+                        <div style="padding: 30px; background: #f9f9f9;">
+                            <h2 style="color: #333; margin-top: 0;">Olá, {nome_cliente}!</h2>
+                            <p style="color: #666; font-size: 16px; line-height: 1.6;">
+                                Um novo documento foi disponibilizado para você no Portal do Cliente.
+                            </p>
+                            <div style="background: white; border: 1px solid #ddd; padding: 15px; margin: 20px 0; border-radius: 4px;">
+                                <p style="color: #333; margin: 0;"><strong>📄 {arquivo.filename}</strong></p>
+                                {f'<p style="color: #666; margin: 5px 0 0 0; font-size: 14px;">{descricao}</p>' if descricao else ''}
+                            </div>
+                            <p style="color: #666; font-size: 14px;">
+                                Para visualizar e baixar o documento, acesse o Portal do Cliente:
+                            </p>
+                            <a href="https://portal-cliente-v2-three.vercel.app/portal/documentos"
+                               style="display: inline-block; background: #8B0000; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; margin-top: 10px;">
+                                Acessar Portal
+                            </a>
+                        </div>
+                        <div style="padding: 20px; text-align: center; color: #999; font-size: 12px;">
+                            <p>Este é um e-mail automático. Por favor, não responda diretamente.</p>
+                        </div>
+                    </div>
+                    """
+                    await enviar_email_resend(email_cliente, assunto, corpo_html)
+                    logger.info(f"E-mail de novo documento enviado para {email_cliente}")
+        except Exception as e:
+            logger.error(f"Erro ao enviar e-mail de notificação de documento: {e}")
+
         return {
             "success": True,
             "message": "Documento enviado com sucesso",
             "documento_id": doc_id
         }
-    
+
     raise HTTPException(status_code=500, detail="Erro ao salvar documento")
 
 @app.get("/api/admin/clientes/{cadastro_id}/documentos-enviados")
