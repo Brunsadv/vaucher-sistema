@@ -7519,6 +7519,52 @@ async def listar_historico_importacoes(admin = Depends(verificar_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.delete("/api/admin/processos/limpar-todos")
+async def limpar_todos_processos(admin = Depends(verificar_admin)):
+    """
+    CUIDADO: Deleta TODOS os processos e andamentos do sistema.
+    Usar apenas para limpar importações incorretas.
+    """
+    try:
+        conn = get_db()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Erro de conexão")
+
+        cur = conn.cursor()
+
+        # Contar antes de deletar
+        cur.execute("SELECT COUNT(*) FROM processos")
+        total_processos = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM processo_andamentos")
+        total_andamentos = cur.fetchone()[0]
+
+        # Deletar andamentos primeiro (FK constraint)
+        cur.execute("DELETE FROM processo_andamentos")
+
+        # Deletar processos
+        cur.execute("DELETE FROM processos")
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        logger.info(f"Admin {admin.get('nome')} deletou {total_processos} processos e {total_andamentos} andamentos")
+
+        return {
+            "sucesso": True,
+            "processos_deletados": total_processos,
+            "andamentos_deletados": total_andamentos,
+            "mensagem": f"Deletados {total_processos} processos e {total_andamentos} andamentos"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao limpar processos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/admin/clientes-para-importacao")
 async def listar_clientes_para_importacao(admin = Depends(verificar_admin)):
     """Lista clientes para seleção na importação do Astrea."""
