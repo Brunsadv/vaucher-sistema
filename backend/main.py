@@ -79,6 +79,8 @@ from modules.database import (
     atualizar_status,
     salvar_financeiro,
     buscar_financeiro,
+    atualizar_status_prestacao,
+    marcar_prestacao_assinada,
 )
 
 # Modelos Pydantic (migrado em 19/01/2026)
@@ -1207,24 +1209,27 @@ def gerar_documento_prestacao_contas(cadastro_id: str):
     cadastro = buscar_cadastro(cadastro_id)
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
-    
+
     financeiro = buscar_financeiro(cadastro_id)
     if not financeiro:
         raise HTTPException(status_code=400, detail="Dados financeiros não encontrados.")
-    
+
     depositos = financeiro.get("depositos", [])
     if not depositos or len(depositos) == 0:
         raise HTTPException(status_code=400, detail="Adicione pelo menos um depósito.")
-    
+
     try:
         caminho_arquivo = gerador.gerar_prestacao_contas(
             dados_cliente=cadastro["dados"],
             financeiro=financeiro,
             cadastro_id=cadastro_id
         )
-        
+
+        # Atualizar status para 'gerado' e salvar caminho do arquivo
+        atualizar_status_prestacao(cadastro_id, "gerado", caminho_arquivo)
+
         nome_arquivo = os.path.basename(caminho_arquivo)
-        
+
         return FileResponse(
             caminho_arquivo,
             filename=nome_arquivo,
@@ -1233,6 +1238,162 @@ def gerar_documento_prestacao_contas(cadastro_id: str):
     except Exception as e:
         logger.error(f"Erro ao gerar prestação de contas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# ENDPOINTS CRUD - LANÇAMENTOS FINANCEIROS
+# ============================================
+
+class LancamentoItem(BaseModel):
+    data: str = ""
+    valor: float = 0
+    descricao: str = ""
+    origem: Optional[str] = ""
+
+
+@app.post("/api/cadastros/{cadastro_id}/financeiro/depositos")
+def adicionar_deposito(cadastro_id: str, item: LancamentoItem, usuario: dict = Depends(verificar_admin)):
+    """Adiciona um depósito aos dados financeiros."""
+    financeiro = buscar_financeiro(cadastro_id)
+    if not financeiro:
+        financeiro = {
+            "numero_processo": "",
+            "vara_tribunal": "",
+            "percentual_honorarios": 20,
+            "valor_credito_cliente": 0,
+            "depositos": [],
+            "sucumbencias": [],
+            "retencoes": [],
+            "observacoes": ""
+        }
+
+    depositos = financeiro.get("depositos", [])
+    depositos.append({
+        "data": item.data,
+        "valor": item.valor,
+        "descricao": item.descricao,
+        "origem": item.origem or item.descricao
+    })
+    financeiro["depositos"] = depositos
+
+    if salvar_financeiro(cadastro_id, financeiro):
+        return {"success": True, "message": "Depósito adicionado", "depositos": depositos}
+    raise HTTPException(status_code=500, detail="Erro ao salvar depósito")
+
+
+@app.delete("/api/cadastros/{cadastro_id}/financeiro/depositos/{idx}")
+def remover_deposito(cadastro_id: str, idx: int, usuario: dict = Depends(verificar_admin)):
+    """Remove um depósito dos dados financeiros."""
+    financeiro = buscar_financeiro(cadastro_id)
+    if not financeiro:
+        raise HTTPException(status_code=404, detail="Dados financeiros não encontrados")
+
+    depositos = financeiro.get("depositos", [])
+    if idx < 0 or idx >= len(depositos):
+        raise HTTPException(status_code=400, detail="Índice inválido")
+
+    depositos.pop(idx)
+    financeiro["depositos"] = depositos
+
+    if salvar_financeiro(cadastro_id, financeiro):
+        return {"success": True, "message": "Depósito removido", "depositos": depositos}
+    raise HTTPException(status_code=500, detail="Erro ao remover depósito")
+
+
+@app.post("/api/cadastros/{cadastro_id}/financeiro/sucumbencias")
+def adicionar_sucumbencia(cadastro_id: str, item: LancamentoItem, usuario: dict = Depends(verificar_admin)):
+    """Adiciona uma sucumbência aos dados financeiros."""
+    financeiro = buscar_financeiro(cadastro_id)
+    if not financeiro:
+        financeiro = {
+            "numero_processo": "",
+            "vara_tribunal": "",
+            "percentual_honorarios": 20,
+            "valor_credito_cliente": 0,
+            "depositos": [],
+            "sucumbencias": [],
+            "retencoes": [],
+            "observacoes": ""
+        }
+
+    sucumbencias = financeiro.get("sucumbencias", [])
+    sucumbencias.append({
+        "data": item.data,
+        "valor": item.valor,
+        "descricao": item.descricao
+    })
+    financeiro["sucumbencias"] = sucumbencias
+
+    if salvar_financeiro(cadastro_id, financeiro):
+        return {"success": True, "message": "Sucumbência adicionada", "sucumbencias": sucumbencias}
+    raise HTTPException(status_code=500, detail="Erro ao salvar sucumbência")
+
+
+@app.delete("/api/cadastros/{cadastro_id}/financeiro/sucumbencias/{idx}")
+def remover_sucumbencia(cadastro_id: str, idx: int, usuario: dict = Depends(verificar_admin)):
+    """Remove uma sucumbência dos dados financeiros."""
+    financeiro = buscar_financeiro(cadastro_id)
+    if not financeiro:
+        raise HTTPException(status_code=404, detail="Dados financeiros não encontrados")
+
+    sucumbencias = financeiro.get("sucumbencias", [])
+    if idx < 0 or idx >= len(sucumbencias):
+        raise HTTPException(status_code=400, detail="Índice inválido")
+
+    sucumbencias.pop(idx)
+    financeiro["sucumbencias"] = sucumbencias
+
+    if salvar_financeiro(cadastro_id, financeiro):
+        return {"success": True, "message": "Sucumbência removida", "sucumbencias": sucumbencias}
+    raise HTTPException(status_code=500, detail="Erro ao remover sucumbência")
+
+
+@app.post("/api/cadastros/{cadastro_id}/financeiro/retencoes")
+def adicionar_retencao(cadastro_id: str, item: LancamentoItem, usuario: dict = Depends(verificar_admin)):
+    """Adiciona uma retenção aos dados financeiros."""
+    financeiro = buscar_financeiro(cadastro_id)
+    if not financeiro:
+        financeiro = {
+            "numero_processo": "",
+            "vara_tribunal": "",
+            "percentual_honorarios": 20,
+            "valor_credito_cliente": 0,
+            "depositos": [],
+            "sucumbencias": [],
+            "retencoes": [],
+            "observacoes": ""
+        }
+
+    retencoes = financeiro.get("retencoes", [])
+    retencoes.append({
+        "data": item.data,
+        "valor": item.valor,
+        "descricao": item.descricao
+    })
+    financeiro["retencoes"] = retencoes
+
+    if salvar_financeiro(cadastro_id, financeiro):
+        return {"success": True, "message": "Retenção adicionada", "retencoes": retencoes}
+    raise HTTPException(status_code=500, detail="Erro ao salvar retenção")
+
+
+@app.delete("/api/cadastros/{cadastro_id}/financeiro/retencoes/{idx}")
+def remover_retencao(cadastro_id: str, idx: int, usuario: dict = Depends(verificar_admin)):
+    """Remove uma retenção dos dados financeiros."""
+    financeiro = buscar_financeiro(cadastro_id)
+    if not financeiro:
+        raise HTTPException(status_code=404, detail="Dados financeiros não encontrados")
+
+    retencoes = financeiro.get("retencoes", [])
+    if idx < 0 or idx >= len(retencoes):
+        raise HTTPException(status_code=400, detail="Índice inválido")
+
+    retencoes.pop(idx)
+    financeiro["retencoes"] = retencoes
+
+    if salvar_financeiro(cadastro_id, financeiro):
+        return {"success": True, "message": "Retenção removida", "retencoes": retencoes}
+    raise HTTPException(status_code=500, detail="Erro ao remover retenção")
 
 # ÁREA DO CLIENTE - DEVOLUÇÃO DE DOCUMENTOS (EXISTENTE)
 # ============================================
@@ -2955,7 +3116,7 @@ async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_clie
             "outros": "Outros"
         }
         tipo_nome = tipos_nomes.get(doc["tipo_documento"], doc["tipo_documento"])
-        
+
         documentos.append({
             "id": doc['id'],
             "tipo": f"demanda_{doc['id']}",
@@ -2967,10 +3128,51 @@ async def portal_cliente_documentos(cliente: dict = Depends(verificar_token_clie
             "disponivel": True,
             "data": doc.get("criado_em")
         })
-    
+
+    # 4. Documentos do CADASTRO (armazenados no campo JSONB dados.documentos)
+    dados = cadastro.get("dados", {})
+    if isinstance(dados, str):
+        import json
+        try:
+            dados = json.loads(dados)
+        except:
+            dados = {}
+
+    docs_cadastro = dados.get("documentos", [])
+    if docs_cadastro:
+        # Traduzir tipos de documentos do cadastro
+        tipos_cadastro = {
+            "rg_frente": "RG (Frente)",
+            "rg_verso": "RG (Verso)",
+            "cpf": "CPF",
+            "comprovante_residencia": "Comprovante de Residência",
+            "contracheque": "Contracheque",
+            "certidao_casamento": "Certidão de Casamento",
+            "certidao_nascimento": "Certidão de Nascimento",
+            "documento_militar": "Documento Militar",
+            "procuracao": "Procuração",
+            "outros": "Outros Documentos"
+        }
+
+        for idx, doc in enumerate(docs_cadastro):
+            tipo_doc = doc.get("tipo", "documento")
+            nome_amigavel = tipos_cadastro.get(tipo_doc, tipo_doc.replace("_", " ").title())
+
+            documentos.append({
+                "id": f"cadastro_{idx}",
+                "tipo": f"cadastro_{tipo_doc}_{idx}",
+                "nome": doc.get("nome") or nome_amigavel,
+                "descricao": nome_amigavel,
+                "categoria": "Documento do Cadastro",
+                "origem": "enviado",
+                "url": doc.get("url", ""),
+                "disponivel": bool(doc.get("url")),
+                "data": cadastro.get("data")
+            })
+
     # Ordenar por data (mais recente primeiro)
     documentos.sort(key=lambda x: x.get("data") or "", reverse=True)
-    
+
     return {"documentos": documentos}
 
 
@@ -3137,20 +3339,76 @@ async def portal_cliente_download_documento(
             media_type="application/octet-stream"
         )
     
+    # Documento do CADASTRO (armazenado no campo JSONB dados.documentos)
+    if tipo.startswith("cadastro_"):
+        dados = cadastro.get("dados", {})
+        if isinstance(dados, str):
+            import json
+            try:
+                dados = json.loads(dados)
+            except:
+                dados = {}
+
+        docs_cadastro = dados.get("documentos", [])
+
+        # Extrair índice do tipo (cadastro_tipo_idx)
+        partes = tipo.split("_")
+        if len(partes) >= 3:
+            try:
+                idx = int(partes[-1])
+                if 0 <= idx < len(docs_cadastro):
+                    doc = docs_cadastro[idx]
+                    url = doc.get("url", "")
+
+                    if url:
+                        # Se a URL for um arquivo local
+                        if url.startswith("/") or url.startswith("./"):
+                            arquivo_path = url
+                            if url.startswith("/app/"):
+                                arquivo_path = url.replace("/app/", UPLOADS_DIR.replace("uploads", ""))
+                            if os.path.exists(arquivo_path):
+                                nome = doc.get("nome") or os.path.basename(arquivo_path)
+                                return FileResponse(
+                                    arquivo_path,
+                                    filename=nome,
+                                    media_type="application/octet-stream"
+                                )
+                        # Se for URL externa, fazer proxy do download
+                        elif url.startswith("http"):
+                            import httpx
+                            try:
+                                async with httpx.AsyncClient() as client:
+                                    resp = await client.get(url, follow_redirects=True)
+                                    if resp.status_code == 200:
+                                        nome = doc.get("nome") or url.split("/")[-1]
+                                        return StreamingResponse(
+                                            iter([resp.content]),
+                                            media_type="application/octet-stream",
+                                            headers={"Content-Disposition": f'attachment; filename="{nome}"'}
+                                        )
+                            except Exception as e:
+                                logger.error(f"Erro ao baixar documento externo: {e}")
+                                raise HTTPException(status_code=500, detail="Erro ao baixar documento externo")
+
+            except (ValueError, IndexError):
+                pass
+
+        raise HTTPException(status_code=404, detail="Documento do cadastro não encontrado")
+
     # Documento gerado (contrato/procuração) - mantido para compatibilidade
     arquivos_gerados = cadastro.get("arquivos_gerados", {})
     if tipo in ["contrato", "procuracao"]:
         arquivo_path = arquivos_gerados.get(tipo)
         if not arquivo_path or not os.path.exists(arquivo_path):
             raise HTTPException(status_code=404, detail="Documento não encontrado")
-        
+
         nome = "Contrato de Honorários.docx" if tipo == "contrato" else "Procuração.docx"
         return FileResponse(
             arquivo_path,
             filename=nome,
             media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
-    
+
     raise HTTPException(status_code=404, detail="Tipo de documento não reconhecido")
 
 @app.get("/api/cliente/mensagens")
@@ -5825,10 +6083,10 @@ async def upload_documento_final(
     O admin deve baixar o documento gerado, editar (preencher honorários, etc),
     e fazer upload da versão final aqui antes de enviar para assinatura.
 
-    tipo_documento: contrato, procuracao
+    tipo_documento: contrato, procuracao, prestacao_contas
     """
-    if tipo_documento not in ["contrato", "procuracao"]:
-        raise HTTPException(status_code=400, detail="Tipo de documento deve ser 'contrato' ou 'procuracao'")
+    if tipo_documento not in ["contrato", "procuracao", "prestacao_contas"]:
+        raise HTTPException(status_code=400, detail="Tipo de documento deve ser 'contrato', 'procuracao' ou 'prestacao_contas'")
 
     cadastro = buscar_cadastro(cadastro_id)
     if not cadastro:
@@ -6007,6 +6265,18 @@ async def enviar_documento_assinatura(
                 status_code=404,
                 detail="Petição não encontrada. Gere a petição primeiro."
             )
+
+    elif tipo_documento == "prestacao_contas":
+        # Para prestação de contas, OBRIGATÓRIO ter documento final (revisado)
+        if "prestacao_contas" in documentos_finais:
+            caminho = documentos_finais["prestacao_contas"].get("caminho")
+        if not caminho or not os.path.exists(caminho):
+            raise HTTPException(
+                status_code=400,
+                detail="É necessário fazer upload da prestação de contas revisada antes de enviar para assinatura. Gere o documento, revise e faça upload da versão final."
+            )
+        nome_doc = f"Prestação de Contas - {dados.get('nome', 'Cliente')}"
+
     else:
         raise HTTPException(status_code=400, detail="Tipo de documento não suportado")
 
@@ -6526,6 +6796,533 @@ async def cliente_minhas_assinaturas(cliente: dict = Depends(verificar_token_cli
         "assinaturas": lista_assinaturas,
         "govbr": govbr
     }
+
+
+# ============================================
+# IMPORTAÇÃO DO ASTREA
+# ============================================
+
+from openpyxl import load_workbook
+
+def parsear_excel_astrea(arquivo_bytes: bytes) -> dict:
+    """
+    Parseia arquivo Excel do Astrea e retorna dados estruturados.
+    Tenta detectar automaticamente as colunas baseado nos headers.
+    """
+    from io import BytesIO
+
+    try:
+        wb = load_workbook(filename=BytesIO(arquivo_bytes), read_only=True, data_only=True)
+        ws = wb.active
+
+        # Ler todas as linhas
+        rows = list(ws.iter_rows(values_only=True))
+        if len(rows) < 2:
+            return {"erro": "Arquivo vazio ou sem dados"}
+
+        # Primeira linha são os headers
+        headers = [str(h).strip().lower() if h else "" for h in rows[0]]
+
+        # Mapeamento flexível de colunas do Astrea para campos do sistema
+        # IMPORTANTE: Ordem importa - primeiro os mais específicos
+        mapeamento_processos = {
+            "numero_processo": ["número", "numero"],
+            "tipo_acao": ["ação", "acao", "matéria", "materia"],
+            "vara_tribunal": ["vara"],
+            "foro": ["foro", "comarca"],
+            "fase": ["instância atual", "instancia atual"],
+            "reu": ["outros envolvidos"],
+            "valor_causa": ["valor da causa"],
+            "data_distribuicao": ["data de distribuição", "data de distribuicao"],
+            "observacoes": ["observações", "observacoes", "detalhes"],
+            "cliente_nome": ["cliente"],
+            "cliente_cpf": ["cpf"],
+            "titulo": ["título", "titulo"],
+            "pasta": ["pasta"],
+            "objeto": ["objeto"]
+        }
+
+        mapeamento_andamentos = {
+            "data": ["data do último histórico", "data do ultimo historico"],
+            "descricao": ["descrição do último histórico", "descricao do ultimo historico"]
+        }
+
+        def encontrar_coluna(mapeamento_lista, headers):
+            """Encontra o índice da coluna baseado no nome exato ou parcial."""
+            # Primeiro: busca por match exato
+            for idx, header in enumerate(headers):
+                header_limpo = header.lower().strip()
+                for possivel in mapeamento_lista:
+                    if header_limpo == possivel:
+                        return idx
+            # Segundo: busca por match parcial (começa com)
+            for idx, header in enumerate(headers):
+                header_limpo = header.lower().strip()
+                for possivel in mapeamento_lista:
+                    if header_limpo.startswith(possivel) or possivel.startswith(header_limpo):
+                        return idx
+            return None
+
+        # Detectar colunas de processos
+        colunas_processo = {}
+        for campo, variacoes in mapeamento_processos.items():
+            idx = encontrar_coluna(variacoes, headers)
+            if idx is not None:
+                colunas_processo[campo] = idx
+
+        # Detectar colunas de andamentos
+        colunas_andamento = {}
+        for campo, variacoes in mapeamento_andamentos.items():
+            idx = encontrar_coluna(variacoes, headers)
+            if idx is not None:
+                colunas_andamento[campo] = idx
+
+        # Verificar se encontrou coluna essencial (número do processo)
+        if "numero_processo" not in colunas_processo:
+            return {
+                "erro": "Não foi possível identificar a coluna de número do processo",
+                "colunas_detectadas": list(colunas_processo.keys()),
+                "headers_encontrados": headers[:20]  # Primeiros 20 headers
+            }
+
+        # Processar dados
+        processos_dict = {}  # Agrupa por numero_processo
+
+        for row in rows[1:]:
+            if not row or not any(row):
+                continue
+
+            def get_valor(campo, colunas, row):
+                if campo in colunas:
+                    idx = colunas[campo]
+                    if idx < len(row):
+                        val = row[idx]
+                        return str(val).strip() if val else ""
+                return ""
+
+            numero_processo = get_valor("numero_processo", colunas_processo, row)
+            if not numero_processo:
+                continue
+
+            # Se processo não existe no dict, criar
+            if numero_processo not in processos_dict:
+                # Converter valor_causa para decimal
+                valor_causa_str = get_valor("valor_causa", colunas_processo, row)
+                valor_causa = 0
+                if valor_causa_str:
+                    try:
+                        # Remove R$, pontos de milhar, troca vírgula por ponto
+                        valor_limpo = valor_causa_str.replace("R$", "").replace(".", "").replace(",", ".").strip()
+                        valor_causa = float(valor_limpo)
+                    except:
+                        pass
+
+                # Converter data_distribuicao
+                data_dist = get_valor("data_distribuicao", colunas_processo, row)
+                data_distribuicao = None
+                if data_dist:
+                    try:
+                        # Tentar vários formatos de data
+                        from datetime import datetime
+                        for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"]:
+                            try:
+                                data_distribuicao = datetime.strptime(data_dist, fmt).strftime("%Y-%m-%d")
+                                break
+                            except:
+                                continue
+                        # Se é um objeto datetime do Excel
+                        if not data_distribuicao and isinstance(row[colunas_processo.get("data_distribuicao", -1)], datetime):
+                            data_distribuicao = row[colunas_processo["data_distribuicao"]].strftime("%Y-%m-%d")
+                    except:
+                        pass
+
+                    # Combinar Vara + Foro para vara_tribunal
+                vara = get_valor("vara_tribunal", colunas_processo, row)
+                foro = get_valor("foro", colunas_processo, row)
+                vara_tribunal = vara
+                if foro and foro != vara:
+                    vara_tribunal = f"{vara} - {foro}" if vara else foro
+
+                # Extrair réu dos "Outros envolvidos" - pegar quem é Requerido
+                outros_envolvidos = get_valor("reu", colunas_processo, row)
+                reu = ""
+                if outros_envolvidos:
+                    # Tentar extrair nomes com papel de Requerido
+                    partes = outros_envolvidos.split("),")
+                    reus = []
+                    for parte in partes:
+                        parte = parte.strip()
+                        if "(Requerido" in parte or "(Réu" in parte:
+                            # Extrair nome antes do parêntese
+                            nome = parte.split("(")[0].strip()
+                            if nome:
+                                reus.append(nome)
+                    reu = ", ".join(reus) if reus else outros_envolvidos
+
+                # Pegar título se disponível (para observações)
+                titulo = get_valor("titulo", colunas_processo, row)
+                objeto = get_valor("objeto", colunas_processo, row)
+                obs = get_valor("observacoes", colunas_processo, row)
+
+                # Combinar observações
+                obs_partes = []
+                if objeto:
+                    obs_partes.append(f"Objeto: {objeto}")
+                if obs:
+                    obs_partes.append(obs)
+                observacoes_final = " | ".join(obs_partes) if obs_partes else ""
+
+                processos_dict[numero_processo] = {
+                    "numero_processo": numero_processo,
+                    "tipo_acao": get_valor("tipo_acao", colunas_processo, row),
+                    "vara_tribunal": vara_tribunal,
+                    "fase": get_valor("fase", colunas_processo, row) or "Inicial",
+                    "reu": reu,
+                    "valor_causa": valor_causa,
+                    "data_distribuicao": data_distribuicao,
+                    "observacoes": observacoes_final,
+                    "cliente_nome": get_valor("cliente_nome", colunas_processo, row),
+                    "cliente_cpf": get_valor("cliente_cpf", colunas_processo, row),
+                    "titulo": titulo,
+                    "pasta": get_valor("pasta", colunas_processo, row),
+                    "andamentos": []
+                }
+
+            # Adicionar andamento se houver dados
+            data_andamento = get_valor("data", colunas_andamento, row)
+            descricao_andamento = get_valor("descricao", colunas_andamento, row)
+
+            if data_andamento or descricao_andamento:
+                # Converter data do andamento
+                data_and_formatada = None
+                if data_andamento:
+                    try:
+                        from datetime import datetime
+                        for fmt in ["%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d.%m.%Y"]:
+                            try:
+                                data_and_formatada = datetime.strptime(data_andamento, fmt).strftime("%Y-%m-%d")
+                                break
+                            except:
+                                continue
+                        # Se é um objeto datetime do Excel
+                        if not data_and_formatada and "data" in colunas_andamento:
+                            idx = colunas_andamento["data"]
+                            if idx < len(row) and isinstance(row[idx], datetime):
+                                data_and_formatada = row[idx].strftime("%Y-%m-%d")
+                    except:
+                        pass
+
+                andamento = {
+                    "data": data_and_formatada or datetime.now().strftime("%Y-%m-%d"),
+                    "descricao": descricao_andamento or "Sem descrição"
+                }
+
+                # Evitar duplicatas de andamentos
+                existe = any(
+                    a["data"] == andamento["data"] and a["descricao"] == andamento["descricao"]
+                    for a in processos_dict[numero_processo]["andamentos"]
+                )
+                if not existe and descricao_andamento:
+                    processos_dict[numero_processo]["andamentos"].append(andamento)
+
+        processos_lista = list(processos_dict.values())
+        total_andamentos = sum(len(p["andamentos"]) for p in processos_lista)
+
+        wb.close()
+
+        return {
+            "sucesso": True,
+            "processos": processos_lista,
+            "total_processos": len(processos_lista),
+            "total_andamentos": total_andamentos,
+            "colunas_detectadas": {
+                "processos": list(colunas_processo.keys()),
+                "andamentos": list(colunas_andamento.keys())
+            },
+            "headers_encontrados": headers[:30]
+        }
+
+    except Exception as e:
+        logger.error(f"Erro ao parsear Excel: {e}")
+        return {"erro": f"Erro ao processar arquivo: {str(e)}"}
+
+
+def buscar_processo_por_numero(numero_processo: str) -> dict:
+    """Busca um processo pelo número."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM processos WHERE numero_processo = %s", (numero_processo,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if row:
+            return dict(row)
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar processo por número: {e}")
+        return None
+
+
+def buscar_cliente_por_cpf(cpf: str) -> dict:
+    """Busca cliente pelo CPF."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        # Limpar CPF - remover pontos e traços
+        cpf_limpo = cpf.replace(".", "").replace("-", "").replace(" ", "")
+
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, dados->>'nome' as nome, dados->>'cpf' as cpf
+            FROM cadastros
+            WHERE REPLACE(REPLACE(REPLACE(dados->>'cpf', '.', ''), '-', ''), ' ', '') = %s
+        """, (cpf_limpo,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if row:
+            return dict(row)
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar cliente por CPF: {e}")
+        return None
+
+
+def verificar_andamento_existente(processo_id: int, data: str, descricao: str) -> bool:
+    """Verifica se um andamento já existe (para evitar duplicatas)."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        # Verifica por data + início da descrição (para evitar problemas com texto truncado)
+        cur.execute("""
+            SELECT 1 FROM processo_andamentos
+            WHERE processo_id = %s AND data = %s AND descricao ILIKE %s
+            LIMIT 1
+        """, (processo_id, data, descricao[:100] + "%"))
+        existe = cur.fetchone() is not None
+        cur.close()
+        conn.close()
+        return existe
+    except Exception as e:
+        logger.error(f"Erro ao verificar andamento existente: {e}")
+        return False
+
+
+@app.post("/api/admin/importar-astrea/preview")
+async def preview_importacao_astrea(
+    arquivo: UploadFile = File(...),
+    admin = Depends(verificar_admin)
+):
+    """
+    Faz preview dos dados do arquivo Excel antes de importar.
+    Retorna lista de processos e andamentos encontrados.
+    """
+    if not arquivo.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(status_code=400, detail="Arquivo deve ser Excel (.xlsx ou .xls)")
+
+    try:
+        conteudo = await arquivo.read()
+        resultado = parsear_excel_astrea(conteudo)
+
+        if "erro" in resultado:
+            raise HTTPException(status_code=400, detail=resultado["erro"])
+
+        # Enriquecer dados com informações do sistema
+        for processo in resultado["processos"]:
+            # Verificar se processo já existe
+            processo_existente = buscar_processo_por_numero(processo["numero_processo"])
+            processo["existe_no_sistema"] = processo_existente is not None
+            if processo_existente:
+                processo["processo_id_existente"] = processo_existente["id"]
+                processo["cadastro_id_existente"] = processo_existente["cadastro_id"]
+
+            # Tentar vincular cliente pelo CPF
+            if processo.get("cliente_cpf"):
+                cliente = buscar_cliente_por_cpf(processo["cliente_cpf"])
+                if cliente:
+                    processo["cliente_encontrado"] = True
+                    processo["cadastro_id_sugerido"] = cliente["id"]
+                    processo["cliente_nome_sistema"] = cliente["nome"]
+                else:
+                    processo["cliente_encontrado"] = False
+
+            # Contar andamentos novos
+            if processo_existente:
+                novos_andamentos = 0
+                for and_item in processo.get("andamentos", []):
+                    if not verificar_andamento_existente(
+                        processo_existente["id"],
+                        and_item["data"],
+                        and_item["descricao"]
+                    ):
+                        novos_andamentos += 1
+                processo["andamentos_novos"] = novos_andamentos
+            else:
+                processo["andamentos_novos"] = len(processo.get("andamentos", []))
+
+        return resultado
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro no preview de importação: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ImportacaoAstreaRequest(BaseModel):
+    processos: List[dict]
+    cadastro_id_padrao: Optional[str] = None  # Para vincular todos ao mesmo cliente
+    importar_andamentos: bool = True
+    andamentos_visiveis: bool = True
+
+
+@app.post("/api/admin/importar-astrea/confirmar")
+async def confirmar_importacao_astrea(
+    dados: ImportacaoAstreaRequest,
+    admin = Depends(verificar_admin)
+):
+    """
+    Efetua a importação dos processos e andamentos do Astrea.
+    """
+    relatorio = {
+        "processos_criados": 0,
+        "processos_atualizados": 0,
+        "andamentos_criados": 0,
+        "erros": [],
+        "detalhes": []
+    }
+
+    for processo_data in dados.processos:
+        try:
+            numero_processo = processo_data.get("numero_processo")
+            if not numero_processo:
+                relatorio["erros"].append("Processo sem número ignorado")
+                continue
+
+            # Determinar cadastro_id
+            cadastro_id = None
+
+            # 1. Se tem cadastro_id padrão, usar
+            if dados.cadastro_id_padrao:
+                cadastro_id = dados.cadastro_id_padrao
+            # 2. Se processo já existe, manter vínculo existente
+            elif processo_data.get("cadastro_id_existente"):
+                cadastro_id = processo_data["cadastro_id_existente"]
+            # 3. Se encontrou cliente pelo CPF
+            elif processo_data.get("cadastro_id_sugerido"):
+                cadastro_id = processo_data["cadastro_id_sugerido"]
+
+            if not cadastro_id:
+                relatorio["erros"].append(f"Processo {numero_processo}: Cliente não identificado")
+                continue
+
+            # Verificar se processo existe
+            processo_existente = buscar_processo_por_numero(numero_processo)
+
+            processo_dados = {
+                "numero_processo": numero_processo,
+                "tipo_acao": processo_data.get("tipo_acao", ""),
+                "vara_tribunal": processo_data.get("vara_tribunal", ""),
+                "fase": processo_data.get("fase", "Inicial"),
+                "reu": processo_data.get("reu", ""),
+                "valor_causa": processo_data.get("valor_causa", 0),
+                "data_distribuicao": processo_data.get("data_distribuicao"),
+                "observacoes": processo_data.get("observacoes", ""),
+                "status": "ativo"
+            }
+
+            if processo_existente:
+                # Atualizar processo existente
+                processo_id = processo_existente["id"]
+                if atualizar_processo(processo_id, processo_dados):
+                    relatorio["processos_atualizados"] += 1
+                    relatorio["detalhes"].append({
+                        "tipo": "atualizado",
+                        "numero": numero_processo,
+                        "processo_id": processo_id
+                    })
+                else:
+                    relatorio["erros"].append(f"Erro ao atualizar processo {numero_processo}")
+                    continue
+            else:
+                # Criar novo processo
+                processo_id = criar_processo(cadastro_id, processo_dados)
+                if processo_id:
+                    relatorio["processos_criados"] += 1
+                    relatorio["detalhes"].append({
+                        "tipo": "criado",
+                        "numero": numero_processo,
+                        "processo_id": processo_id,
+                        "cadastro_id": cadastro_id
+                    })
+                else:
+                    relatorio["erros"].append(f"Erro ao criar processo {numero_processo}")
+                    continue
+
+            # Importar andamentos
+            if dados.importar_andamentos and processo_data.get("andamentos"):
+                for andamento in processo_data["andamentos"]:
+                    # Verificar se andamento já existe
+                    if verificar_andamento_existente(
+                        processo_id,
+                        andamento["data"],
+                        andamento["descricao"]
+                    ):
+                        continue
+
+                    # Criar andamento
+                    and_id = criar_andamento_processo(
+                        processo_id,
+                        andamento["data"],
+                        andamento["descricao"],
+                        dados.andamentos_visiveis
+                    )
+                    if and_id:
+                        relatorio["andamentos_criados"] += 1
+                    else:
+                        relatorio["erros"].append(
+                            f"Erro ao criar andamento para processo {numero_processo}"
+                        )
+
+        except Exception as e:
+            logger.error(f"Erro ao importar processo: {e}")
+            relatorio["erros"].append(f"Erro inesperado: {str(e)}")
+
+    relatorio["sucesso"] = True
+    relatorio["total_erros"] = len(relatorio["erros"])
+
+    return relatorio
+
+
+@app.get("/api/admin/clientes-para-importacao")
+async def listar_clientes_para_importacao(admin = Depends(verificar_admin)):
+    """Lista clientes para seleção na importação do Astrea."""
+    try:
+        cadastros = carregar_cadastros()
+        clientes = [
+            {
+                "id": c["id"],
+                "nome": c["dados"].get("nome", ""),
+                "cpf": c["dados"].get("cpf", ""),
+                "email": c["dados"].get("email", "")
+            }
+            for c in cadastros
+        ]
+        return {"clientes": clientes}
+    except Exception as e:
+        logger.error(f"Erro ao listar clientes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================

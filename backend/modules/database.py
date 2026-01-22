@@ -132,6 +132,22 @@ def init_db():
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='retencoes') THEN
                     ALTER TABLE financeiro ADD COLUMN retencoes JSONB DEFAULT '[]';
                 END IF;
+                -- Novos campos para prestação de contas (21/01/2026)
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='status') THEN
+                    ALTER TABLE financeiro ADD COLUMN status VARCHAR(20) DEFAULT 'rascunho';
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='arquivo_gerado') THEN
+                    ALTER TABLE financeiro ADD COLUMN arquivo_gerado VARCHAR(500);
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='data_geracao') THEN
+                    ALTER TABLE financeiro ADD COLUMN data_geracao TIMESTAMP;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='data_assinatura') THEN
+                    ALTER TABLE financeiro ADD COLUMN data_assinatura TIMESTAMP;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='financeiro' AND column_name='periodo_prestacao') THEN
+                    ALTER TABLE financeiro ADD COLUMN periodo_prestacao VARCHAR(100);
+                END IF;
             END $$;
         """)
 
@@ -753,9 +769,66 @@ def buscar_financeiro(cadastro_id: str) -> Optional[dict]:
                 "depositos": depositos,
                 "sucumbencias": sucumbencias,
                 "retencoes": retencoes,
-                "observacoes": row["observacoes"] or ""
+                "observacoes": row["observacoes"] or "",
+                # Novos campos de prestação de contas
+                "status": row.get("status") or "rascunho",
+                "arquivo_gerado": row.get("arquivo_gerado") or "",
+                "data_geracao": row["data_geracao"].isoformat() if row.get("data_geracao") else None,
+                "data_assinatura": row["data_assinatura"].isoformat() if row.get("data_assinatura") else None,
+                "periodo_prestacao": row.get("periodo_prestacao") or ""
             }
         return None
     except Exception as e:
         logger.error(f"Erro ao buscar financeiro: {e}")
         return None
+
+
+def atualizar_status_prestacao(cadastro_id: str, status: str, arquivo_gerado: str = None) -> bool:
+    """Atualiza o status e arquivo da prestação de contas."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        if arquivo_gerado:
+            cur.execute("""
+                UPDATE financeiro
+                SET status = %s, arquivo_gerado = %s, data_geracao = CURRENT_TIMESTAMP, atualizado_em = CURRENT_TIMESTAMP
+                WHERE cadastro_id = %s
+            """, (status, arquivo_gerado, cadastro_id))
+        else:
+            cur.execute("""
+                UPDATE financeiro
+                SET status = %s, atualizado_em = CURRENT_TIMESTAMP
+                WHERE cadastro_id = %s
+            """, (status, cadastro_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao atualizar status prestação: {e}")
+        return False
+
+
+def marcar_prestacao_assinada(cadastro_id: str) -> bool:
+    """Marca a prestação de contas como assinada."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE financeiro
+            SET status = 'assinado', data_assinatura = CURRENT_TIMESTAMP, atualizado_em = CURRENT_TIMESTAMP
+            WHERE cadastro_id = %s
+        """, (cadastro_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao marcar prestação assinada: {e}")
+        return False

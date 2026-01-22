@@ -91,4 +91,7 @@ ALLOWED_ORIGINS = [
     "https://portal-cliente-git-main-brunsadvs-projects.vercel.app",
     # Portal Cliente V2 (novo design)
     "https://portal-cliente-v2-liard.vercel.app",
+    # Admin V2 (novo painel administrativo)
+    "https://appadmin.vaucherealvares.com",
+    "https://admin-v2-brunsadvs-projects.vercel.app",
 ]
