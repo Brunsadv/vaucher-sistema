@@ -6826,25 +6826,25 @@ def parsear_excel_astrea(arquivo_bytes: bytes) -> dict:
         # Mapeamento flexível de colunas do Astrea para campos do sistema
         # IMPORTANTE: Ordem importa - primeiro os mais específicos
         mapeamento_processos = {
-            "numero_processo": ["número", "numero"],
-            "tipo_acao": ["ação", "acao", "matéria", "materia"],
-            "vara_tribunal": ["vara"],
-            "foro": ["foro", "comarca"],
-            "fase": ["instância atual", "instancia atual"],
-            "reu": ["outros envolvidos"],
-            "valor_causa": ["valor da causa"],
-            "data_distribuicao": ["data de distribuição", "data de distribuicao"],
-            "observacoes": ["observações", "observacoes", "detalhes"],
+            "numero_processo": ["número", "numero", "nº processo", "n° processo", "processo"],
+            "tipo_acao": ["ação", "acao", "matéria", "materia", "tipo", "classe"],
+            "vara_tribunal": ["vara", "tribunal", "órgão julgador", "orgao julgador"],
+            "foro": ["foro", "comarca", "localidade"],
+            "fase": ["instância atual", "instancia atual", "fase", "situação", "situacao", "status", "fase atual", "instância", "instancia"],
+            "reu": ["outros envolvidos", "réu", "reu", "requerido", "reclamado", "polo passivo", "parte contrária", "parte contraria", "réus", "reus", "partes"],
+            "valor_causa": ["valor da causa", "valor"],
+            "data_distribuicao": ["data de distribuição", "data de distribuicao", "data distribuição", "data distribuicao", "distribuição", "distribuicao"],
+            "observacoes": ["observações", "observacoes", "detalhes", "obs"],
             "cliente_nome": ["cliente", "nome do cliente", "parte", "autor", "requerente", "reclamante", "polo ativo", "partes", "nome"],
             "cliente_cpf": ["cpf", "cpf do cliente", "cpf cliente", "documento"],
-            "titulo": ["título", "titulo"],
-            "pasta": ["pasta"],
-            "objeto": ["objeto"]
+            "titulo": ["título", "titulo", "assunto"],
+            "pasta": ["pasta", "código", "codigo"],
+            "objeto": ["objeto", "pedido"]
         }
 
         mapeamento_andamentos = {
-            "data": ["data do último histórico", "data do ultimo historico"],
-            "descricao": ["descrição do último histórico", "descricao do ultimo historico"]
+            "data": ["data do último histórico", "data do ultimo historico", "data histórico", "data historico", "data andamento", "data", "data do andamento", "data movimentação", "data movimentacao"],
+            "descricao": ["descrição do último histórico", "descricao do ultimo historico", "descrição histórico", "descricao historico", "descrição", "descricao", "histórico", "historico", "andamento", "movimentação", "movimentacao", "último andamento", "ultimo andamento"]
         }
 
         def encontrar_coluna(mapeamento_lista, headers):
@@ -6999,9 +6999,13 @@ def parsear_excel_astrea(arquivo_bytes: bytes) -> dict:
                     "pasta": get_valor("pasta", colunas_processo, row),
                     "andamentos": []
                 }
-                # Log primeiros 5 processos para debug
-                if len(processos_dict) <= 5:
-                    logger.info(f"Processo #{len(processos_dict)}: numero={numero_processo}, cliente_nome='{get_valor('cliente_nome', colunas_processo, row)}'")
+                # Log primeiros 3 processos para debug detalhado
+                if len(processos_dict) <= 3:
+                    logger.info(f"Processo #{len(processos_dict)}: numero={numero_processo}")
+                    logger.info(f"  - cliente_nome='{get_valor('cliente_nome', colunas_processo, row)}'")
+                    logger.info(f"  - fase='{get_valor('fase', colunas_processo, row)}'")
+                    logger.info(f"  - reu='{reu}'")
+                    logger.info(f"  - tipo_acao='{get_valor('tipo_acao', colunas_processo, row)}'")
 
 
             # Adicionar andamento se houver dados
@@ -7049,6 +7053,19 @@ def parsear_excel_astrea(arquivo_bytes: bytes) -> dict:
         # Montar lista de colunas encontradas para exibição
         colunas_encontradas = list(colunas_processo.keys()) + list(colunas_andamento.keys())
 
+        # Criar mapeamento de colunas encontradas com índices para debug
+        colunas_mapeadas = {}
+        for campo, idx in colunas_processo.items():
+            colunas_mapeadas[campo] = {
+                "indice": idx,
+                "header_excel": headers[idx] if idx < len(headers) else "?"
+            }
+        for campo, idx in colunas_andamento.items():
+            colunas_mapeadas[f"andamento_{campo}"] = {
+                "indice": idx,
+                "header_excel": headers[idx] if idx < len(headers) else "?"
+            }
+
         return {
             "sucesso": True,
             "processos": processos_lista,
@@ -7059,6 +7076,7 @@ def parsear_excel_astrea(arquivo_bytes: bytes) -> dict:
                 "processos": list(colunas_processo.keys()),
                 "andamentos": list(colunas_andamento.keys())
             },
+            "colunas_mapeadas": colunas_mapeadas,
             "headers_encontrados": headers[:30],
             "erros": []  # Erros serão adicionados durante o enriquecimento
         }
