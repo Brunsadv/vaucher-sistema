@@ -5563,6 +5563,165 @@ async def admin_download_documento_backup(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class DownloadSelecionadosRequest(BaseModel):
+    documentos_ids: list[str]
+
+
+@app.post("/api/admin/backup/download-selecionados")
+async def admin_download_documentos_selecionados(
+    request: DownloadSelecionadosRequest,
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Faz download de múltiplos documentos selecionados em um arquivo ZIP.
+    """
+    if not request.documentos_ids:
+        raise HTTPException(status_code=400, detail="Nenhum documento selecionado")
+
+    try:
+        # Criar ZIP em memória
+        zip_buffer = BytesIO()
+
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            arquivos_adicionados = 0
+            nomes_usados = {}  # Para evitar nomes duplicados
+
+            for doc_id in request.documentos_ids:
+                try:
+                    partes = doc_id.split("_", 2)
+                    if len(partes) < 2:
+                        continue
+
+                    tipo = partes[0]
+                    caminho = None
+                    nome_arquivo = None
+                    pasta = ""
+
+                    if tipo == "cadastro":
+                        cadastro_id = partes[1]
+                        arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
+                        caminho = os.path.join(UPLOADS_DIR, cadastro_id, arquivo)
+                        nome_arquivo = arquivo
+                        pasta = f"{cadastro_id}/documentos/"
+
+                    elif tipo == "gerado":
+                        cadastro_id = partes[1]
+                        tipo_doc = "_".join(partes[2:]) if len(partes) > 2 else ""
+                        cadastro = buscar_cadastro(cadastro_id)
+                        if cadastro and cadastro.get("arquivos_gerados"):
+                            caminho_rel = cadastro["arquivos_gerados"].get(tipo_doc)
+                            if caminho_rel:
+                                caminho = caminho_rel if os.path.isabs(caminho_rel) else os.path.join(BASE_DIR, caminho_rel)
+                                nome_arquivo = os.path.basename(caminho)
+                                pasta = f"{cadastro_id}/gerados/"
+
+                    elif tipo == "assinado":
+                        cadastro_id = partes[1]
+                        arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
+                        caminho = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", arquivo)
+                        nome_arquivo = arquivo
+                        pasta = f"{cadastro_id}/assinados/"
+
+                    elif tipo == "extra":
+                        db_id = int(partes[1])
+                        conn = get_db()
+                        cur = conn.cursor(cursor_factory=RealDictCursor)
+                        cur.execute("SELECT arquivo_path, nome_original, cadastro_id FROM documentos_extras WHERE id = %s", (db_id,))
+                        doc = cur.fetchone()
+                        cur.close()
+                        conn.close()
+                        if doc:
+                            caminho = doc["arquivo_path"]
+                            nome_arquivo = doc["nome_original"]
+                            pasta = f"{doc['cadastro_id']}/extras/"
+
+                    elif tipo == "admin":
+                        db_id = int(partes[1])
+                        conn = get_db()
+                        cur = conn.cursor(cursor_factory=RealDictCursor)
+                        cur.execute("SELECT arquivo_path, nome_original, cadastro_id FROM documentos_admin WHERE id = %s", (db_id,))
+                        doc = cur.fetchone()
+                        cur.close()
+                        conn.close()
+                        if doc:
+                            caminho = doc["arquivo_path"]
+                            nome_arquivo = doc["nome_original"]
+                            pasta = f"{doc['cadastro_id']}/admin/"
+
+                    elif tipo == "comprovante":
+                        db_id = int(partes[1])
+                        conn = get_db()
+                        cur = conn.cursor(cursor_factory=RealDictCursor)
+                        cur.execute("""
+                            SELECT c.arquivo_path, c.arquivo_nome, ch.cadastro_id
+                            FROM comprovantes c
+                            JOIN parcelas p ON c.parcela_id = p.id
+                            JOIN contratos_honorarios ch ON p.contrato_id = ch.id
+                            WHERE c.id = %s
+                        """, (db_id,))
+                        doc = cur.fetchone()
+                        cur.close()
+                        conn.close()
+                        if doc:
+                            caminho = doc["arquivo_path"]
+                            nome_arquivo = doc["arquivo_nome"]
+                            pasta = f"{doc['cadastro_id']}/comprovantes/"
+
+                    elif tipo == "demanda":
+                        db_id = int(partes[1])
+                        conn = get_db()
+                        cur = conn.cursor(cursor_factory=RealDictCursor)
+                        cur.execute("SELECT arquivo_path, nome_original, cadastro_id FROM documentos_demanda WHERE id = %s", (db_id,))
+                        doc = cur.fetchone()
+                        cur.close()
+                        conn.close()
+                        if doc:
+                            caminho = doc["arquivo_path"]
+                            nome_arquivo = doc["nome_original"]
+                            pasta = f"{doc['cadastro_id']}/demanda/"
+
+                    # Adicionar ao ZIP se arquivo existe
+                    if caminho and os.path.exists(caminho) and nome_arquivo:
+                        # Garantir nome único
+                        nome_no_zip = f"{pasta}{nome_arquivo}"
+                        if nome_no_zip in nomes_usados:
+                            nomes_usados[nome_no_zip] += 1
+                            base, ext = os.path.splitext(nome_arquivo)
+                            nome_arquivo = f"{base}_{nomes_usados[nome_no_zip]}{ext}"
+                            nome_no_zip = f"{pasta}{nome_arquivo}"
+                        else:
+                            nomes_usados[nome_no_zip] = 0
+
+                        zip_file.write(caminho, nome_no_zip)
+                        arquivos_adicionados += 1
+
+                except Exception as e:
+                    logger.error(f"Erro ao processar documento {doc_id}: {e}")
+                    continue
+
+        if arquivos_adicionados == 0:
+            raise HTTPException(status_code=404, detail="Nenhum arquivo encontrado para download")
+
+        # Preparar resposta
+        zip_buffer.seek(0)
+        from datetime import datetime
+        data_atual = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        return StreamingResponse(
+            zip_buffer,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="backup_selecionados_{data_atual}.zip"'
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao criar ZIP de documentos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/admin/backup/download-completo")
 async def admin_download_backup_completo(
     usuario: dict = Depends(verificar_admin)
