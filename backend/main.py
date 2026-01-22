@@ -7101,6 +7101,104 @@ def buscar_cliente_por_cpf(cpf: str) -> dict:
         return None
 
 
+def normalizar_nome(nome: str) -> str:
+    """Normaliza nome para comparação (uppercase, sem acentos)."""
+    import unicodedata
+    if not nome:
+        return ""
+    # Remove acentos
+    nome_norm = unicodedata.normalize('NFKD', nome)
+    nome_norm = ''.join(c for c in nome_norm if not unicodedata.combining(c))
+    # Uppercase e remove espaços extras
+    return ' '.join(nome_norm.upper().split())
+
+
+def buscar_cliente_por_nome(nome: str) -> dict:
+    """Busca cliente pelo nome (correspondência exata normalizada)."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        nome_normalizado = normalizar_nome(nome)
+        if not nome_normalizado:
+            return None
+
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, dados->>'nome' as nome, dados->>'cpf' as cpf
+            FROM cadastros
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        # Busca por correspondência exata normalizada
+        for row in rows:
+            nome_cliente = normalizar_nome(row.get("nome", ""))
+            if nome_cliente == nome_normalizado:
+                return dict(row)
+
+        # Busca por correspondência parcial (nome contido)
+        for row in rows:
+            nome_cliente = normalizar_nome(row.get("nome", ""))
+            if nome_normalizado in nome_cliente or nome_cliente in nome_normalizado:
+                return dict(row)
+
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar cliente por nome: {e}")
+        return None
+
+
+def buscar_clientes_similares(nome: str, limite: int = 5) -> list:
+    """Busca clientes com nomes similares usando distância de similaridade."""
+    conn = get_db()
+    if not conn:
+        return []
+
+    try:
+        nome_normalizado = normalizar_nome(nome)
+        if not nome_normalizado:
+            return []
+
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, dados->>'nome' as nome, dados->>'cpf' as cpf
+            FROM cadastros
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        # Calcular similaridade simples (palavras em comum)
+        palavras_busca = set(nome_normalizado.split())
+        resultados = []
+
+        for row in rows:
+            nome_cliente = normalizar_nome(row.get("nome", ""))
+            palavras_cliente = set(nome_cliente.split())
+
+            # Conta palavras em comum
+            palavras_comum = palavras_busca & palavras_cliente
+            if palavras_comum:
+                # Score baseado em palavras em comum
+                score = len(palavras_comum) / max(len(palavras_busca), len(palavras_cliente))
+                if score >= 0.3:  # Mínimo 30% de similaridade
+                    resultados.append({
+                        **dict(row),
+                        "score": score,
+                        "palavras_comum": len(palavras_comum)
+                    })
+
+        # Ordenar por score e retornar top N
+        resultados.sort(key=lambda x: x["score"], reverse=True)
+        return resultados[:limite]
+    except Exception as e:
+        logger.error(f"Erro ao buscar clientes similares: {e}")
+        return []
+
+
 def verificar_andamento_existente(processo_id: int, data: str, descricao: str) -> bool:
     """Verifica se um andamento já existe (para evitar duplicatas)."""
     conn = get_db()
@@ -7152,15 +7250,35 @@ async def preview_importacao_astrea(
                 processo["processo_id_existente"] = processo_existente["id"]
                 processo["cadastro_id_existente"] = processo_existente["cadastro_id"]
 
-            # Tentar vincular cliente pelo CPF
+            # Tentar vincular cliente pelo CPF ou Nome
+            cliente = None
+            processo["cliente_encontrado"] = False
+
+            # 1. Primeiro tentar por CPF (mais preciso)
             if processo.get("cliente_cpf"):
                 cliente = buscar_cliente_por_cpf(processo["cliente_cpf"])
                 if cliente:
-                    processo["cliente_encontrado"] = True
-                    processo["cadastro_id_sugerido"] = cliente["id"]
-                    processo["cliente_nome_sistema"] = cliente["nome"]
+                    processo["match_tipo"] = "cpf"
+
+            # 2. Se não encontrou por CPF, tentar por nome
+            if not cliente and processo.get("cliente_nome"):
+                cliente = buscar_cliente_por_nome(processo["cliente_nome"])
+                if cliente:
+                    processo["match_tipo"] = "nome_exato"
                 else:
-                    processo["cliente_encontrado"] = False
+                    # 3. Buscar clientes similares
+                    similares = buscar_clientes_similares(processo["cliente_nome"], 3)
+                    if similares:
+                        processo["clientes_similares"] = similares
+                        # Se tiver alta similaridade (>70%), sugerir automaticamente
+                        if similares[0]["score"] >= 0.7:
+                            cliente = similares[0]
+                            processo["match_tipo"] = "nome_similar"
+
+            if cliente:
+                processo["cliente_encontrado"] = True
+                processo["cadastro_id_sugerido"] = cliente["id"]
+                processo["cliente_nome_sistema"] = cliente.get("nome", "")
 
             # Contar andamentos novos
             if processo_existente:
@@ -7175,6 +7293,25 @@ async def preview_importacao_astrea(
                 processo["andamentos_novos"] = novos_andamentos
             else:
                 processo["andamentos_novos"] = len(processo.get("andamentos", []))
+
+        # Adicionar estatísticas de correspondência
+        clientes_encontrados = sum(1 for p in resultado["processos"] if p.get("cliente_encontrado"))
+        clientes_nao_encontrados = len(resultado["processos"]) - clientes_encontrados
+
+        resultado["estatisticas"] = {
+            "total_processos": len(resultado["processos"]),
+            "clientes_encontrados": clientes_encontrados,
+            "clientes_nao_encontrados": clientes_nao_encontrados,
+            "percentual_match": round(clientes_encontrados / max(len(resultado["processos"]), 1) * 100, 1)
+        }
+
+        # Adicionar aviso se muitos clientes não foram encontrados
+        if clientes_nao_encontrados > 0:
+            resultado["erros"] = resultado.get("erros", [])
+            resultado["erros"].append(
+                f"{clientes_nao_encontrados} processo(s) sem cliente correspondente no sistema. "
+                "Selecione um cliente padrão ou cadastre os clientes primeiro."
+            )
 
         return resultado
 
