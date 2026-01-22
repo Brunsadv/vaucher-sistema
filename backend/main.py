@@ -6877,6 +6877,18 @@ def parsear_excel_astrea(arquivo_bytes: bytes) -> dict:
             if idx is not None:
                 colunas_andamento[campo] = idx
 
+        # Logar colunas detectadas para debug
+        logger.info(f"Headers Excel: {headers[:20]}")
+        logger.info(f"Colunas de processo detectadas: {colunas_processo}")
+        logger.info(f"Colunas de andamento detectadas: {colunas_andamento}")
+
+        # Verificar especificamente coluna de cliente
+        if "cliente_nome" in colunas_processo:
+            logger.info(f"Coluna de cliente encontrada no índice {colunas_processo['cliente_nome']}: '{headers[colunas_processo['cliente_nome']]}'")
+        else:
+            logger.warning("Coluna de cliente NÃO encontrada no Excel!")
+            logger.warning(f"Headers disponíveis: {headers}")
+
         # Verificar se encontrou coluna essencial (número do processo)
         if "numero_processo" not in colunas_processo:
             return {
@@ -6987,6 +6999,10 @@ def parsear_excel_astrea(arquivo_bytes: bytes) -> dict:
                     "pasta": get_valor("pasta", colunas_processo, row),
                     "andamentos": []
                 }
+                # Log primeiros 5 processos para debug
+                if len(processos_dict) <= 5:
+                    logger.info(f"Processo #{len(processos_dict)}: numero={numero_processo}, cliente_nome='{get_valor('cliente_nome', colunas_processo, row)}'")
+
 
             # Adicionar andamento se houver dados
             data_andamento = get_valor("data", colunas_andamento, row)
