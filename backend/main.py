@@ -6835,8 +6835,8 @@ def parsear_excel_astrea(arquivo_bytes: bytes) -> dict:
             "valor_causa": ["valor da causa"],
             "data_distribuicao": ["data de distribuição", "data de distribuicao"],
             "observacoes": ["observações", "observacoes", "detalhes"],
-            "cliente_nome": ["cliente"],
-            "cliente_cpf": ["cpf"],
+            "cliente_nome": ["cliente", "nome do cliente", "parte", "autor", "requerente", "reclamante", "polo ativo", "partes", "nome"],
+            "cliente_cpf": ["cpf", "cpf do cliente", "cpf cliente", "documento"],
             "titulo": ["título", "titulo"],
             "pasta": ["pasta"],
             "objeto": ["objeto"]
