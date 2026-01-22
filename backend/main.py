@@ -7550,6 +7550,392 @@ async def confirmar_importacao_astrea(
     return relatorio
 
 
+# ============================================
+# INTEGRAÇÃO COM API DATAJUD DO CNJ
+# ============================================
+
+# Mapeamento de tribunais por código
+TRIBUNAIS_DATAJUD = {
+    # Justiça Estadual (8)
+    "8.01": "tjac", "8.02": "tjal", "8.03": "tjap", "8.04": "tjam", "8.05": "tjba",
+    "8.06": "tjce", "8.07": "tjdft", "8.08": "tjes", "8.09": "tjgo", "8.10": "tjma",
+    "8.11": "tjmt", "8.12": "tjms", "8.13": "tjmg", "8.14": "tjpa", "8.15": "tjpb",
+    "8.16": "tjpr", "8.17": "tjpe", "8.18": "tjpi", "8.19": "tjrj", "8.20": "tjrn",
+    "8.21": "tjrs", "8.22": "tjro", "8.23": "tjrr", "8.24": "tjsc", "8.25": "tjsp",
+    "8.26": "tjsp", "8.27": "tjse", "8.28": "tjto",
+    # Justiça Federal (4)
+    "4.01": "trf1", "4.02": "trf2", "4.03": "trf3", "4.04": "trf4", "4.05": "trf5",
+    # Justiça do Trabalho (5)
+    "5.01": "trt1", "5.02": "trt2", "5.03": "trt3", "5.04": "trt4", "5.05": "trt5",
+    "5.06": "trt6", "5.07": "trt7", "5.08": "trt8", "5.09": "trt9", "5.10": "trt10",
+    "5.11": "trt11", "5.12": "trt12", "5.13": "trt13", "5.14": "trt14", "5.15": "trt15",
+    "5.16": "trt16", "5.17": "trt17", "5.18": "trt18", "5.19": "trt19", "5.20": "trt20",
+    "5.21": "trt21", "5.22": "trt22", "5.23": "trt23", "5.24": "trt24",
+}
+
+DATAJUD_API_KEY = "cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw=="
+DATAJUD_BASE_URL = "https://api-publica.datajud.cnj.jus.br"
+
+
+def extrair_codigo_tribunal(numero_processo: str) -> str:
+    """
+    Extrai o código do tribunal do número do processo.
+    Formato CNJ: NNNNNNN-DD.AAAA.J.TR.OOOO
+    J = Justiça (posição 16), TR = Tribunal (posição 18-19)
+    """
+    # Remove caracteres não numéricos exceto hífen e ponto
+    numero_limpo = numero_processo.replace(" ", "")
+
+    # Tentar extrair do formato padrão CNJ
+    partes = numero_limpo.split(".")
+    if len(partes) >= 4:
+        # partes[2] = J (justiça), partes[3] = TR (tribunal)
+        justica = partes[2]
+        tribunal = partes[3]
+        return f"{justica}.{tribunal.zfill(2)}"
+
+    return None
+
+
+async def consultar_datajud(numero_processo: str) -> dict:
+    """
+    Consulta a API pública do DataJud do CNJ.
+    Retorna dados do processo e movimentações.
+    """
+    codigo_tribunal = extrair_codigo_tribunal(numero_processo)
+    if not codigo_tribunal:
+        return {"erro": "Não foi possível identificar o tribunal pelo número do processo"}
+
+    tribunal_alias = TRIBUNAIS_DATAJUD.get(codigo_tribunal)
+    if not tribunal_alias:
+        return {"erro": f"Tribunal não encontrado para código {codigo_tribunal}"}
+
+    url = f"{DATAJUD_BASE_URL}/api_publica_{tribunal_alias}/_search"
+
+    # Número do processo sem formatação para busca
+    numero_busca = numero_processo.replace("-", "").replace(".", "").replace(" ", "")
+
+    headers = {
+        "Authorization": f"APIKey {DATAJUD_API_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    # Query Elasticsearch para buscar pelo número do processo
+    body = {
+        "query": {
+            "match": {
+                "numeroProcesso": numero_processo
+            }
+        },
+        "size": 1
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, json=body, headers=headers)
+
+            if response.status_code != 200:
+                logger.error(f"Erro DataJud: {response.status_code} - {response.text}")
+                return {"erro": f"Erro na API DataJud: {response.status_code}"}
+
+            data = response.json()
+            hits = data.get("hits", {}).get("hits", [])
+
+            if not hits:
+                return {"erro": "Processo não encontrado no DataJud"}
+
+            processo_cnj = hits[0].get("_source", {})
+            return {
+                "sucesso": True,
+                "dados": processo_cnj,
+                "tribunal": tribunal_alias.upper()
+            }
+
+    except Exception as e:
+        logger.error(f"Erro ao consultar DataJud: {e}")
+        return {"erro": f"Erro ao consultar DataJud: {str(e)}"}
+
+
+@app.get("/api/admin/datajud/consultar/{numero_processo:path}")
+async def consultar_processo_datajud(
+    numero_processo: str,
+    admin = Depends(verificar_admin)
+):
+    """
+    Consulta um processo na API pública do DataJud do CNJ.
+    """
+    resultado = await consultar_datajud(numero_processo)
+
+    if "erro" in resultado:
+        raise HTTPException(status_code=400, detail=resultado["erro"])
+
+    return resultado
+
+
+@app.post("/api/admin/datajud/atualizar-processo/{processo_id}")
+async def atualizar_processo_datajud(
+    processo_id: int,
+    admin = Depends(verificar_admin)
+):
+    """
+    Atualiza um processo com dados do DataJud do CNJ.
+    """
+    # Buscar processo no banco
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM processos WHERE id = %s", (processo_id,))
+        processo = cur.fetchone()
+
+        if not processo:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+        numero_processo = processo["numero_processo"]
+
+        # Consultar DataJud
+        resultado = await consultar_datajud(numero_processo)
+
+        if "erro" in resultado:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=400, detail=resultado["erro"])
+
+        dados_cnj = resultado["dados"]
+
+        # Extrair dados relevantes
+        classe = dados_cnj.get("classe", {}).get("nome", "")
+        orgao = dados_cnj.get("orgaoJulgador", {}).get("nome", "")
+        movimentos = dados_cnj.get("movimentos", [])
+
+        # Atualizar processo
+        updates = []
+        params = []
+
+        if classe and not processo.get("tipo_acao"):
+            updates.append("tipo_acao = %s")
+            params.append(classe)
+
+        if orgao and not processo.get("vara_tribunal"):
+            updates.append("vara_tribunal = %s")
+            params.append(orgao)
+
+        # Atualizar fase com base no último movimento
+        if movimentos:
+            ultimo_movimento = movimentos[0] if movimentos else {}
+            nome_movimento = ultimo_movimento.get("nome", "")
+            if nome_movimento:
+                updates.append("fase = %s")
+                params.append(nome_movimento[:100])
+
+        if updates:
+            params.append(processo_id)
+            cur.execute(f"""
+                UPDATE processos SET {', '.join(updates)}
+                WHERE id = %s
+            """, params)
+
+        # Adicionar movimentos como andamentos
+        andamentos_adicionados = 0
+        for movimento in movimentos[:20]:  # Limitar a 20 movimentos
+            data_mov = movimento.get("dataHora", "")[:10]  # Pegar só a data
+            descricao = movimento.get("nome", "")
+            complementos = movimento.get("complementosTabelados", [])
+
+            if complementos:
+                complemento_texto = ", ".join([c.get("nome", "") for c in complementos if c.get("nome")])
+                if complemento_texto:
+                    descricao = f"{descricao}: {complemento_texto}"
+
+            if not data_mov or not descricao:
+                continue
+
+            # Verificar se já existe
+            cur.execute("""
+                SELECT id FROM processo_andamentos
+                WHERE processo_id = %s AND data = %s AND descricao = %s
+            """, (processo_id, data_mov, descricao[:500]))
+
+            if not cur.fetchone():
+                cur.execute("""
+                    INSERT INTO processo_andamentos (processo_id, data, descricao, visivel_cliente)
+                    VALUES (%s, %s, %s, %s)
+                """, (processo_id, data_mov, descricao[:500], True))
+                andamentos_adicionados += 1
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        return {
+            "sucesso": True,
+            "processo_atualizado": True,
+            "andamentos_adicionados": andamentos_adicionados,
+            "tribunal": resultado.get("tribunal"),
+            "mensagem": f"Processo atualizado com {andamentos_adicionados} novos andamentos do CNJ"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao atualizar processo do DataJud: {e}")
+        if conn:
+            conn.close()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/admin/datajud/atualizar-todos")
+async def atualizar_todos_processos_datajud(admin = Depends(verificar_admin)):
+    """
+    Atualiza todos os processos cadastrados com dados do DataJud.
+    """
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT id, numero_processo FROM processos WHERE status = 'ativo'")
+        processos = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        resultados = {
+            "total": len(processos),
+            "atualizados": 0,
+            "erros": 0,
+            "detalhes": []
+        }
+
+        for processo in processos:
+            try:
+                resultado = await consultar_datajud(processo["numero_processo"])
+                if "sucesso" in resultado:
+                    # Atualizar processo individualmente
+                    await atualizar_processo_datajud(processo["id"], admin)
+                    resultados["atualizados"] += 1
+                    resultados["detalhes"].append({
+                        "numero": processo["numero_processo"],
+                        "status": "atualizado"
+                    })
+                else:
+                    resultados["erros"] += 1
+                    resultados["detalhes"].append({
+                        "numero": processo["numero_processo"],
+                        "status": "erro",
+                        "mensagem": resultado.get("erro", "Erro desconhecido")
+                    })
+            except Exception as e:
+                resultados["erros"] += 1
+                resultados["detalhes"].append({
+                    "numero": processo["numero_processo"],
+                    "status": "erro",
+                    "mensagem": str(e)
+                })
+
+        return resultados
+
+    except Exception as e:
+        logger.error(f"Erro ao atualizar todos processos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# ENDPOINT DE IA PARA EXPLICAR ANDAMENTOS
+# ============================================
+
+@app.post("/api/cliente/andamento/explicar")
+async def explicar_andamento_ia(
+    dados: dict,
+    authorization: str = Header(None)
+):
+    """
+    Usa IA para explicar tecnicamente um andamento processual.
+    Retorna explicação em linguagem acessível.
+    """
+    # Verificar token do cliente
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Token não fornecido")
+
+    token = authorization.replace("Bearer ", "")
+    cliente = decodificar_token_cliente(token)
+    if not cliente:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+    descricao = dados.get("descricao", "")
+    if not descricao:
+        raise HTTPException(status_code=400, detail="Descrição do andamento não fornecida")
+
+    # Criar explicação usando template (pode ser substituído por API de IA como Claude)
+    explicacao = gerar_explicacao_andamento(descricao)
+
+    return {
+        "sucesso": True,
+        "andamento_original": descricao,
+        "explicacao": explicacao,
+        "aviso": "Esta explicação foi gerada automaticamente e pode conter imprecisões. Para esclarecimentos, utilize o módulo de mensagens."
+    }
+
+
+def gerar_explicacao_andamento(descricao: str) -> str:
+    """
+    Gera uma explicação simplificada do andamento processual.
+    Pode ser integrado com API de IA (Claude, GPT) para explicações mais sofisticadas.
+    """
+    descricao_lower = descricao.lower()
+
+    # Dicionário de termos jurídicos comuns e suas explicações
+    explicacoes = {
+        "distribuído": "O processo foi registrado e encaminhado para uma vara/juízo específico que será responsável por analisá-lo.",
+        "distribuição": "O processo foi registrado e encaminhado para uma vara/juízo específico que será responsável por analisá-lo.",
+        "citação": "O réu (parte contrária) está sendo oficialmente notificado sobre a existência do processo e terá prazo para se defender.",
+        "citado": "O réu (parte contrária) foi oficialmente notificado sobre o processo.",
+        "contestação": "A parte contrária apresentou sua defesa, respondendo às acusações ou pedidos feitos.",
+        "sentença": "O juiz proferiu sua decisão sobre o caso. Esta decisão pode ser favorável ou desfavorável e ainda pode ser objeto de recurso.",
+        "julgado": "O caso foi analisado e decidido pelo juiz ou tribunal.",
+        "audiência": "Foi marcada ou realizada uma sessão presencial ou virtual onde as partes e o juiz discutem o caso.",
+        "despacho": "O juiz emitiu uma ordem ou determinação sobre algum aspecto do processo.",
+        "intimação": "Uma das partes está sendo notificada sobre alguma decisão ou prazo no processo.",
+        "intimado": "A parte foi notificada oficialmente sobre uma decisão ou prazo.",
+        "recurso": "Uma das partes está contestando uma decisão anterior, pedindo que seja revista por instância superior.",
+        "apelação": "Recurso apresentado contra a sentença, pedindo que o tribunal de segunda instância revise a decisão.",
+        "agravo": "Recurso contra decisões intermediárias do processo, geralmente sobre questões processuais.",
+        "embargos": "Recurso que pede esclarecimento, correção ou complementação de uma decisão.",
+        "trânsito em julgado": "A decisão se tornou definitiva, não cabendo mais recursos. O processo está encerrado nesta fase.",
+        "arquivado": "O processo foi encerrado e guardado, seja por decisão final ou por outros motivos legais.",
+        "baixa": "O processo foi devolvido à instância inferior ou encerrado.",
+        "petição": "Um documento foi apresentado por uma das partes solicitando algo ao juiz.",
+        "concluso": "O processo está com o juiz para análise e decisão.",
+        "vista": "O processo foi encaminhado para uma das partes ou para o Ministério Público analisar.",
+        "perícia": "Foi determinada ou realizada uma análise técnica por especialista sobre algum aspecto do caso.",
+        "penhora": "Bens foram bloqueados ou apreendidos para garantir o pagamento de uma dívida.",
+        "execução": "Fase em que a decisão judicial está sendo cumprida, geralmente envolvendo cobrança de valores.",
+        "cumprimento": "A parte está executando (cumprindo) o que foi determinado na sentença.",
+        "acordo": "As partes chegaram a um entendimento e resolveram a questão de forma consensual.",
+        "homologação": "O juiz aprovou oficialmente um acordo ou documento apresentado pelas partes.",
+        "tutela": "Medida de proteção ou antecipação de direitos concedida pelo juiz.",
+        "liminar": "Decisão urgente tomada no início do processo para proteger direitos enquanto o caso é analisado.",
+        "suspensão": "O processo foi temporariamente paralisado por algum motivo legal.",
+        "expedição": "Um documento oficial (como mandado ou ofício) foi emitido pelo cartório.",
+        "certidão": "Documento que atesta ou comprova algum fato ou situação do processo.",
+        "autos": "Conjunto de todos os documentos e peças do processo.",
+        "remessa": "O processo foi enviado para outro órgão, instância ou localidade.",
+        "juntada": "Um documento foi anexado ao processo.",
+    }
+
+    # Buscar explicação correspondente
+    for termo, explicacao in explicacoes.items():
+        if termo in descricao_lower:
+            return f"📋 **Explicação:** {explicacao}\n\n💡 **Contexto:** Este andamento indica uma movimentação importante no seu processo. O andamento '{descricao}' significa que houve uma ação relacionada a '{termo}'."
+
+    # Explicação genérica se não encontrar termo específico
+    return f"📋 **Explicação:** Este é um andamento processual que indica uma movimentação no seu processo. Cada andamento representa uma etapa ou ação realizada pelo judiciário.\n\n💡 **O que significa '{descricao}':** Este registro indica que houve uma atividade no seu processo. Para entender melhor o impacto desta movimentação no seu caso específico, recomendamos entrar em contato através do módulo de mensagens."
+
+
 @app.get("/api/admin/importacoes/historico")
 async def listar_historico_importacoes(admin = Depends(verificar_admin)):
     """Lista o histórico de importações."""
