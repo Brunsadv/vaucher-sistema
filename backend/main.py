@@ -4998,7 +4998,27 @@ async def admin_listar_todos_documentos(
                     "status": comp["status"],
                     "data": comp["enviado_em"].isoformat() if comp["enviado_em"] else None
                 })
-            
+
+            # 7. Documentos da Demanda (tabela documentos_demanda)
+            cur.execute("""
+                SELECT id, tipo_documento, nome_arquivo, nome_original, arquivo_path, descricao, criado_em
+                FROM documentos_demanda WHERE cadastro_id = %s
+            """, (cadastro_id,))
+            docs_demanda = cur.fetchall()
+            for doc in docs_demanda:
+                documentos_cliente["documentos"].append({
+                    "id": f"demanda_{doc['id']}",
+                    "db_id": doc["id"],
+                    "tipo": "documento_demanda",
+                    "nome": doc["nome_original"],
+                    "tipo_documento": doc["tipo_documento"],
+                    "descricao": doc.get("descricao", ""),
+                    "caminho": doc["arquivo_path"],
+                    "existe": os.path.exists(doc["arquivo_path"]) if doc["arquivo_path"] else False,
+                    "tamanho": os.path.getsize(doc["arquivo_path"]) if doc["arquivo_path"] and os.path.exists(doc["arquivo_path"]) else 0,
+                    "data": doc["criado_em"].isoformat() if doc["criado_em"] else None
+                })
+
             # Calcular totais
             docs_existentes = [d for d in documentos_cliente["documentos"] if d.get("existe")]
             documentos_cliente["total_documentos"] = len(documentos_cliente["documentos"])
@@ -5355,7 +5375,18 @@ async def admin_deletar_documentos_selecionados(
                     cur.execute("DELETE FROM comprovantes WHERE id = %s", (db_id,))
                     conn.commit()
                     sucesso = True
-                
+
+                elif tipo == "demanda":
+                    # Documentos da demanda
+                    db_id = int(partes[1])
+                    cur.execute("SELECT arquivo_path FROM documentos_demanda WHERE id = %s", (db_id,))
+                    doc = cur.fetchone()
+                    if doc and doc["arquivo_path"] and os.path.exists(doc["arquivo_path"]):
+                        os.remove(doc["arquivo_path"])
+                    cur.execute("DELETE FROM documentos_demanda WHERE id = %s", (db_id,))
+                    conn.commit()
+                    sucesso = True
+
                 if sucesso:
                     deletados.append(doc_id)
                 else:
@@ -5455,6 +5486,18 @@ async def admin_download_documento_backup(
             if doc:
                 caminho = doc["arquivo_path"]
                 nome_arquivo = doc["arquivo_nome"]
+
+        elif tipo == "demanda":
+            db_id = int(partes[1])
+            conn = get_db()
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT arquivo_path, nome_original FROM documentos_demanda WHERE id = %s", (db_id,))
+            doc = cur.fetchone()
+            cur.close()
+            conn.close()
+            if doc:
+                caminho = doc["arquivo_path"]
+                nome_arquivo = doc["nome_original"]
 
         if not caminho or not os.path.exists(caminho):
             raise HTTPException(status_code=404, detail="Arquivo não encontrado")
