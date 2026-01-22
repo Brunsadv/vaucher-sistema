@@ -4937,15 +4937,29 @@ async def admin_listar_todos_documentos(
                     })
             
             # 3. Documentos assinados
+            # Podem ser strings (nome do arquivo) ou objetos
             docs_assinados = cadastro["documentos_assinados"] if isinstance(cadastro["documentos_assinados"], list) else json.loads(cadastro["documentos_assinados"] or "[]")
             for doc in docs_assinados:
-                if isinstance(doc, dict) and doc.get("arquivo"):
-                    caminho = os.path.join(UPLOADS_DIR, doc["arquivo"])
+                arquivo = None
+                nome = None
+
+                if isinstance(doc, str):
+                    # Formato: apenas nome do arquivo (string)
+                    arquivo = doc
+                    nome = doc
+                elif isinstance(doc, dict) and doc.get("arquivo"):
+                    # Formato: objeto com campo "arquivo"
+                    arquivo = doc.get("arquivo")
+                    nome = doc.get("nome", arquivo)
+
+                if arquivo:
+                    # Arquivos assinados estão em UPLOADS_DIR/cadastro_id/assinados/filename
+                    caminho = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", arquivo)
                     documentos_cliente["documentos"].append({
-                        "id": f"assinado_{cadastro_id}_{doc.get('arquivo', '')}",
+                        "id": f"assinado_{cadastro_id}_{arquivo}",
                         "tipo": "documento_assinado",
-                        "nome": doc.get("nome", "Documento Assinado"),
-                        "arquivo": doc.get("arquivo"),
+                        "nome": nome,
+                        "arquivo": arquivo,
                         "caminho": caminho,
                         "existe": os.path.exists(caminho),
                         "tamanho": os.path.getsize(caminho) if os.path.exists(caminho) else 0
@@ -5350,15 +5364,24 @@ async def admin_deletar_documentos_selecionados(
                     # Documentos assinados
                     cadastro_id = partes[1]
                     arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
-                    caminho = os.path.join(UPLOADS_DIR, arquivo)
-                    
+                    # Arquivos assinados estão em UPLOADS_DIR/cadastro_id/assinados/filename
+                    caminho = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", arquivo)
+
                     if os.path.exists(caminho):
                         os.remove(caminho)
-                    
+
                     cadastro = buscar_cadastro(cadastro_id)
                     if cadastro:
                         docs = cadastro.get("documentos_assinados", [])
-                        docs_atualizados = [d for d in docs if d.get("arquivo") != arquivo]
+                        # Filtrar - docs podem ser strings ou dicts
+                        docs_atualizados = []
+                        for d in docs:
+                            if isinstance(d, str):
+                                if d != arquivo:
+                                    docs_atualizados.append(d)
+                            elif isinstance(d, dict):
+                                if d.get("arquivo") != arquivo:
+                                    docs_atualizados.append(d)
                         cur.execute(
                             "UPDATE cadastros SET documentos_assinados = %s WHERE id = %s",
                             (json.dumps(docs_atualizados), cadastro_id)
@@ -5472,7 +5495,8 @@ async def admin_download_documento_backup(
         elif tipo == "assinado":
             cadastro_id = partes[1]
             arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
-            caminho = os.path.join(UPLOADS_DIR, arquivo)
+            # Arquivos assinados estão em UPLOADS_DIR/cadastro_id/assinados/filename
+            caminho = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", arquivo)
             nome_arquivo = arquivo
 
         elif tipo == "extra":
