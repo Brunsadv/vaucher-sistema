@@ -7519,6 +7519,23 @@ async def listar_historico_importacoes(admin = Depends(verificar_admin)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/debug/clientes-cadastrados")
+async def debug_clientes():
+    """TEMPORÁRIO: Ver clientes cadastrados."""
+    try:
+        conn = get_db()
+        if not conn:
+            return {"erro": "Sem conexão"}
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT id, dados->>'nome' as nome, dados->>'cpf' as cpf FROM cadastros LIMIT 50")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return {"clientes": [dict(r) for r in rows]}
+    except Exception as e:
+        return {"erro": str(e)}
+
+
 @app.get("/api/admin/processos/limpar-todos-agora")
 async def limpar_todos_processos_get(admin = Depends(verificar_admin)):
     """Versão GET para limpar todos os processos (mais compatível)."""
