@@ -258,6 +258,47 @@ interface AtualizacaoCadastral {
   cpf_cliente?: string
   dados_atuais?: Record<string, any>
 }
+
+interface ProcessoImportacao {
+  numero_processo: string
+  tipo_acao: string
+  vara_tribunal: string
+  fase: string
+  reu: string
+  valor_causa: number
+  data_distribuicao: string | null
+  observacoes: string
+  cliente_nome: string
+  cliente_cpf: string
+  andamentos: { data: string; descricao: string }[]
+  existe_no_sistema?: boolean
+  processo_id_existente?: number
+  cadastro_id_existente?: string
+  cliente_encontrado?: boolean
+  cadastro_id_sugerido?: string
+  cliente_nome_sistema?: string
+  andamentos_novos?: number
+}
+
+interface PreviewImportacao {
+  sucesso: boolean
+  processos: ProcessoImportacao[]
+  total_processos: number
+  total_andamentos: number
+  colunas_detectadas: {
+    processos: string[]
+    andamentos: string[]
+  }
+  headers_encontrados: string[]
+}
+
+interface ClienteParaImportacao {
+  id: string
+  nome: string
+  cpf: string
+  email: string
+}
+
 // Tela de Login
 const LoginScreen = ({ onLogin }: { onLogin: (user: UserData) => void }) => {
   const [email, setEmail] = useState('')
@@ -2005,6 +2046,507 @@ const BackupModal = ({ user, onClose }: { user: UserData, onClose: () => void })
   )
 }
 
+// Modal de Importação do Astrea
+const ImportarAstreaModal = ({ user, onClose, onImportSuccess }: { user: UserData, onClose: () => void, onImportSuccess?: () => void }) => {
+  const [etapa, setEtapa] = useState<'upload' | 'preview' | 'importando' | 'resultado'>('upload')
+  const [arquivo, setArquivo] = useState<File | null>(null)
+  const [preview, setPreview] = useState<PreviewImportacao | null>(null)
+  const [clientes, setClientes] = useState<ClienteParaImportacao[]>([])
+  const [clienteSelecionado, setClienteSelecionado] = useState<string>('')
+  const [importarAndamentos, setImportarAndamentos] = useState(true)
+  const [andamentosVisiveis, setAndamentosVisiveis] = useState(true)
+  const [carregando, setCarregando] = useState(false)
+  const [erro, setErro] = useState('')
+  const [resultado, setResultado] = useState<any>(null)
+  const [processosExpandidos, setProcessosExpandidos] = useState<Set<string>>(new Set())
+
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    carregarClientes()
+  }, [])
+
+  const carregarClientes = async () => {
+    try {
+      const response = await fetch(`${API_URL}/api/admin/clientes-para-importacao`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+      const data = await response.json()
+      setClientes(data.clientes || [])
+    } catch (e) {
+      console.error('Erro ao carregar clientes:', e)
+    }
+  }
+
+  const handleArquivoSelecionado = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+      setErro('Por favor, selecione um arquivo Excel (.xlsx ou .xls)')
+      return
+    }
+
+    setArquivo(file)
+    setErro('')
+    await fazerPreview(file)
+  }
+
+  const fazerPreview = async (file: File) => {
+    setCarregando(true)
+    setErro('')
+
+    try {
+      const formData = new FormData()
+      formData.append('arquivo', file)
+
+      const response = await fetch(`${API_URL}/api/admin/importar-astrea/preview`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${user.token}` },
+        body: formData
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setErro(data.detail || 'Erro ao processar arquivo')
+        return
+      }
+
+      setPreview(data)
+      setEtapa('preview')
+    } catch (e) {
+      setErro('Erro de conexão ao processar arquivo')
+    } finally {
+      setCarregando(false)
+    }
+  }
+
+  const confirmarImportacao = async () => {
+    if (!preview) return
+
+    setEtapa('importando')
+    setCarregando(true)
+
+    try {
+      const response = await fetch(`${API_URL}/api/admin/importar-astrea/confirmar`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${user.token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          processos: preview.processos,
+          cadastro_id_padrao: clienteSelecionado || null,
+          importar_andamentos: importarAndamentos,
+          andamentos_visiveis: andamentosVisiveis
+        })
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        setErro(data.detail || 'Erro ao importar dados')
+        setEtapa('preview')
+        return
+      }
+
+      setResultado(data)
+      setEtapa('resultado')
+      if (onImportSuccess) {
+        onImportSuccess()
+      }
+    } catch (e) {
+      setErro('Erro de conexão ao importar dados')
+      setEtapa('preview')
+    } finally {
+      setCarregando(false)
+    }
+  }
+
+  const toggleProcessoExpandido = (numero: string) => {
+    setProcessosExpandidos(prev => {
+      const novo = new Set(prev)
+      if (novo.has(numero)) {
+        novo.delete(numero)
+      } else {
+        novo.add(numero)
+      }
+      return novo
+    })
+  }
+
+  const formatarData = (dataStr: string | null) => {
+    if (!dataStr) return '-'
+    try {
+      const date = new Date(dataStr)
+      return date.toLocaleDateString('pt-BR')
+    } catch {
+      return dataStr
+    }
+  }
+
+  const formatarValor = (valor: number) => {
+    return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-xl">
+        {/* Header */}
+        <div className="p-4 border-b flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+              <FileSpreadsheet className="w-5 h-5 text-blue-700" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">Importar do Astrea</h2>
+              <p className="text-sm text-gray-500">
+                {etapa === 'upload' && 'Selecione o arquivo Excel exportado do Astrea'}
+                {etapa === 'preview' && `${preview?.total_processos || 0} processos encontrados`}
+                {etapa === 'importando' && 'Importando dados...'}
+                {etapa === 'resultado' && 'Importação concluída'}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Conteúdo */}
+        <div className="flex-1 overflow-y-auto p-4">
+          {/* Etapa: Upload */}
+          {etapa === 'upload' && (
+            <div className="space-y-4">
+              <div
+                className={`border-2 border-dashed rounded-xl p-12 text-center cursor-pointer transition-colors ${
+                  carregando ? 'bg-gray-50 border-gray-300' : 'border-gray-300 hover:border-blue-500 hover:bg-blue-50'
+                }`}
+                onClick={() => !carregando && fileInputRef.current?.click()}
+              >
+                {carregando ? (
+                  <>
+                    <div className="w-10 h-10 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+                    <p className="text-gray-600">Processando arquivo...</p>
+                  </>
+                ) : (
+                  <>
+                    <Upload className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-600 font-medium">Clique para selecionar o arquivo</p>
+                    <p className="text-gray-400 text-sm mt-2">ou arraste e solte aqui</p>
+                    <p className="text-gray-400 text-xs mt-4">Aceito: .xlsx, .xls</p>
+                  </>
+                )}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".xlsx,.xls"
+                onChange={handleArquivoSelecionado}
+                className="hidden"
+              />
+
+              {erro && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                  <p className="text-red-700">{erro}</p>
+                </div>
+              )}
+
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <h4 className="font-medium text-blue-800 mb-2">Instruções</h4>
+                <ul className="text-sm text-blue-700 space-y-1">
+                  <li>• Exporte os dados do Astrea no formato Excel (.xlsx)</li>
+                  <li>• O sistema detectará automaticamente as colunas</li>
+                  <li>• Colunas esperadas: Número do Processo, Tipo de Ação, Vara/Tribunal, etc.</li>
+                  <li>• Andamentos podem estar na mesma planilha ou em linhas separadas</li>
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* Etapa: Preview */}
+          {etapa === 'preview' && preview && (
+            <div className="space-y-4">
+              {/* Resumo */}
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-blue-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-blue-700">{preview.total_processos}</p>
+                  <p className="text-sm text-blue-600">Processos encontrados</p>
+                </div>
+                <div className="bg-green-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-green-700">{preview.total_andamentos}</p>
+                  <p className="text-sm text-green-600">Andamentos encontrados</p>
+                </div>
+                <div className="bg-purple-50 rounded-lg p-4">
+                  <p className="text-2xl font-bold text-purple-700">
+                    {preview.processos.filter(p => p.existe_no_sistema).length}
+                  </p>
+                  <p className="text-sm text-purple-600">Processos já existentes</p>
+                </div>
+              </div>
+
+              {/* Opções */}
+              <div className="bg-gray-50 rounded-lg p-4 space-y-4">
+                <h4 className="font-medium text-gray-800">Opções de Importação</h4>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Vincular todos os processos a um cliente específico (opcional)
+                  </label>
+                  <select
+                    value={clienteSelecionado}
+                    onChange={(e) => setClienteSelecionado(e.target.value)}
+                    className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Detectar automaticamente pelo CPF</option>
+                    {clientes.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.nome} {c.cpf && `(${c.cpf})`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={importarAndamentos}
+                      onChange={(e) => setImportarAndamentos(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded"
+                    />
+                    <span className="text-sm text-gray-700">Importar andamentos</span>
+                  </label>
+
+                  {importarAndamentos && (
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={andamentosVisiveis}
+                        onChange={(e) => setAndamentosVisiveis(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 rounded"
+                      />
+                      <span className="text-sm text-gray-700">Andamentos visíveis para o cliente</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {/* Lista de Processos */}
+              <div className="border rounded-lg overflow-hidden">
+                <div className="bg-gray-100 px-4 py-2 border-b">
+                  <h4 className="font-medium text-gray-800">Preview dos Processos</h4>
+                </div>
+                <div className="max-h-80 overflow-y-auto">
+                  {preview.processos.map((processo, idx) => (
+                    <div key={idx} className="border-b last:border-b-0">
+                      <div
+                        className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+                        onClick={() => toggleProcessoExpandido(processo.numero_processo)}
+                      >
+                        <div className="flex items-center gap-3">
+                          {processo.existe_no_sistema ? (
+                            <span className="w-6 h-6 bg-purple-100 text-purple-700 rounded-full flex items-center justify-center text-xs" title="Será atualizado">
+                              <RefreshCw className="w-3 h-3" />
+                            </span>
+                          ) : (
+                            <span className="w-6 h-6 bg-green-100 text-green-700 rounded-full flex items-center justify-center text-xs" title="Será criado">
+                              <Plus className="w-3 h-3" />
+                            </span>
+                          )}
+                          <div>
+                            <p className="font-medium text-gray-800">{processo.numero_processo}</p>
+                            <p className="text-xs text-gray-500">
+                              {processo.tipo_acao || 'Tipo não informado'} • {processo.andamentos.length} andamentos
+                              {processo.cliente_nome && ` • ${processo.cliente_nome}`}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {processo.cliente_encontrado && (
+                            <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
+                              Cliente encontrado
+                            </span>
+                          )}
+                          {processosExpandidos.has(processo.numero_processo) ? (
+                            <ChevronUp className="w-4 h-4 text-gray-400" />
+                          ) : (
+                            <ChevronDown className="w-4 h-4 text-gray-400" />
+                          )}
+                        </div>
+                      </div>
+
+                      {processosExpandidos.has(processo.numero_processo) && (
+                        <div className="px-4 py-3 bg-gray-50 border-t">
+                          <div className="grid grid-cols-2 gap-4 text-sm mb-3">
+                            <div>
+                              <span className="text-gray-500">Vara/Tribunal:</span>
+                              <span className="ml-2 text-gray-800">{processo.vara_tribunal || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Fase:</span>
+                              <span className="ml-2 text-gray-800">{processo.fase || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Réu:</span>
+                              <span className="ml-2 text-gray-800">{processo.reu || '-'}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Valor da Causa:</span>
+                              <span className="ml-2 text-gray-800">{formatarValor(processo.valor_causa)}</span>
+                            </div>
+                            <div>
+                              <span className="text-gray-500">Distribuição:</span>
+                              <span className="ml-2 text-gray-800">{formatarData(processo.data_distribuicao)}</span>
+                            </div>
+                            {processo.cliente_cpf && (
+                              <div>
+                                <span className="text-gray-500">CPF Cliente:</span>
+                                <span className="ml-2 text-gray-800">{processo.cliente_cpf}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {processo.andamentos.length > 0 && (
+                            <div>
+                              <p className="text-xs font-medium text-gray-600 mb-2">
+                                Andamentos ({processo.andamentos.length}):
+                              </p>
+                              <div className="space-y-1 max-h-32 overflow-y-auto">
+                                {processo.andamentos.slice(0, 5).map((and, andIdx) => (
+                                  <div key={andIdx} className="text-xs bg-white rounded p-2 border">
+                                    <span className="text-gray-500">{formatarData(and.data)}:</span>
+                                    <span className="ml-2 text-gray-700">
+                                      {and.descricao.length > 100
+                                        ? and.descricao.substring(0, 100) + '...'
+                                        : and.descricao}
+                                    </span>
+                                  </div>
+                                ))}
+                                {processo.andamentos.length > 5 && (
+                                  <p className="text-xs text-gray-500 text-center">
+                                    + {processo.andamentos.length - 5} andamentos
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {erro && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-center gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0" />
+                  <p className="text-red-700">{erro}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Etapa: Importando */}
+          {etapa === 'importando' && (
+            <div className="text-center py-12">
+              <div className="w-12 h-12 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-4" />
+              <p className="text-gray-600 font-medium">Importando dados...</p>
+              <p className="text-gray-400 text-sm mt-2">Isso pode levar alguns segundos</p>
+            </div>
+          )}
+
+          {/* Etapa: Resultado */}
+          {etapa === 'resultado' && resultado && (
+            <div className="space-y-4">
+              <div className="bg-green-50 border border-green-200 rounded-lg p-6 text-center">
+                <CheckCircle className="w-12 h-12 text-green-600 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-green-800">Importação Concluída!</h3>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
+                <div className="bg-green-50 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-green-700">{resultado.processos_criados}</p>
+                  <p className="text-sm text-green-600">Processos criados</p>
+                </div>
+                <div className="bg-purple-50 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-purple-700">{resultado.processos_atualizados}</p>
+                  <p className="text-sm text-purple-600">Processos atualizados</p>
+                </div>
+                <div className="bg-blue-50 rounded-lg p-4 text-center">
+                  <p className="text-2xl font-bold text-blue-700">{resultado.andamentos_criados}</p>
+                  <p className="text-sm text-blue-600">Andamentos adicionados</p>
+                </div>
+              </div>
+
+              {resultado.erros && resultado.erros.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
+                  <h4 className="font-medium text-amber-800 mb-2 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4" />
+                    {resultado.erros.length} avisos/erros
+                  </h4>
+                  <ul className="text-sm text-amber-700 space-y-1 max-h-32 overflow-y-auto">
+                    {resultado.erros.map((erro: string, idx: number) => (
+                      <li key={idx}>• {erro}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="p-4 border-t flex justify-between">
+          {etapa === 'preview' && (
+            <>
+              <button
+                onClick={() => {
+                  setEtapa('upload')
+                  setPreview(null)
+                  setArquivo(null)
+                  setErro('')
+                }}
+                className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+              >
+                Voltar
+              </button>
+              <button
+                onClick={confirmarImportacao}
+                disabled={carregando}
+                className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+              >
+                <FileUp className="w-4 h-4" />
+                Confirmar Importação
+              </button>
+            </>
+          )}
+
+          {etapa === 'resultado' && (
+            <button
+              onClick={onClose}
+              className="ml-auto px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+            >
+              Fechar
+            </button>
+          )}
+
+          {etapa === 'upload' && (
+            <button
+              onClick={onClose}
+              className="ml-auto px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+            >
+              Cancelar
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // Dashboard Administrativo Principal
 const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => void }) => {
   const [cadastros, setCadastros] = useState<Cadastro[]>([])
@@ -2054,6 +2596,9 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const [showEnviarEmailModal, setShowEnviarEmailModal] = useState(false)
 // Estado do Modal de Backup
   const [showBackupModal, setShowBackupModal] = useState(false)
+
+  // Estado do Modal de Importação do Astrea
+  const [showImportarAstreaModal, setShowImportarAstreaModal] = useState(false)
 
   // Estados de Assinatura Digital
   const [enviandoParaAssinatura, setEnviandoParaAssinatura] = useState(false)
@@ -4547,6 +5092,17 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
               <span className="hidden sm:inline">Exportar Excel</span>
               <span className="sm:hidden">Excel</span>
             </a>
+            {user.is_admin && (
+              <button
+                onClick={() => setShowImportarAstreaModal(true)}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium px-4 py-2 rounded-lg transition-colors"
+                title="Importar processos do Astrea"
+              >
+                <FileUp className="w-5 h-5" />
+                <span className="hidden sm:inline">Importar Astrea</span>
+                <span className="sm:hidden">Astrea</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -4624,6 +5180,17 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       )}
       {showBackupModal && (
         <BackupModal user={user} onClose={() => setShowBackupModal(false)} />
+      )}
+
+      {showImportarAstreaModal && (
+        <ImportarAstreaModal
+          user={user}
+          onClose={() => setShowImportarAstreaModal(false)}
+          onImportSuccess={() => {
+            // Recarregar dados se necessário
+            carregarCadastros()
+          }}
+        />
       )}
 
       {/* Modal Ver Atualização */}

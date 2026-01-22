@@ -429,6 +429,31 @@ def init_db():
         logger.info("Tabelas de Demandas Específicas verificadas/criadas!")
         logger.info("Tabelas de Termos de Uso e Privacidade verificadas/criadas!")
 
+        # ========== HISTÓRICO DE IMPORTAÇÕES ==========
+
+        # Tabela de histórico de importações
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS historico_importacoes (
+                id SERIAL PRIMARY KEY,
+                tipo VARCHAR(50) NOT NULL,
+                arquivo_nome VARCHAR(255),
+                arquivo_tamanho INTEGER,
+                processos_criados INTEGER DEFAULT 0,
+                processos_atualizados INTEGER DEFAULT 0,
+                andamentos_adicionados INTEGER DEFAULT 0,
+                erros INTEGER DEFAULT 0,
+                detalhes JSONB DEFAULT '{}',
+                usuario_id INTEGER REFERENCES usuarios(id),
+                usuario_nome VARCHAR(255),
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_historico_tipo ON historico_importacoes(tipo)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_historico_data ON historico_importacoes(criado_em DESC)")
+
+        logger.info("Tabela de histórico de importações verificada/criada!")
+
         conn.commit()
 
         # Criar usuário admin inicial se não existir

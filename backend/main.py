@@ -7183,8 +7183,11 @@ async def preview_importacao_astrea(
 class ImportacaoAstreaRequest(BaseModel):
     processos: List[dict]
     cadastro_id_padrao: Optional[str] = None  # Para vincular todos ao mesmo cliente
+    cliente_id: Optional[str] = None  # Alias para cadastro_id_padrao (frontend usa este)
     importar_andamentos: bool = True
     andamentos_visiveis: bool = True
+    arquivo_nome: Optional[str] = None
+    arquivo_tamanho: Optional[int] = None
 
 
 @app.post("/api/admin/importar-astrea/confirmar")
@@ -7195,6 +7198,9 @@ async def confirmar_importacao_astrea(
     """
     Efetua a importação dos processos e andamentos do Astrea.
     """
+    # Suporte a cliente_id como alias de cadastro_id_padrao
+    cadastro_id_padrao = dados.cadastro_id_padrao or dados.cliente_id
+
     relatorio = {
         "processos_criados": 0,
         "processos_atualizados": 0,
@@ -7214,8 +7220,8 @@ async def confirmar_importacao_astrea(
             cadastro_id = None
 
             # 1. Se tem cadastro_id padrão, usar
-            if dados.cadastro_id_padrao:
-                cadastro_id = dados.cadastro_id_padrao
+            if cadastro_id_padrao:
+                cadastro_id = cadastro_id_padrao
             # 2. Se processo já existe, manter vínculo existente
             elif processo_data.get("cadastro_id_existente"):
                 cadastro_id = processo_data["cadastro_id_existente"]
@@ -7302,7 +7308,81 @@ async def confirmar_importacao_astrea(
     relatorio["sucesso"] = True
     relatorio["total_erros"] = len(relatorio["erros"])
 
+    # Salvar histórico da importação
+    try:
+        conn = get_db()
+        if conn:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO historico_importacoes
+                (tipo, arquivo_nome, arquivo_tamanho, processos_criados, processos_atualizados,
+                 andamentos_adicionados, erros, detalhes, usuario_id, usuario_nome)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                'astrea',
+                dados.arquivo_nome or 'arquivo.xlsx',
+                dados.arquivo_tamanho or 0,
+                relatorio["processos_criados"],
+                relatorio["processos_atualizados"],
+                relatorio["andamentos_criados"],
+                len(relatorio["erros"]),
+                json.dumps({"erros": relatorio["erros"][:10], "detalhes": relatorio["detalhes"][:20]}),
+                admin.get("id"),
+                admin.get("nome", "Admin")
+            ))
+            conn.commit()
+            cur.close()
+            conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao salvar histórico de importação: {e}")
+
     return relatorio
+
+
+@app.get("/api/admin/importacoes/historico")
+async def listar_historico_importacoes(admin = Depends(verificar_admin)):
+    """Lista o histórico de importações."""
+    try:
+        conn = get_db()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Erro de conexão")
+
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, tipo, arquivo_nome, arquivo_tamanho,
+                   processos_criados, processos_atualizados, andamentos_adicionados,
+                   erros, detalhes, usuario_nome, criado_em
+            FROM historico_importacoes
+            ORDER BY criado_em DESC
+            LIMIT 50
+        """)
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+
+        historico = []
+        for row in rows:
+            historico.append({
+                "id": row["id"],
+                "tipo": row["tipo"],
+                "arquivo_nome": row["arquivo_nome"],
+                "arquivo_tamanho": row["arquivo_tamanho"],
+                "processos_criados": row["processos_criados"],
+                "processos_atualizados": row["processos_atualizados"],
+                "andamentos_adicionados": row["andamentos_adicionados"],
+                "erros": row["erros"],
+                "detalhes": row["detalhes"] if isinstance(row["detalhes"], dict) else json.loads(row["detalhes"] or "{}"),
+                "usuario_nome": row["usuario_nome"],
+                "criado_em": row["criado_em"].isoformat() if row["criado_em"] else None
+            })
+
+        return historico
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao listar histórico: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/admin/clientes-para-importacao")
