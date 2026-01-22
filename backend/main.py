@@ -7030,16 +7030,21 @@ def parsear_excel_astrea(arquivo_bytes: bytes) -> dict:
 
         wb.close()
 
+        # Montar lista de colunas encontradas para exibição
+        colunas_encontradas = list(colunas_processo.keys()) + list(colunas_andamento.keys())
+
         return {
             "sucesso": True,
             "processos": processos_lista,
             "total_processos": len(processos_lista),
             "total_andamentos": total_andamentos,
+            "colunas_encontradas": colunas_encontradas,
             "colunas_detectadas": {
                 "processos": list(colunas_processo.keys()),
                 "andamentos": list(colunas_andamento.keys())
             },
-            "headers_encontrados": headers[:30]
+            "headers_encontrados": headers[:30],
+            "erros": []  # Erros serão adicionados durante o enriquecimento
         }
 
     except Exception as e:
