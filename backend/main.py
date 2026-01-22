@@ -3585,6 +3585,334 @@ async def admin_verificar_acesso_cliente(
 
 
 # ============================================
+# ENDPOINTS - ADMIN CRIAR/IMPORTAR CLIENTES
+# ============================================
+
+class ClienteManual(BaseModel):
+    """Dados para criação manual de cliente pelo admin."""
+    nome: str
+    email: EmailStr
+    cpf: str
+    telefone: str
+    # Campos opcionais
+    nacionalidade: str = "brasileiro(a)"
+    estado_civil: str = ""
+    profissao: str = ""
+    data_nascimento: str = ""
+    endereco_completo: str = ""
+    rg: str = ""
+    tipo_demanda: str = ""
+    objeto_contrato: str = ""
+    poderes_especificos: str = ""
+    observacoes: str = ""
+    # Habilitar portal automaticamente
+    habilitar_portal: bool = False
+
+@app.post("/api/admin/clientes")
+async def admin_criar_cliente(
+    dados: ClienteManual,
+    usuario: dict = Depends(verificar_admin)
+):
+    """Admin cria um novo cliente manualmente."""
+    logger.info(f"Admin {usuario['email']} criando cliente: {dados.nome}")
+
+    # Verificar se já existe cliente com mesmo CPF
+    cadastros = carregar_cadastros()
+    cpf_limpo = dados.cpf.replace(".", "").replace("-", "")
+    for c in cadastros:
+        cpf_existente = c.get("dados", {}).get("cpf", "").replace(".", "").replace("-", "")
+        if cpf_existente == cpf_limpo:
+            raise HTTPException(status_code=400, detail=f"Já existe um cliente com o CPF {dados.cpf}")
+
+    # Criar cadastro
+    novo_cadastro = {
+        "id": uuid.uuid4().hex[:12],
+        "data": datetime.now().strftime("%d/%m/%Y"),
+        "data_hora": datetime.now().isoformat(),
+        "status": "validado",  # Cliente criado pelo admin já vem validado
+        "dados": {
+            "nome": dados.nome,
+            "email": dados.email,
+            "cpf": dados.cpf,
+            "telefone": dados.telefone,
+            "nacionalidade": dados.nacionalidade,
+            "estado_civil": dados.estado_civil,
+            "profissao": dados.profissao,
+            "data_nascimento": dados.data_nascimento,
+            "endereco_completo": dados.endereco_completo,
+            "rg": dados.rg,
+            "tipo_demanda": dados.tipo_demanda,
+            "objeto_contrato": dados.objeto_contrato,
+            "poderes_especificos": dados.poderes_especificos,
+            "observacoes": dados.observacoes,
+        },
+        "documentos": [],
+        "arquivos_gerados": {}
+    }
+
+    if not salvar_cadastro(novo_cadastro):
+        raise HTTPException(status_code=500, detail="Erro ao salvar cadastro")
+
+    resultado = {
+        "success": True,
+        "id": novo_cadastro["id"],
+        "message": f"Cliente {dados.nome} criado com sucesso",
+        "portal_habilitado": False
+    }
+
+    # Habilitar portal se solicitado
+    if dados.habilitar_portal:
+        senha_temporaria = secrets.token_urlsafe(8)
+        if criar_cliente_auth(novo_cadastro["id"], senha_temporaria):
+            resultado["portal_habilitado"] = True
+            resultado["senha_temporaria"] = senha_temporaria
+
+            # Enviar email com credenciais
+            if RESEND_API_KEY:
+                try:
+                    conteudo = f"""
+                        <p style="font-size: 16px;">Olá, <strong>{dados.nome}</strong>!</p>
+
+                        <p>Seu cadastro foi criado e seu acesso ao Portal do Cliente foi habilitado.</p>
+
+                        <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                            <p style="margin: 0;"><strong>Email:</strong> {dados.email}</p>
+                            <p style="margin: 10px 0;"><strong>Senha temporária:</strong> <code style="background: #e0e0e0; padding: 3px 8px; border-radius: 4px; font-size: 18px;">{senha_temporaria}</code></p>
+                        </div>
+
+                        <p>Acesse o portal em: <a href="https://portal.vaucherealvares.com" style="color: #8B1538;">portal.vaucherealvares.com</a></p>
+
+                        <p style="color: #666; font-size: 14px;">
+                            <strong>Importante:</strong> Recomendamos que você altere sua senha no primeiro acesso.
+                        </p>
+                    """
+                    corpo_html = criar_email_html(conteudo)
+                    await enviar_email_resend(
+                        dados.email,
+                        "🔑 Acesso ao Portal do Cliente - Vaucher e Álvares",
+                        corpo_html
+                    )
+                    resultado["email_enviado"] = True
+                except Exception as e:
+                    logger.error(f"Erro ao enviar email: {e}")
+                    resultado["email_enviado"] = False
+
+    return resultado
+
+
+@app.post("/api/admin/clientes/lote")
+async def admin_criar_clientes_lote(
+    arquivo: UploadFile = File(...),
+    habilitar_portal: bool = Form(default=False),
+    usuario: dict = Depends(verificar_admin)
+):
+    """
+    Admin cria múltiplos clientes a partir de arquivo TXT.
+
+    Formato esperado do arquivo (separado por ponto e vírgula ou tabulação):
+    nome;email;cpf;telefone;endereco;profissao;estado_civil;data_nascimento
+
+    Exemplo:
+    João Silva;joao@email.com;123.456.789-00;(65)99999-9999;Rua A, 123;Advogado;Casado;01/01/1990
+    Maria Santos;maria@email.com;987.654.321-00;(65)88888-8888;Rua B, 456;Médica;Solteira;15/05/1985
+    """
+    logger.info(f"Admin {usuario['email']} importando clientes em lote")
+
+    if not arquivo.filename.endswith(('.txt', '.csv')):
+        raise HTTPException(status_code=400, detail="Formato de arquivo inválido. Use .txt ou .csv")
+
+    # Ler conteúdo do arquivo
+    try:
+        conteudo = await arquivo.read()
+        # Tentar decodificar com diferentes encodings
+        for encoding in ['utf-8', 'latin-1', 'cp1252']:
+            try:
+                texto = conteudo.decode(encoding)
+                break
+            except:
+                continue
+        else:
+            raise HTTPException(status_code=400, detail="Não foi possível ler o arquivo. Verifique a codificação.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Erro ao ler arquivo: {str(e)}")
+
+    # Processar linhas
+    linhas = texto.strip().split('\n')
+    if len(linhas) < 1:
+        raise HTTPException(status_code=400, detail="Arquivo vazio")
+
+    # Detectar separador (ponto e vírgula ou tabulação)
+    primeira_linha = linhas[0]
+    separador = ';' if ';' in primeira_linha else '\t' if '\t' in primeira_linha else ','
+
+    # Verificar se primeira linha é cabeçalho
+    cabecalho_possivel = primeira_linha.lower()
+    tem_cabecalho = 'nome' in cabecalho_possivel or 'email' in cabecalho_possivel or 'cpf' in cabecalho_possivel
+
+    if tem_cabecalho:
+        linhas = linhas[1:]  # Pular cabeçalho
+
+    # Carregar cadastros existentes para verificar duplicatas
+    cadastros_existentes = carregar_cadastros()
+    cpfs_existentes = set()
+    for c in cadastros_existentes:
+        cpf = c.get("dados", {}).get("cpf", "").replace(".", "").replace("-", "")
+        if cpf:
+            cpfs_existentes.add(cpf)
+
+    resultados = {
+        "total": len(linhas),
+        "criados": 0,
+        "erros": 0,
+        "detalhes": [],
+        "clientes_criados": []
+    }
+
+    for i, linha in enumerate(linhas, 1):
+        linha = linha.strip()
+        if not linha:
+            continue
+
+        campos = linha.split(separador)
+
+        # Mínimo: nome, email, cpf, telefone
+        if len(campos) < 4:
+            resultados["erros"] += 1
+            resultados["detalhes"].append({
+                "linha": i,
+                "erro": f"Linha incompleta. Esperado no mínimo: nome;email;cpf;telefone"
+            })
+            continue
+
+        try:
+            nome = campos[0].strip()
+            email = campos[1].strip()
+            cpf = campos[2].strip()
+            telefone = campos[3].strip()
+            endereco = campos[4].strip() if len(campos) > 4 else ""
+            profissao = campos[5].strip() if len(campos) > 5 else ""
+            estado_civil = campos[6].strip() if len(campos) > 6 else ""
+            data_nascimento = campos[7].strip() if len(campos) > 7 else ""
+
+            # Validar campos obrigatórios
+            if not nome or not email or not cpf or not telefone:
+                resultados["erros"] += 1
+                resultados["detalhes"].append({
+                    "linha": i,
+                    "erro": "Campos obrigatórios vazios (nome, email, cpf, telefone)"
+                })
+                continue
+
+            # Verificar duplicata
+            cpf_limpo = cpf.replace(".", "").replace("-", "")
+            if cpf_limpo in cpfs_existentes:
+                resultados["erros"] += 1
+                resultados["detalhes"].append({
+                    "linha": i,
+                    "nome": nome,
+                    "erro": f"CPF {cpf} já cadastrado"
+                })
+                continue
+
+            # Criar cadastro
+            novo_cadastro = {
+                "id": uuid.uuid4().hex[:12],
+                "data": datetime.now().strftime("%d/%m/%Y"),
+                "data_hora": datetime.now().isoformat(),
+                "status": "validado",
+                "dados": {
+                    "nome": nome,
+                    "email": email,
+                    "cpf": cpf,
+                    "telefone": telefone,
+                    "endereco_completo": endereco,
+                    "profissao": profissao,
+                    "estado_civil": estado_civil,
+                    "data_nascimento": data_nascimento,
+                    "nacionalidade": "brasileiro(a)",
+                    "tipo_demanda": "",
+                    "objeto_contrato": "",
+                    "poderes_especificos": "",
+                },
+                "documentos": [],
+                "arquivos_gerados": {}
+            }
+
+            if salvar_cadastro(novo_cadastro):
+                cpfs_existentes.add(cpf_limpo)
+                resultados["criados"] += 1
+
+                cliente_info = {
+                    "id": novo_cadastro["id"],
+                    "nome": nome,
+                    "email": email
+                }
+
+                # Habilitar portal se solicitado
+                if habilitar_portal:
+                    senha_temporaria = secrets.token_urlsafe(8)
+                    if criar_cliente_auth(novo_cadastro["id"], senha_temporaria):
+                        cliente_info["portal_habilitado"] = True
+                        cliente_info["senha_temporaria"] = senha_temporaria
+
+                        # Enviar email com credenciais
+                        if RESEND_API_KEY:
+                            try:
+                                conteudo_email = f"""
+                                    <p style="font-size: 16px;">Olá, <strong>{nome}</strong>!</p>
+
+                                    <p>Seu cadastro foi criado e seu acesso ao Portal do Cliente foi habilitado.</p>
+
+                                    <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                                        <p style="margin: 0;"><strong>Email:</strong> {email}</p>
+                                        <p style="margin: 10px 0;"><strong>Senha temporária:</strong> <code style="background: #e0e0e0; padding: 3px 8px; border-radius: 4px; font-size: 18px;">{senha_temporaria}</code></p>
+                                    </div>
+
+                                    <p>Acesse o portal em: <a href="https://portal.vaucherealvares.com" style="color: #8B1538;">portal.vaucherealvares.com</a></p>
+                                """
+                                corpo_html = criar_email_html(conteudo_email)
+                                await enviar_email_resend(
+                                    email,
+                                    "🔑 Acesso ao Portal do Cliente - Vaucher e Álvares",
+                                    corpo_html
+                                )
+                                cliente_info["email_enviado"] = True
+                            except Exception as e:
+                                logger.error(f"Erro ao enviar email para {email}: {e}")
+                                cliente_info["email_enviado"] = False
+
+                resultados["clientes_criados"].append(cliente_info)
+                resultados["detalhes"].append({
+                    "linha": i,
+                    "nome": nome,
+                    "sucesso": True,
+                    "id": novo_cadastro["id"]
+                })
+            else:
+                resultados["erros"] += 1
+                resultados["detalhes"].append({
+                    "linha": i,
+                    "nome": nome,
+                    "erro": "Erro ao salvar no banco de dados"
+                })
+
+        except Exception as e:
+            resultados["erros"] += 1
+            resultados["detalhes"].append({
+                "linha": i,
+                "erro": str(e)
+            })
+
+    logger.info(f"Importação em lote: {resultados['criados']} criados, {resultados['erros']} erros")
+
+    return {
+        "success": True,
+        "message": f"{resultados['criados']} clientes criados, {resultados['erros']} erros",
+        **resultados
+    }
+
+
+# ============================================
 # ENDPOINTS - ADMIN PROCESSO
 # ============================================
 
