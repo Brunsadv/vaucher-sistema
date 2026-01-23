@@ -93,8 +93,22 @@ def init_db():
                 nome VARCHAR(255) NOT NULL,
                 is_admin BOOLEAN DEFAULT FALSE,
                 ativo BOOLEAN DEFAULT TRUE,
-                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                termos_aceitos_em TIMESTAMP
             )
+        """)
+
+        # Adicionar coluna termos_aceitos_em se não existir (migração)
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'usuarios' AND column_name = 'termos_aceitos_em'
+                ) THEN
+                    ALTER TABLE usuarios ADD COLUMN termos_aceitos_em TIMESTAMP;
+                END IF;
+            END $$;
         """)
 
         # Tabela financeiro - estrutura completa
@@ -530,7 +544,7 @@ def listar_usuarios() -> List[dict]:
 
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, email, nome, is_admin, ativo, criado_em FROM usuarios ORDER BY criado_em DESC")
+        cur.execute("SELECT id, email, nome, is_admin, ativo, criado_em, termos_aceitos_em FROM usuarios ORDER BY criado_em DESC")
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -538,6 +552,45 @@ def listar_usuarios() -> List[dict]:
     except Exception as e:
         logger.error(f"Erro ao listar usuários: {e}")
         return []
+
+
+def verificar_termos_aceitos(user_id: int) -> bool:
+    """Verifica se o usuário já aceitou os termos de uso."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT termos_aceitos_em FROM usuarios WHERE id = %s", (user_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return bool(row and row.get("termos_aceitos_em"))
+    except Exception as e:
+        logger.error(f"Erro ao verificar termos aceitos: {e}")
+        return False
+
+
+def registrar_aceite_termos(user_id: int) -> bool:
+    """Registra o aceite dos termos de uso pelo usuário."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE usuarios SET termos_aceitos_em = CURRENT_TIMESTAMP WHERE id = %s",
+            (user_id,)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao registrar aceite dos termos: {e}")
+        return False
 
 
 def criar_usuario(email: str, senha: str, nome: str, is_admin: bool = False) -> bool:

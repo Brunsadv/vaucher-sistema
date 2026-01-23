@@ -50,6 +50,7 @@ class LoginResponse(BaseModel):
     nome: Optional[str] = None
     is_admin: Optional[bool] = None
     message: Optional[str] = None
+    termos_aceitos: Optional[bool] = None
 
 
 class NovoUsuario(BaseModel):

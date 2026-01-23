@@ -73,6 +73,8 @@ from modules.database import (
     criar_usuario,
     atualizar_usuario,
     deletar_usuario,
+    verificar_termos_aceitos,
+    registrar_aceite_termos,
     salvar_cadastro,
     carregar_cadastros,
     buscar_cadastro,
@@ -359,22 +361,37 @@ def health():
 def login(request: LoginRequest):
     """Autenticação do painel administrativo."""
     usuario = buscar_usuario_por_email(request.email)
-    
+
     if usuario and verificar_senha(request.senha, usuario['senha_hash']):
         token = gerar_token(usuario["id"], usuario["email"], usuario["is_admin"])
+        termos_aceitos = verificar_termos_aceitos(usuario["id"])
         return LoginResponse(
-            success=True, 
-            token=token, 
+            success=True,
+            token=token,
             nome=usuario['nome'],
-            is_admin=usuario['is_admin']
+            is_admin=usuario['is_admin'],
+            termos_aceitos=termos_aceitos
         )
-    
+
     return LoginResponse(success=False, message="E-mail ou senha incorretos")
 
 @app.post("/api/logout")
 def logout():
     """Encerra a sessão do usuário."""
     return {"success": True}
+
+@app.post("/api/aceitar-termos")
+def aceitar_termos(usuario: dict = Depends(verificar_admin)):
+    """Registra o aceite dos termos de uso pelo usuário."""
+    if registrar_aceite_termos(usuario["id"]):
+        return {"success": True, "message": "Termos aceitos com sucesso"}
+    raise HTTPException(status_code=500, detail="Erro ao registrar aceite dos termos")
+
+@app.get("/api/verificar-termos")
+def verificar_termos(usuario: dict = Depends(verificar_admin)):
+    """Verifica se o usuário já aceitou os termos de uso."""
+    aceitos = verificar_termos_aceitos(usuario["id"])
+    return {"termos_aceitos": aceitos}
 
 # --- GERENCIAMENTO DE USUÁRIOS (APENAS ADMIN) ---
 
