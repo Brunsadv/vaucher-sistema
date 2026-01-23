@@ -347,10 +347,10 @@ def buscar_documento_demanda(doc_id: int) -> dict:
 def root():
     return {"message": "Vaucher e Álvares API", "status": "online", "version": "3.0"}
 
-@app.get("/health")
+@app.api_route("/health", methods=["GET", "HEAD"])
 def health():
     return {
-        "status": "healthy", 
+        "status": "healthy",
         "database": "connected" if get_db() else "disconnected",
         "email": "resend" if RESEND_API_KEY else "not_configured"
     }
