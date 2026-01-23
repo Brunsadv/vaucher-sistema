@@ -1906,7 +1906,7 @@ def criar_contrato_honorarios(cadastro_id: str, dados: dict) -> int:
             dados.get("tipo"),
             dados.get("descricao"),
             dados.get("valor_total"),
-            dados.get("num_parcelas", 1),
+            dados.get("num_parcelas") or dados.get("numero_parcelas") or 1,
             dados.get("valor_mensal"),
             dados.get("dia_vencimento", 10),
             dados.get("percentual_exito"),
@@ -1918,8 +1918,9 @@ def criar_contrato_honorarios(cadastro_id: str, dados: dict) -> int:
         cur.close()
         conn.close()
         
-        # Gerar parcelas automaticamente se for fixo ou parcelado
-        if dados.get("tipo") in ["fixo", "parcelado"]:
+        # Gerar parcelas automaticamente para qualquer tipo de contrato
+        num_parcelas = dados.get("num_parcelas") or dados.get("numero_parcelas") or 1
+        if int(num_parcelas) >= 1:
             gerar_parcelas_contrato(contrato_id, dados)
         
         return contrato_id
@@ -1940,7 +1941,7 @@ def gerar_parcelas_contrato(contrato_id: int, dados: dict):
         cur = conn.cursor()
         
         valor_total = float(dados.get("valor_total", 0))
-        num_parcelas = int(dados.get("num_parcelas", 1))
+        num_parcelas = int(dados.get("num_parcelas") or dados.get("numero_parcelas") or 1)
         valor_parcela = valor_total / num_parcelas
         dia_vencimento = int(dados.get("dia_vencimento", 10))
         
@@ -2089,7 +2090,7 @@ def atualizar_contrato(contrato_id: int, dados: dict) -> bool:
             dados.get("tipo"),
             dados.get("descricao"),
             dados.get("valor_total"),
-            dados.get("num_parcelas", 1),
+            dados.get("num_parcelas") or dados.get("numero_parcelas") or 1,
             dados.get("valor_mensal"),
             dados.get("dia_vencimento", 10),
             dados.get("percentual_exito"),
