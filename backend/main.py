@@ -449,11 +449,11 @@ def alterar_minha_senha(dados: AlterarSenha, usuario: dict = Depends(verificar_t
 async def criar_cadastro(dados: DadosCliente):
     """Recebe novo cadastro do cliente."""
     logger.info(f"Novo cadastro recebido: {dados.nome}")
-    
+
     novo_cadastro = {
         "id": uuid.uuid4().hex[:12],
-        "data": datetime.now().strftime("%d/%m/%Y"),
-        "data_hora": datetime.now().isoformat(),
+        "data": datetime.now().isoformat(),
+        "data_cadastro_br": datetime.now().strftime("%d/%m/%Y"),
         "status": "pendente",
         "dados": dados.dict(),
         "documentos": [],
@@ -3645,8 +3645,8 @@ async def admin_criar_cliente(
     # Criar cadastro
     novo_cadastro = {
         "id": uuid.uuid4().hex[:12],
-        "data": datetime.now().strftime("%d/%m/%Y"),
-        "data_hora": datetime.now().isoformat(),
+        "data": datetime.now().isoformat(),
+        "data_cadastro_br": datetime.now().strftime("%d/%m/%Y"),
         "status": "validado",  # Cliente criado pelo admin já vem validado
         "dados": {
             "nome": dados.nome,
@@ -3835,8 +3835,8 @@ async def admin_criar_clientes_lote(
             # Criar cadastro
             novo_cadastro = {
                 "id": uuid.uuid4().hex[:12],
-                "data": datetime.now().strftime("%d/%m/%Y"),
-                "data_hora": datetime.now().isoformat(),
+                "data": datetime.now().isoformat(),
+                "data_cadastro_br": datetime.now().strftime("%d/%m/%Y"),
                 "status": "validado",
                 "dados": {
                     "nome": nome,
