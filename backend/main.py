@@ -134,6 +134,14 @@ from modules.assinatura import (
     gerar_html_botoes_assinatura,
 )
 
+# OCR com Google Vision (criado em 23/01/2026)
+try:
+    from modules.ocr import ocr_processor, OCRProcessor
+    OCR_DISPONIVEL = True
+except Exception as e:
+    logger.warning(f"Módulo OCR não disponível: {e}")
+    OCR_DISPONIVEL = False
+
 # PostgreSQL
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -9049,6 +9057,272 @@ async def listar_banners_cliente(authorization: str = Header(None)):
     except Exception as e:
         logger.error(f"Erro ao listar banners para cliente: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# OCR - GOOGLE CLOUD VISION
+# ============================================
+
+@app.post("/api/admin/ocr/processar")
+async def processar_documento_ocr(
+    arquivo: UploadFile = File(...),
+    formato_exportacao: str = Form("auto"),
+    admin: dict = Depends(verificar_token_admin)
+):
+    """
+    Processa um documento com OCR e exporta para CSV/XLSX (tabelas) ou DOCX (texto).
+
+    - formato_exportacao: 'auto' (detecta), 'csv', 'xlsx', ou 'docx'
+    """
+    if not OCR_DISPONIVEL:
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço de OCR não disponível. Verifique as credenciais do Google Cloud."
+        )
+
+    # Validar tipo de arquivo
+    extensoes_permitidas = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.webp', '.pdf']
+    ext = os.path.splitext(arquivo.filename)[1].lower()
+    if ext not in extensoes_permitidas:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Tipo de arquivo não suportado. Use: {', '.join(extensoes_permitidas)}"
+        )
+
+    try:
+        # Salvar arquivo temporariamente
+        temp_dir = UPLOADS_DIR / "ocr_temp"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        temp_path = temp_dir / f"{timestamp}_{arquivo.filename}"
+
+        with open(temp_path, "wb") as f:
+            content = await arquivo.read()
+            f.write(content)
+
+        # Processar com OCR
+        resultado = ocr_processor.process_document(
+            str(temp_path),
+            export_format=formato_exportacao,
+            generate_summary=True
+        )
+
+        # Limpar arquivo temporário
+        os.remove(temp_path)
+
+        return {
+            "sucesso": True,
+            "tipo_detectado": resultado.get("tipo_detectado"),
+            "resumo": resultado.get("resumo"),
+            "confianca_media": resultado.get("confianca_media"),
+            "texto_completo": resultado.get("texto_completo", "")[:5000],  # Limita tamanho
+            "num_tabelas": len(resultado.get("tabelas", [])),
+            "arquivos_exportados": resultado.get("arquivos_exportados", {}),
+            "info_extraida": ocr_processor.ocr._extract_key_info(resultado.get("texto_completo", ""))
+        }
+
+    except Exception as e:
+        logger.error(f"Erro ao processar OCR: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao processar documento: {str(e)}")
+
+
+@app.post("/api/admin/ocr/comprovante/{parcela_id}")
+async def processar_comprovante_ocr(
+    parcela_id: int,
+    admin: dict = Depends(verificar_token_admin)
+):
+    """
+    Processa o comprovante de uma parcela com OCR e extrai informações.
+    """
+    if not OCR_DISPONIVEL:
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço de OCR não disponível. Verifique as credenciais do Google Cloud."
+        )
+
+    try:
+        # Buscar comprovante da parcela
+        conn = get_db()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT c.*, p.valor as valor_parcela, p.vencimento
+            FROM comprovantes c
+            JOIN parcelas p ON c.parcela_id = p.id
+            WHERE c.parcela_id = %s
+            ORDER BY c.enviado_em DESC
+            LIMIT 1
+        """, (parcela_id,))
+        comprovante = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not comprovante:
+            raise HTTPException(status_code=404, detail="Comprovante não encontrado para esta parcela")
+
+        arquivo_path = comprovante["arquivo_path"]
+        if not os.path.exists(arquivo_path):
+            raise HTTPException(status_code=404, detail="Arquivo do comprovante não encontrado")
+
+        # Processar com OCR
+        resultado = ocr_processor.process_comprovante(arquivo_path, parcela_id)
+
+        # Comparar valor detectado com valor da parcela
+        valor_parcela = float(comprovante["valor_parcela"]) if comprovante["valor_parcela"] else 0
+        valor_detectado_str = resultado["comprovante_info"].get("valor_detectado", "")
+
+        valor_confere = False
+        if valor_detectado_str:
+            try:
+                valor_detectado = float(
+                    valor_detectado_str.replace("R$", "").replace(".", "").replace(",", ".").strip()
+                )
+                # Tolerância de 1%
+                valor_confere = abs(valor_detectado - valor_parcela) / valor_parcela < 0.01 if valor_parcela > 0 else False
+            except:
+                pass
+
+        return {
+            "sucesso": True,
+            "parcela_id": parcela_id,
+            "comprovante_id": comprovante["id"],
+            "resumo": resultado.get("resumo"),
+            "tipo_documento": resultado["comprovante_info"].get("tipo_documento"),
+            "valor_parcela": valor_parcela,
+            "valor_detectado": valor_detectado_str,
+            "valor_confere": valor_confere,
+            "data_detectada": resultado["comprovante_info"].get("data_detectada"),
+            "cpf_cnpj_detectado": resultado["comprovante_info"].get("cpf_cnpj_detectado"),
+            "nome_detectado": resultado["comprovante_info"].get("nome_detectado"),
+            "confianca_media": resultado.get("confianca_media"),
+            "texto_completo": resultado.get("texto_completo", "")[:3000]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao processar comprovante com OCR: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao processar comprovante: {str(e)}")
+
+
+@app.post("/api/admin/ocr/documento/{cadastro_id}")
+async def processar_documento_cadastro_ocr(
+    cadastro_id: str,
+    documento_id: int,
+    admin: dict = Depends(verificar_token_admin)
+):
+    """
+    Processa um documento de cadastro específico com OCR.
+    """
+    if not OCR_DISPONIVEL:
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço de OCR não disponível. Verifique as credenciais do Google Cloud."
+        )
+
+    try:
+        # Buscar documento
+        conn = get_db()
+        if not conn:
+            raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT * FROM documentos_demanda
+            WHERE id = %s AND cadastro_id = %s
+        """, (documento_id, cadastro_id))
+        documento = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not documento:
+            raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+        arquivo_path = documento["arquivo_path"]
+        if not os.path.exists(arquivo_path):
+            raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+        # Processar com OCR
+        resultado = ocr_processor.process_document(
+            arquivo_path,
+            export_format="docx",
+            generate_summary=True
+        )
+
+        return {
+            "sucesso": True,
+            "documento_id": documento_id,
+            "cadastro_id": cadastro_id,
+            "tipo_documento": documento["tipo_documento"],
+            "nome_original": documento["nome_original"],
+            "tipo_detectado": resultado.get("tipo_detectado"),
+            "resumo": resultado.get("resumo"),
+            "confianca_media": resultado.get("confianca_media"),
+            "texto_completo": resultado.get("texto_completo", "")[:5000],
+            "info_extraida": ocr_processor.ocr._extract_key_info(resultado.get("texto_completo", "")),
+            "arquivos_exportados": resultado.get("arquivos_exportados", {})
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao processar documento com OCR: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao processar documento: {str(e)}")
+
+
+@app.get("/api/admin/ocr/download/{filename}")
+async def download_arquivo_ocr(
+    filename: str,
+    admin: dict = Depends(verificar_token_admin)
+):
+    """
+    Faz download de um arquivo exportado pelo OCR (CSV, XLSX ou DOCX).
+    """
+    from pathlib import Path
+
+    # Diretório de saída do OCR
+    ocr_output_dir = UPLOADS_DIR / "ocr_output"
+    filepath = ocr_output_dir / filename
+
+    # Validar que o arquivo está no diretório correto (segurança)
+    try:
+        filepath = filepath.resolve()
+        if not str(filepath).startswith(str(ocr_output_dir.resolve())):
+            raise HTTPException(status_code=403, detail="Acesso negado")
+    except:
+        raise HTTPException(status_code=400, detail="Caminho inválido")
+
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+
+    # Determinar content-type
+    ext = filepath.suffix.lower()
+    content_types = {
+        ".csv": "text/csv",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    }
+    content_type = content_types.get(ext, "application/octet-stream")
+
+    return FileResponse(
+        filepath,
+        media_type=content_type,
+        filename=filename
+    )
+
+
+@app.get("/api/admin/ocr/status")
+async def verificar_status_ocr(admin: dict = Depends(verificar_token_admin)):
+    """
+    Verifica se o serviço de OCR está disponível e configurado.
+    """
+    return {
+        "disponivel": OCR_DISPONIVEL,
+        "mensagem": "OCR Google Vision está operacional" if OCR_DISPONIVEL else "OCR não configurado. Verifique GOOGLE_APPLICATION_CREDENTIALS."
+    }
 
 
 # ============================================
