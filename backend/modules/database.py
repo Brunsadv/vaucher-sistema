@@ -1984,3 +1984,411 @@ def contar_mensagens_nao_lidas(cadastro_id: str = None, remetente: str = None) -
     except Exception as e:
         logger.error(f"Erro ao contar mensagens: {e}")
         return 0
+
+
+# ============================================
+# COMPROVANTES
+# ============================================
+
+def criar_comprovante(parcela_id: int, arquivo_nome: str, arquivo_path: str) -> int:
+    """Cria um registro de comprovante."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO comprovantes (parcela_id, arquivo_nome, arquivo_path)
+            VALUES (%s, %s, %s)
+            RETURNING id
+        """, (parcela_id, arquivo_nome, arquivo_path))
+        comprovante_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return comprovante_id
+    except Exception as e:
+        logger.error(f"Erro ao criar comprovante: {e}")
+        return None
+
+
+# ============================================
+# DOCUMENTOS ADMIN (ENVIADOS PELO ESCRITÓRIO)
+# ============================================
+
+def criar_documento_admin(cadastro_id: str, nome_arquivo: str, nome_original: str, arquivo_path: str, descricao: str, admin_email: str) -> int:
+    """Cria um registro de documento enviado pelo admin."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO documentos_admin (cadastro_id, nome_arquivo, nome_original, arquivo_path, descricao, enviado_por)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (cadastro_id, nome_arquivo, nome_original, arquivo_path, descricao, admin_email))
+        doc_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return doc_id
+    except Exception as e:
+        logger.error(f"Erro ao criar documento admin: {e}")
+        return None
+
+
+def listar_documentos_admin(cadastro_id: str) -> list:
+    """Lista documentos enviados pelo admin para um cliente."""
+    conn = get_db()
+    if not conn:
+        return []
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, nome_arquivo, nome_original, descricao, enviado_por, criado_em
+            FROM documentos_admin
+            WHERE cadastro_id = %s
+            ORDER BY criado_em DESC
+        """, (cadastro_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar documentos admin: {e}")
+        return []
+
+
+def buscar_documento_admin(doc_id: int) -> dict:
+    """Busca um documento admin específico."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM documentos_admin WHERE id = %s", (doc_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar documento admin: {e}")
+        return None
+
+
+def deletar_documento_admin(doc_id: int) -> bool:
+    """Deleta um documento admin."""
+    import os
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT arquivo_path FROM documentos_admin WHERE id = %s", (doc_id,))
+        row = cur.fetchone()
+
+        if row and row["arquivo_path"]:
+            if os.path.exists(row["arquivo_path"]):
+                os.remove(row["arquivo_path"])
+
+        cur.execute("DELETE FROM documentos_admin WHERE id = %s", (doc_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar documento admin: {e}")
+        return False
+
+
+# ============================================
+# DOCUMENTOS EXTRAS (ENVIADOS PELO CLIENTE)
+# ============================================
+
+def criar_documento_extra(cadastro_id: str, nome_arquivo: str, nome_original: str, arquivo_path: str, descricao: str) -> int:
+    """Cria um registro de documento extra enviado pelo cliente."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO documentos_extras (cadastro_id, nome_arquivo, nome_original, arquivo_path, descricao)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (cadastro_id, nome_arquivo, nome_original, arquivo_path, descricao))
+        doc_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        return doc_id
+    except Exception as e:
+        logger.error(f"Erro ao criar documento extra: {e}")
+        return None
+
+
+def listar_documentos_extras(cadastro_id: str) -> list:
+    """Lista documentos extras enviados pelo cliente."""
+    conn = get_db()
+    if not conn:
+        return []
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT id, nome_arquivo, nome_original, descricao, criado_em
+            FROM documentos_extras
+            WHERE cadastro_id = %s
+            ORDER BY criado_em DESC
+        """, (cadastro_id,))
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        return [dict(row) for row in rows]
+    except Exception as e:
+        logger.error(f"Erro ao listar documentos extras: {e}")
+        return []
+
+
+def buscar_documento_extra(doc_id: int) -> dict:
+    """Busca um documento extra específico."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM documentos_extras WHERE id = %s", (doc_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar documento extra: {e}")
+        return None
+
+
+def deletar_documento_extra(doc_id: int) -> bool:
+    """Deleta um documento extra."""
+    import os
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT arquivo_path FROM documentos_extras WHERE id = %s", (doc_id,))
+        row = cur.fetchone()
+
+        if row and row["arquivo_path"]:
+            if os.path.exists(row["arquivo_path"]):
+                os.remove(row["arquivo_path"])
+
+        cur.execute("DELETE FROM documentos_extras WHERE id = %s", (doc_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao deletar documento extra: {e}")
+        return False
+
+
+# ============================================
+# PROCESSO INFO (LEGACY - POR CADASTRO)
+# ============================================
+
+def buscar_processo_info(cadastro_id: str) -> dict:
+    """Busca informações do processo de um cliente (modelo legacy)."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM processo_info WHERE cadastro_id = %s", (cadastro_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if row:
+            return {
+                "cadastro_id": row["cadastro_id"],
+                "numero_processo": row["numero_processo"] or "",
+                "vara_tribunal": row["vara_tribunal"] or "",
+                "fase": row["fase"] or "Inicial",
+                "data_distribuicao": row["data_distribuicao"].isoformat() if row["data_distribuicao"] else None,
+                "valor_causa": float(row["valor_causa"]) if row["valor_causa"] else 0,
+                "reu": row["reu"] or "",
+                "observacoes": row["observacoes"] or ""
+            }
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar processo info: {e}")
+        return None
+
+
+def salvar_processo_info(cadastro_id: str, dados: dict) -> bool:
+    """Salva ou atualiza informações do processo (modelo legacy)."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO processo_info (cadastro_id, numero_processo, vara_tribunal, fase,
+                                       data_distribuicao, valor_causa, reu, observacoes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (cadastro_id) DO UPDATE SET
+                numero_processo = EXCLUDED.numero_processo,
+                vara_tribunal = EXCLUDED.vara_tribunal,
+                fase = EXCLUDED.fase,
+                data_distribuicao = EXCLUDED.data_distribuicao,
+                valor_causa = EXCLUDED.valor_causa,
+                reu = EXCLUDED.reu,
+                observacoes = EXCLUDED.observacoes,
+                atualizado_em = CURRENT_TIMESTAMP
+        """, (
+            cadastro_id,
+            dados.get("numero_processo"),
+            dados.get("vara_tribunal"),
+            dados.get("fase", "Inicial"),
+            dados.get("data_distribuicao") if dados.get("data_distribuicao") else None,
+            dados.get("valor_causa", 0),
+            dados.get("reu"),
+            dados.get("observacoes")
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao salvar processo info: {e}")
+        return False
+
+
+# ============================================
+# AUTENTICAÇÃO DO CLIENTE (PORTAL)
+# ============================================
+
+def criar_cliente_auth(cadastro_id: str, senha: str) -> bool:
+    """Cria autenticação para um cliente (recebe senha em texto plano)."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        senha_hash = hash_senha(senha)
+        cur.execute("""
+            INSERT INTO clientes_auth (cadastro_id, senha_hash)
+            VALUES (%s, %s)
+            ON CONFLICT (cadastro_id) DO UPDATE SET
+                senha_hash = EXCLUDED.senha_hash,
+                primeiro_acesso = TRUE,
+                ativo = TRUE
+        """, (cadastro_id, senha_hash))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao criar auth cliente: {e}")
+        return False
+
+
+def buscar_cliente_auth(cadastro_id: str) -> dict:
+    """Busca autenticação de um cliente."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT ca.*, c.dados->>'email' as email, c.dados->>'nome' as nome
+            FROM clientes_auth ca
+            JOIN cadastros c ON c.id = ca.cadastro_id
+            WHERE ca.cadastro_id = %s AND ca.ativo = TRUE
+        """, (cadastro_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar auth cliente: {e}")
+        return None
+
+
+def buscar_cliente_por_email(email: str) -> dict:
+    """Busca cliente pelo email."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT ca.*, c.dados->>'email' as email, c.dados->>'nome' as nome, c.id as cadastro_id
+            FROM cadastros c
+            LEFT JOIN clientes_auth ca ON c.id = ca.cadastro_id
+            WHERE c.dados->>'email' = %s
+        """, (email,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar cliente por email: {e}")
+        return None
+
+
+def atualizar_senha_cliente(cadastro_id: str, nova_senha: str) -> bool:
+    """Atualiza a senha de um cliente (recebe senha em texto plano)."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        senha_hash = hash_senha(nova_senha)
+        cur.execute("""
+            UPDATE clientes_auth
+            SET senha_hash = %s, primeiro_acesso = FALSE
+            WHERE cadastro_id = %s
+        """, (senha_hash, cadastro_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao atualizar senha cliente: {e}")
+        return False
+
+
+def registrar_acesso_cliente(cadastro_id: str):
+    """Registra o último acesso do cliente."""
+    conn = get_db()
+    if not conn:
+        return
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE clientes_auth
+            SET ultimo_acesso = CURRENT_TIMESTAMP
+            WHERE cadastro_id = %s
+        """, (cadastro_id,))
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao registrar acesso: {e}")
