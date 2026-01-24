@@ -1,97 +1,177 @@
 """
 Funções de Segurança do Sistema Vaucher e Álvares
-Migrado do main.py em 19/01/2026
+Atualizado em 23/01/2026 - Implementação de bcrypt e JWT
 
 Este arquivo contém funções de hash, tokens e templates de e-mail.
 """
 
 import hashlib
-import base64
+import bcrypt
+import jwt
+from datetime import datetime, timedelta
+from typing import Optional
 from modules.config import TOKEN_SECRET, LOGO_URL
 
 # ============================================
-# FUNÇÕES DE HASH DE SENHA
+# CONFIGURAÇÕES DE SEGURANÇA
+# ============================================
+
+# Tempo de expiração dos tokens
+TOKEN_EXPIRATION_HOURS = 24  # Tokens de admin expiram em 24 horas
+CLIENT_TOKEN_EXPIRATION_HOURS = 72  # Tokens de cliente expiram em 72 horas
+
+# Algoritmo JWT
+JWT_ALGORITHM = "HS256"
+
+# Extensões permitidas para upload de arquivos
+ALLOWED_FILE_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx'}
+MAX_FILE_SIZE_MB = 10
+
+# ============================================
+# FUNÇÕES DE HASH DE SENHA (BCRYPT)
 # ============================================
 
 def hash_senha(senha: str) -> str:
-    """Cria hash da senha usando SHA-256 com salt."""
-    salt = "vaucher_alvares_2024"
-    return hashlib.sha256(f"{senha}{salt}".encode()).hexdigest()
+    """Cria hash da senha usando bcrypt."""
+    salt = bcrypt.gensalt(rounds=12)
+    return bcrypt.hashpw(senha.encode(), salt).decode()
 
 def verificar_senha(senha: str, hash_armazenado: str) -> bool:
     """Verifica se a senha corresponde ao hash."""
-    return hash_senha(senha) == hash_armazenado
+    try:
+        # Primeiro, tenta verificar com bcrypt (novo formato)
+        if hash_armazenado.startswith('$2'):
+            return bcrypt.checkpw(senha.encode(), hash_armazenado.encode())
+
+        # Fallback para SHA-256 legado (migração gradual)
+        salt_legado = "vaucher_alvares_2024"
+        hash_legado = hashlib.sha256(f"{senha}{salt_legado}".encode()).hexdigest()
+        return hash_legado == hash_armazenado
+    except Exception:
+        return False
+
+def senha_precisa_atualizacao(hash_armazenado: str) -> bool:
+    """Verifica se a senha usa hash legado e precisa ser atualizada."""
+    return not hash_armazenado.startswith('$2')
 
 # ============================================
-# FUNÇÕES DE TOKEN - USUÁRIOS (ADMIN)
+# FUNÇÕES DE TOKEN JWT - USUÁRIOS (ADMIN)
 # ============================================
 
 def gerar_token(user_id: int, email: str, is_admin: bool) -> str:
-    """Gera um token que contém informações do usuário."""
-    payload = f"{user_id}:{email}:{is_admin}"
-    signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
-    token_data = base64.b64encode(f"{payload}:{signature}".encode()).decode()
-    return token_data
+    """Gera um token JWT com informações do usuário e expiração."""
+    payload = {
+        "user_id": user_id,
+        "email": email,
+        "is_admin": is_admin,
+        "type": "admin",
+        "iat": datetime.utcnow(),
+        "exp": datetime.utcnow() + timedelta(hours=TOKEN_EXPIRATION_HOURS)
+    }
+    return jwt.encode(payload, TOKEN_SECRET, algorithm=JWT_ALGORITHM)
 
-def decodificar_token(token: str) -> dict:
-    """Decodifica e valida um token."""
+def decodificar_token(token: str) -> Optional[dict]:
+    """Decodifica e valida um token JWT."""
     try:
-        decoded = base64.b64decode(token.encode()).decode()
-        parts = decoded.rsplit(":", 1)
-        if len(parts) != 2:
+        payload = jwt.decode(token, TOKEN_SECRET, algorithms=[JWT_ALGORITHM])
+
+        # Verifica se é um token de admin
+        if payload.get("type") != "admin":
             return None
 
-        payload, signature = parts
-
-        expected_signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
-        if signature != expected_signature:
-            return None
-
-        user_id, email, is_admin = payload.split(":")
         return {
-            "id": int(user_id),
-            "email": email,
-            "is_admin": is_admin == "True"
+            "id": payload["user_id"],
+            "email": payload["email"],
+            "is_admin": payload["is_admin"]
         }
-    except Exception:
+    except jwt.ExpiredSignatureError:
+        # Token expirado
+        return None
+    except jwt.InvalidTokenError:
+        # Token inválido
         return None
 
 # ============================================
-# FUNÇÕES DE TOKEN - CLIENTES (PORTAL)
+# FUNÇÕES DE TOKEN JWT - CLIENTES (PORTAL)
 # ============================================
 
 def gerar_token_cliente(cadastro_id: str, email: str) -> str:
-    """Gera um token específico para clientes."""
-    payload = f"cliente:{cadastro_id}:{email}"
-    signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
-    token_data = base64.b64encode(f"{payload}:{signature}".encode()).decode()
-    return token_data
+    """Gera um token JWT específico para clientes."""
+    payload = {
+        "cadastro_id": cadastro_id,
+        "email": email,
+        "type": "cliente",
+        "iat": datetime.utcnow(),
+        "exp": datetime.utcnow() + timedelta(hours=CLIENT_TOKEN_EXPIRATION_HOURS)
+    }
+    return jwt.encode(payload, TOKEN_SECRET, algorithm=JWT_ALGORITHM)
 
-def decodificar_token_cliente(token: str) -> dict:
-    """Decodifica e valida um token de cliente."""
+def decodificar_token_cliente(token: str) -> Optional[dict]:
+    """Decodifica e valida um token JWT de cliente."""
     try:
-        decoded = base64.b64decode(token.encode()).decode()
-        parts = decoded.rsplit(":", 1)
-        if len(parts) != 2:
-            return None
+        payload = jwt.decode(token, TOKEN_SECRET, algorithms=[JWT_ALGORITHM])
 
-        payload, signature = parts
-
-        expected_signature = hashlib.sha256(f"{payload}:{TOKEN_SECRET}".encode()).hexdigest()[:16]
-        if signature != expected_signature:
-            return None
-
-        tipo, cadastro_id, email = payload.split(":")
-        if tipo != "cliente":
+        # Verifica se é um token de cliente
+        if payload.get("type") != "cliente":
             return None
 
         return {
-            "cadastro_id": cadastro_id,
-            "email": email,
+            "cadastro_id": payload["cadastro_id"],
+            "email": payload["email"],
             "tipo": "cliente"
         }
-    except Exception:
+    except jwt.ExpiredSignatureError:
         return None
+    except jwt.InvalidTokenError:
+        return None
+
+# ============================================
+# VALIDAÇÃO DE ARQUIVOS
+# ============================================
+
+def validar_arquivo(filename: str, content_length: int = 0) -> tuple[bool, str]:
+    """
+    Valida um arquivo para upload.
+    Retorna (válido, mensagem_erro).
+    """
+    import os
+
+    if not filename:
+        return False, "Nome do arquivo não fornecido"
+
+    # Verifica extensão
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ALLOWED_FILE_EXTENSIONS:
+        return False, f"Extensão não permitida. Use: {', '.join(ALLOWED_FILE_EXTENSIONS)}"
+
+    # Verifica tamanho (se fornecido)
+    max_size = MAX_FILE_SIZE_MB * 1024 * 1024  # Converte para bytes
+    if content_length > max_size:
+        return False, f"Arquivo muito grande. Máximo: {MAX_FILE_SIZE_MB}MB"
+
+    # Verifica caracteres perigosos no nome
+    dangerous_chars = ['..', '/', '\\', '\x00']
+    for char in dangerous_chars:
+        if char in filename:
+            return False, "Nome do arquivo contém caracteres inválidos"
+
+    return True, ""
+
+def sanitizar_nome_arquivo(filename: str) -> str:
+    """Sanitiza o nome do arquivo para evitar path traversal."""
+    import os
+    import re
+
+    # Remove path e mantém apenas o nome
+    filename = os.path.basename(filename)
+
+    # Remove caracteres especiais exceto ponto, hífen e underscore
+    filename = re.sub(r'[^\w\-\.]', '_', filename)
+
+    # Remove múltiplos underscores
+    filename = re.sub(r'_+', '_', filename)
+
+    return filename
 
 # ============================================
 # TEMPLATE DE E-MAIL

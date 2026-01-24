@@ -5,7 +5,7 @@ Com gerenciamento de usuários no banco de dados
 VERSÃO 3.0 - COM PORTAL DO CLIENTE
 """
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +16,11 @@ import json
 import zipfile
 import shutil
 from datetime import datetime, timezone
+
+# Rate Limiting
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 # MIGRADO PARA modules/config.py
 # try:
 #     from zoneinfo import ZoneInfo
@@ -53,15 +58,18 @@ from modules.config import (
     logger,
 )
 
-# Funções de segurança (migrado em 19/01/2026)
+# Funções de segurança (migrado em 19/01/2026, atualizado 23/01/2026)
 from modules.security import (
     hash_senha,
     verificar_senha,
+    senha_precisa_atualizacao,
     gerar_token,
     decodificar_token,
     gerar_token_cliente,
     decodificar_token_cliente,
     criar_email_html,
+    validar_arquivo,
+    sanitizar_nome_arquivo,
 )
 
 # Funções de banco de dados (migrado em 19/01/2026)
@@ -161,16 +169,21 @@ from psycopg2.extras import RealDictCursor
 app = FastAPI(
     title="Vaucher e Álvares - API",
     description="Sistema de cadastro de clientes e geração de documentos",
-    version="3.0.0"
+    version="3.1.0"  # Atualizado com melhorias de segurança
 )
+
+# Rate Limiter - proteção contra brute force e DDoS
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS - permitir acesso dos frontends (usando ALLOWED_ORIGINS do config.py)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
 
 # Criar diretórios se não existirem
@@ -374,11 +387,28 @@ def health():
 # --- AUTENTICAÇÃO ADMIN ---
 
 @app.post("/api/login", response_model=LoginResponse)
-def login(request: LoginRequest):
+@limiter.limit("5/minute")  # Limite de 5 tentativas por minuto
+def login(request: Request, data: LoginRequest):
     """Autenticação do painel administrativo."""
-    usuario = buscar_usuario_por_email(request.email)
+    usuario = buscar_usuario_por_email(data.email)
 
-    if usuario and verificar_senha(request.senha, usuario['senha_hash']):
+    if usuario and verificar_senha(data.senha, usuario['senha_hash']):
+        # Migra senha legada para bcrypt se necessário
+        if senha_precisa_atualizacao(usuario['senha_hash']):
+            try:
+                novo_hash = hash_senha(data.senha)
+                conn = get_db()
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute("UPDATE usuarios SET senha_hash = %s WHERE id = %s",
+                                (novo_hash, usuario['id']))
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+                    logger.info(f"Senha migrada para bcrypt: {usuario['email']}")
+            except Exception as e:
+                logger.error(f"Erro ao migrar senha: {e}")
+
         token = gerar_token(usuario["id"], usuario["email"], usuario["is_admin"])
         termos_aceitos = verificar_termos_aceitos(usuario["id"])
         return LoginResponse(
@@ -614,10 +644,16 @@ async def enviar_email_documentos(
     if arquivos:
         for arquivo in arquivos:
             if arquivo.filename:
+                # Validar arquivo
+                valido, erro = validar_arquivo(arquivo.filename, arquivo.size or 0)
+                if not valido:
+                    raise HTTPException(status_code=400, detail=f"Arquivo inválido: {erro}")
+
                 logger.info(f"Processando anexo: {arquivo.filename}")
                 conteudo = await arquivo.read()
+                nome_seguro = sanitizar_nome_arquivo(arquivo.filename)
                 anexos_email.append({
-                    "filename": arquivo.filename,
+                    "filename": nome_seguro,
                     "content": base64.b64encode(conteudo).decode("utf-8")
                 })
     
@@ -1072,18 +1108,23 @@ async def receber_documentos_assinados(cadastro_id: str, arquivos: List[UploadFi
 
 @app.post("/api/cadastros/{cadastro_id}/upload")
 async def upload_documento(
-    cadastro_id: str, 
+    cadastro_id: str,
     arquivo: UploadFile = File(...),
     tipo_documento: str = Form(default=""),
     categoria: str = Form(default="")
 ):
     """Recebe upload de documento do cliente.
-    
+
     Se tipo_documento ou categoria for especificado, salva na tabela documentos_demanda.
     Caso contrário, salva na lista de documentos genérica do cadastro.
     """
+    # Validar arquivo
+    valido, erro = validar_arquivo(arquivo.filename, arquivo.size or 0)
+    if not valido:
+        raise HTTPException(status_code=400, detail=f"Arquivo inválido: {erro}")
+
     logger.info(f"Upload recebido para cadastro {cadastro_id}: {arquivo.filename}, tipo: {tipo_documento}, categoria: {categoria}")
-    
+
     cadastro = buscar_cadastro(cadastro_id)
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
@@ -1118,26 +1159,35 @@ async def upload_documento(
         # Comportamento padrão - salva na pasta do cliente e lista genérica
         cliente_dir = os.path.join(UPLOADS_DIR, cadastro_id)
         os.makedirs(cliente_dir, exist_ok=True)
-        
-        file_path = os.path.join(cliente_dir, arquivo.filename)
+
+        nome_seguro = sanitizar_nome_arquivo(arquivo.filename)
+        file_path = os.path.join(cliente_dir, nome_seguro)
         content = await arquivo.read()
         with open(file_path, "wb") as f:
             f.write(content)
-        
-        if arquivo.filename not in cadastro["documentos"]:
-            cadastro["documentos"].append(arquivo.filename)
+
+        if nome_seguro not in cadastro["documentos"]:
+            cadastro["documentos"].append(nome_seguro)
         salvar_cadastro(cadastro)
-        
-        return {"success": True, "filename": arquivo.filename, "modo": "generico"}
+
+        return {"success": True, "filename": nome_seguro, "modo": "generico"}
 
 @app.get("/api/cadastros/{cadastro_id}/uploads/{filename}")
 def download_upload_cliente(cadastro_id: str, filename: str):
     """Faz download de um arquivo enviado pelo cliente."""
-    file_path = os.path.join(UPLOADS_DIR, cadastro_id, filename)
-    
+    # Sanitizar filename para prevenir path traversal
+    nome_seguro = sanitizar_nome_arquivo(filename)
+    file_path = os.path.join(UPLOADS_DIR, cadastro_id, nome_seguro)
+
+    # Verificar se o caminho está dentro do diretório permitido
+    real_path = os.path.realpath(file_path)
+    allowed_dir = os.path.realpath(os.path.join(UPLOADS_DIR, cadastro_id))
+    if not real_path.startswith(allowed_dir):
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
     if os.path.exists(file_path):
-        return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
-    
+        return FileResponse(file_path, filename=nome_seguro, media_type="application/octet-stream")
+
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
 
 
@@ -2827,29 +2877,46 @@ def verificar_token_cliente(authorization: str = Header(None)) -> dict:
 # ============================================
 
 @app.post("/api/cliente/login")
-async def portal_cliente_login(dados: ClienteLogin):
+@limiter.limit("5/minute")  # Limite de 5 tentativas por minuto
+async def portal_cliente_login(request: Request, dados: ClienteLogin):
     """Login do cliente no portal."""
     logger.info(f"Tentativa de login cliente: {dados.email}")
-    
+
     cliente = buscar_cliente_por_email(dados.email)
     logger.info(f"Cliente encontrado: {cliente}")
-    
+
     if not cliente:
         raise HTTPException(status_code=401, detail="Email não encontrado")
-    
+
     if not cliente.get("senha_hash"):
         logger.info(f"Senha hash não encontrada para cliente: {cliente.get('cadastro_id')}")
         raise HTTPException(status_code=401, detail="Acesso não habilitado. Entre em contato com o escritório.")
-    
+
     if not verificar_senha(dados.senha, cliente["senha_hash"]):
         raise HTTPException(status_code=401, detail="Senha incorreta")
-    
+
     if not cliente.get("ativo", True):
         raise HTTPException(status_code=401, detail="Acesso desativado")
-    
+
+    # Migra senha legada para bcrypt se necessário
+    if senha_precisa_atualizacao(cliente["senha_hash"]):
+        try:
+            novo_hash = hash_senha(dados.senha)
+            conn = get_db()
+            if conn:
+                cur = conn.cursor()
+                cur.execute("UPDATE clientes_acesso SET senha_hash = %s WHERE cadastro_id = %s",
+                            (novo_hash, cliente['cadastro_id']))
+                conn.commit()
+                cur.close()
+                conn.close()
+                logger.info(f"Senha cliente migrada para bcrypt: {cliente['cadastro_id']}")
+        except Exception as e:
+            logger.error(f"Erro ao migrar senha cliente: {e}")
+
     registrar_acesso_cliente(cliente["cadastro_id"])
     token = gerar_token_cliente(cliente["cadastro_id"], cliente["email"])
-    
+
     return {
         "success": True,
         "token": token,
