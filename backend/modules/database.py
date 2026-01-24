@@ -494,6 +494,36 @@ def init_db():
 
         logger.info("Tabela de banners verificada/criada!")
 
+        # ========== PRAZOS PROCESSUAIS ==========
+
+        # Tabela de prazos processuais
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS prazos_processuais (
+                id SERIAL PRIMARY KEY,
+                processo_id INTEGER REFERENCES processos(id) ON DELETE CASCADE,
+                tipo VARCHAR(100) NOT NULL,
+                descricao TEXT NOT NULL,
+                data_inicio DATE NOT NULL,
+                data_fim DATE NOT NULL,
+                dias_uteis BOOLEAN DEFAULT TRUE,
+                status VARCHAR(20) DEFAULT 'pendente',
+                prioridade VARCHAR(20) DEFAULT 'normal',
+                origem VARCHAR(50) DEFAULT 'manual',
+                movimento_origem TEXT,
+                observacoes TEXT,
+                concluido_em TIMESTAMP,
+                concluido_por VARCHAR(255),
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_prazos_processo ON prazos_processuais(processo_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_prazos_status ON prazos_processuais(status)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_prazos_data_fim ON prazos_processuais(data_fim)")
+
+        logger.info("Tabela de prazos processuais verificada/criada!")
+
         conn.commit()
 
         # Criar usuário admin inicial se não existir
