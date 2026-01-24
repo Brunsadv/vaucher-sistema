@@ -19,7 +19,7 @@ from modules.prazos import (
     obter_resumo_prazos,
     calcular_data_prazo,
 )
-from routes.auth import verificar_admin
+from modules.auth import verificar_admin
 
 router = APIRouter(prefix="/api/admin", tags=["Prazos Processuais"])
 

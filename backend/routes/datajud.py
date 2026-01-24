@@ -10,7 +10,7 @@ from psycopg2.extras import RealDictCursor
 from modules.config import logger
 from modules.database import get_db
 from modules.prazos import processar_andamentos_para_prazos
-from routes.auth import verificar_admin
+from modules.auth import verificar_admin
 
 router = APIRouter(prefix="/api/admin/datajud", tags=["DataJud CNJ"])
 

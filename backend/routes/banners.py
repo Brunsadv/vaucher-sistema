@@ -16,7 +16,7 @@ from modules.database import (
     deletar_banner,
 )
 from modules.security import decodificar_token_cliente
-from routes.auth import verificar_admin
+from modules.auth import verificar_admin
 
 router = APIRouter(tags=["Banners e Notícias"])
 

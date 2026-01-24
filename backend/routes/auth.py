@@ -3,7 +3,7 @@ Rotas de Autenticação - Admin e Cliente
 Refatorado em 23/01/2026
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Header, Request
+from fastapi import APIRouter, HTTPException, Depends, Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
@@ -13,10 +13,8 @@ from modules.security import (
     verificar_senha,
     senha_precisa_atualizacao,
     gerar_token,
-    decodificar_token,
-    gerar_token_cliente,
-    decodificar_token_cliente,
 )
+from modules.auth import verificar_admin
 from modules.database import (
     get_db,
     buscar_usuario_por_email,
@@ -39,41 +37,6 @@ router = APIRouter(prefix="/api", tags=["Autenticação"])
 
 # Rate limiter
 limiter = Limiter(key_func=get_remote_address)
-
-
-# ============================================
-# VERIFICAÇÃO DE AUTENTICAÇÃO
-# ============================================
-
-def verificar_token_header(authorization: str = Header(None)) -> dict:
-    """Verifica se o token é válido e retorna o usuário."""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Token não fornecido")
-
-    token = authorization.replace("Bearer ", "")
-
-    usuario = decodificar_token(token)
-    if not usuario:
-        raise HTTPException(status_code=401, detail="Token inválido ou expirado")
-
-    usuario_db = buscar_usuario_por_email(usuario["email"])
-    if not usuario_db or not usuario_db.get("ativo", True):
-        raise HTTPException(status_code=401, detail="Usuário não encontrado ou inativo")
-
-    return {
-        "id": usuario_db["id"],
-        "email": usuario_db["email"],
-        "nome": usuario_db["nome"],
-        "is_admin": usuario_db["is_admin"]
-    }
-
-
-def verificar_admin(authorization: str = Header(None)) -> dict:
-    """Verifica se o usuário é admin."""
-    usuario = verificar_token_header(authorization)
-    if not usuario.get("is_admin"):
-        raise HTTPException(status_code=403, detail="Acesso negado. Apenas administradores.")
-    return usuario
 
 
 # ============================================
