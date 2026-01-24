@@ -209,12 +209,14 @@ from routes.auth import router as auth_router
 from routes.prazos import router as prazos_router
 from routes.datajud import router as datajud_router
 from routes.banners import router as banners_router
+from routes.admin_processos import router as admin_processos_router
 
 # Registrar routers na aplicação
 app.include_router(auth_router)
 app.include_router(prazos_router)
 app.include_router(datajud_router)
 app.include_router(banners_router)
+app.include_router(admin_processos_router)
 
 # ============================================
 # INICIALIZAÇÃO DA APLICAÇÃO

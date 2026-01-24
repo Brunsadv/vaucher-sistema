@@ -1544,6 +1544,96 @@ def deletar_contrato(contrato_id: int) -> bool:
         return False
 
 
+def gerar_parcelas_contrato(contrato_id: int, dados: dict):
+    """Gera parcelas para um contrato."""
+    from datetime import date
+    from dateutil.relativedelta import relativedelta
+
+    conn = get_db()
+    if not conn:
+        return
+
+    try:
+        cur = conn.cursor()
+
+        valor_total = float(dados.get("valor_total", 0))
+        num_parcelas = int(dados.get("num_parcelas") or dados.get("numero_parcelas") or 1)
+        valor_parcela = valor_total / num_parcelas
+        dia_vencimento = int(dados.get("dia_vencimento", 10))
+
+        data_inicio = dados.get("data_inicio")
+        if data_inicio:
+            if isinstance(data_inicio, str):
+                data_base = date.fromisoformat(data_inicio)
+            else:
+                data_base = data_inicio
+        else:
+            data_base = date.today()
+
+        for i in range(num_parcelas):
+            vencimento = data_base + relativedelta(months=i)
+            try:
+                vencimento = vencimento.replace(day=dia_vencimento)
+            except ValueError:
+                next_month = vencimento + relativedelta(months=1, day=1)
+                vencimento = next_month - relativedelta(days=1)
+
+            cur.execute("""
+                INSERT INTO parcelas (contrato_id, numero, valor, vencimento)
+                VALUES (%s, %s, %s, %s)
+            """, (contrato_id, i + 1, valor_parcela, vencimento))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao gerar parcelas: {e}")
+
+
+def criar_contrato_honorarios(cadastro_id: str, dados: dict) -> int:
+    """Cria um contrato de honorarios."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO contratos_honorarios (
+                cadastro_id, processo_id, tipo, descricao, valor_total,
+                num_parcelas, valor_mensal, dia_vencimento, percentual_exito,
+                data_inicio, observacoes
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            cadastro_id,
+            dados.get("processo_id"),
+            dados.get("tipo"),
+            dados.get("descricao"),
+            dados.get("valor_total"),
+            dados.get("num_parcelas") or dados.get("numero_parcelas") or 1,
+            dados.get("valor_mensal"),
+            dados.get("dia_vencimento", 10),
+            dados.get("percentual_exito"),
+            dados.get("data_inicio") if dados.get("data_inicio") else None,
+            dados.get("observacoes")
+        ))
+        contrato_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        # Gerar parcelas automaticamente
+        num_parcelas = dados.get("num_parcelas") or dados.get("numero_parcelas") or 1
+        if int(num_parcelas) >= 1:
+            gerar_parcelas_contrato(contrato_id, dados)
+
+        return contrato_id
+    except Exception as e:
+        logger.error(f"Erro ao criar contrato: {e}")
+        return None
+
+
 # ============================================
 # FUNÇÕES CRUD - PARCELAS
 # ============================================
