@@ -4,17 +4,15 @@ Refatorado em 23/01/2026
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Request
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
-from modules.config import logger
+from modules.config import logger, limiter
 from modules.security import (
     hash_senha,
     verificar_senha,
     senha_precisa_atualizacao,
     gerar_token,
 )
-from modules.auth import verificar_admin
+from modules.auth import verificar_admin, verificar_token
 from modules.database import (
     get_db,
     buscar_usuario_por_email,
@@ -34,9 +32,6 @@ from modules.models import (
 )
 
 router = APIRouter(prefix="/api", tags=["Autenticação"])
-
-# Rate limiter
-limiter = Limiter(key_func=get_remote_address)
 
 
 # ============================================
@@ -104,13 +99,13 @@ def verificar_termos(usuario: dict = Depends(verificar_admin)):
 # GERENCIAMENTO DE USUÁRIOS (APENAS ADMIN)
 # ============================================
 
-@router.get("/admin/usuarios")
+@router.get("/usuarios")
 def listar_usuarios_api(usuario: dict = Depends(verificar_admin)):
     """Lista todos os usuários do sistema."""
     return listar_usuarios()
 
 
-@router.post("/admin/usuarios")
+@router.post("/usuarios")
 def criar_usuario_api(dados: NovoUsuario, usuario: dict = Depends(verificar_admin)):
     """Cria um novo usuário."""
     existente = buscar_usuario_por_email(dados.email)
@@ -125,7 +120,7 @@ def criar_usuario_api(dados: NovoUsuario, usuario: dict = Depends(verificar_admi
     raise HTTPException(status_code=500, detail="Erro ao criar usuário")
 
 
-@router.put("/admin/usuarios/{user_id}")
+@router.put("/usuarios/{user_id}")
 def atualizar_usuario_api(user_id: int, dados: AtualizarUsuario, usuario: dict = Depends(verificar_admin)):
     """Atualiza dados de um usuário."""
     if atualizar_usuario(user_id, dados.nome, dados.email, dados.is_admin, dados.ativo):
@@ -133,7 +128,7 @@ def atualizar_usuario_api(user_id: int, dados: AtualizarUsuario, usuario: dict =
     raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
 
-@router.delete("/admin/usuarios/{user_id}")
+@router.delete("/usuarios/{user_id}")
 def deletar_usuario_api(user_id: int, usuario: dict = Depends(verificar_admin)):
     """Remove um usuário do sistema."""
     if user_id == usuario["id"]:
@@ -144,7 +139,7 @@ def deletar_usuario_api(user_id: int, usuario: dict = Depends(verificar_admin)):
     raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
 
-@router.post("/admin/usuarios/{user_id}/alterar-senha")
+@router.post("/usuarios/{user_id}/alterar-senha")
 def alterar_senha_usuario(user_id: int, dados: AlterarSenha, usuario: dict = Depends(verificar_admin)):
     """Altera a senha de um usuário."""
     senha_hash = hash_senha(dados.nova_senha)
@@ -163,6 +158,31 @@ def alterar_senha_usuario(user_id: int, dados: AlterarSenha, usuario: dict = Dep
         return {"success": True, "message": "Senha alterada com sucesso"}
     except HTTPException:
         raise
+    except Exception as e:
+        logger.error(f"Erro ao alterar senha: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao alterar senha")
+
+
+@router.post("/alterar-senha")
+def alterar_minha_senha(dados: AlterarSenha, usuario: dict = Depends(verificar_token)):
+    """Permite ao usuário alterar sua própria senha."""
+    usuario_db = buscar_usuario_por_email(usuario["email"])
+
+    if not usuario_db or not verificar_senha(dados.senha_atual, usuario_db["senha_hash"]):
+        raise HTTPException(status_code=400, detail="Senha atual incorreta")
+
+    novo_hash = hash_senha(dados.nova_senha)
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão")
+
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE usuarios SET senha_hash = %s WHERE id = %s", (novo_hash, usuario["id"]))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return {"success": True, "message": "Senha alterada com sucesso"}
     except Exception as e:
         logger.error(f"Erro ao alterar senha: {e}")
         raise HTTPException(status_code=500, detail="Erro ao alterar senha")

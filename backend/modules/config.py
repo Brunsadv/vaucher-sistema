@@ -14,6 +14,16 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============================================
+# RATE LIMITER (Compartilhado)
+# ============================================
+
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+
+# Instância compartilhada do rate limiter
+limiter = Limiter(key_func=get_remote_address)
+
+# ============================================
 # FUSO HORÁRIO
 # ============================================
 

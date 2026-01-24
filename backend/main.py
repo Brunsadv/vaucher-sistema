@@ -56,6 +56,7 @@ from modules.config import (
     LOGO_URL,
     ALLOWED_ORIGINS,
     logger,
+    limiter,  # Rate limiter compartilhado
 )
 
 # Funções de segurança (migrado em 19/01/2026, atualizado 23/01/2026)
@@ -172,8 +173,7 @@ app = FastAPI(
     version="3.1.0"  # Atualizado com melhorias de segurança
 )
 
-# Rate Limiter - proteção contra brute force e DDoS
-limiter = Limiter(key_func=get_remote_address)
+# Rate Limiter - proteção contra brute force e DDoS (usando instância compartilhada)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -205,11 +205,13 @@ from modules.auth import verificar_token, verificar_admin, verificar_token_clien
 # ============================================
 
 # Importar e registrar routers dos módulos
+from routes.auth import router as auth_router
 from routes.prazos import router as prazos_router
 from routes.datajud import router as datajud_router
 from routes.banners import router as banners_router
 
 # Registrar routers na aplicação
+app.include_router(auth_router)
 app.include_router(prazos_router)
 app.include_router(datajud_router)
 app.include_router(banners_router)
@@ -371,111 +373,6 @@ def health():
         "database": "connected" if get_db() else "disconnected",
         "email": "resend" if RESEND_API_KEY else "not_configured"
     }
-
-# --- AUTENTICAÇÃO ADMIN ---
-
-@app.post("/api/login", response_model=LoginResponse)
-@limiter.limit("5/minute")  # Limite de 5 tentativas por minuto
-def login(request: Request, data: LoginRequest):
-    """Autenticação do painel administrativo."""
-    usuario = buscar_usuario_por_email(data.email)
-
-    if usuario and verificar_senha(data.senha, usuario['senha_hash']):
-        # Migra senha legada para bcrypt se necessário
-        if senha_precisa_atualizacao(usuario['senha_hash']):
-            try:
-                novo_hash = hash_senha(data.senha)
-                conn = get_db()
-                if conn:
-                    cur = conn.cursor()
-                    cur.execute("UPDATE usuarios SET senha_hash = %s WHERE id = %s",
-                                (novo_hash, usuario['id']))
-                    conn.commit()
-                    cur.close()
-                    conn.close()
-                    logger.info(f"Senha migrada para bcrypt: {usuario['email']}")
-            except Exception as e:
-                logger.error(f"Erro ao migrar senha: {e}")
-
-        token = gerar_token(usuario["id"], usuario["email"], usuario["is_admin"])
-        termos_aceitos = verificar_termos_aceitos(usuario["id"])
-        return LoginResponse(
-            success=True,
-            token=token,
-            nome=usuario['nome'],
-            is_admin=usuario['is_admin'],
-            termos_aceitos=termos_aceitos
-        )
-
-    return LoginResponse(success=False, message="E-mail ou senha incorretos")
-
-@app.post("/api/logout")
-def logout():
-    """Encerra a sessão do usuário."""
-    return {"success": True}
-
-@app.post("/api/aceitar-termos")
-def aceitar_termos(usuario: dict = Depends(verificar_admin)):
-    """Registra o aceite dos termos de uso pelo usuário."""
-    if registrar_aceite_termos(usuario["id"]):
-        return {"success": True, "message": "Termos aceitos com sucesso"}
-    raise HTTPException(status_code=500, detail="Erro ao registrar aceite dos termos")
-
-@app.get("/api/verificar-termos")
-def verificar_termos(usuario: dict = Depends(verificar_admin)):
-    """Verifica se o usuário já aceitou os termos de uso."""
-    aceitos = verificar_termos_aceitos(usuario["id"])
-    return {"termos_aceitos": aceitos}
-
-# --- GERENCIAMENTO DE USUÁRIOS (APENAS ADMIN) ---
-
-@app.get("/api/usuarios")
-def listar_todos_usuarios(usuario: dict = Depends(verificar_admin)):
-    """Lista todos os usuários (apenas admin)."""
-    return listar_usuarios()
-
-@app.post("/api/usuarios")
-def criar_novo_usuario(dados: NovoUsuario, usuario: dict = Depends(verificar_admin)):
-    """Cria um novo usuário (apenas admin)."""
-    if buscar_usuario_por_email(dados.email):
-        raise HTTPException(status_code=400, detail="E-mail já cadastrado")
-    
-    if criar_usuario(dados.email, dados.senha, dados.nome, dados.is_admin):
-        return {"success": True, "message": f"Usuário {dados.nome} criado com sucesso"}
-    
-    raise HTTPException(status_code=500, detail="Erro ao criar usuário")
-
-@app.put("/api/usuarios/{user_id}")
-def atualizar_usuario_existente(user_id: int, dados: AtualizarUsuario, usuario: dict = Depends(verificar_admin)):
-    """Atualiza um usuário (apenas admin)."""
-    if atualizar_usuario(user_id, dados.nome, dados.senha, dados.is_admin, dados.ativo):
-        return {"success": True, "message": "Usuário atualizado com sucesso"}
-    
-    raise HTTPException(status_code=500, detail="Erro ao atualizar usuário")
-
-@app.delete("/api/usuarios/{user_id}")
-def desativar_usuario(user_id: int, usuario: dict = Depends(verificar_admin)):
-    """Desativa um usuário (apenas admin)."""
-    if usuario["id"] == user_id:
-        raise HTTPException(status_code=400, detail="Você não pode desativar sua própria conta")
-    
-    if deletar_usuario(user_id):
-        return {"success": True, "message": "Usuário desativado com sucesso"}
-    
-    raise HTTPException(status_code=500, detail="Erro ao desativar usuário")
-
-@app.post("/api/alterar-senha")
-def alterar_minha_senha(dados: AlterarSenha, usuario: dict = Depends(verificar_token)):
-    """Permite ao usuário alterar sua própria senha."""
-    usuario_db = buscar_usuario_por_email(usuario["email"])
-    
-    if not usuario_db or not verificar_senha(dados.senha_atual, usuario_db["senha_hash"]):
-        raise HTTPException(status_code=400, detail="Senha atual incorreta")
-    
-    if atualizar_usuario(usuario["id"], senha=dados.nova_senha):
-        return {"success": True, "message": "Senha alterada com sucesso"}
-    
-    raise HTTPException(status_code=500, detail="Erro ao alterar senha")
 
 # --- CADASTROS ---
 
