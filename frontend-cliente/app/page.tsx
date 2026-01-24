@@ -408,7 +408,7 @@ const removeDocumentoDemanda = (docId: string, index: number) => {
       // 2. Registrar aceite dos termos
       if (termosUso?.id || politicaPrivacidade?.id) {
         try {
-          await fetch(`${API_URL}/api/aceitar-termos`, {
+          await fetch(`${API_URL}/api/cliente/aceitar-termos`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
