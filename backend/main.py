@@ -66,6 +66,8 @@ from modules.database import (
     buscar_documento_admin,
     listar_documentos_extras,
     buscar_documento_extra,
+    # Auth cliente (usado em verificar_token_cliente)
+    buscar_cliente_auth,
 )
 
 # Modelos Pydantic
