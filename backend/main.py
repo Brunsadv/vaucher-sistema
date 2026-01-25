@@ -1346,7 +1346,8 @@ async def cliente_enviar_documentos_assinados(
     if cadastro["status"] not in ["enviado", "assinado"]:
         raise HTTPException(status_code=400, detail="Você ainda não recebeu os documentos para assinar")
     
-    cliente_assinados_dir = os.path.join(UPLOADS_DIR, cadastro_id, "assinados")
+    # Usar caminho consistente com download: uploads/documentos_assinados/{cadastro_id}/
+    cliente_assinados_dir = os.path.join(UPLOADS_DIR, "documentos_assinados", cadastro_id)
     os.makedirs(cliente_assinados_dir, exist_ok=True)
     
     arquivos_salvos = []
@@ -1409,12 +1410,30 @@ def download_documento_assinado(cadastro_id: str, filename: str):
     # Sanitizar filename para segurança
     nome_seguro = sanitizar_nome_arquivo(filename)
 
-    # Caminho correto: uploads/documentos_assinados/{cadastro_id}/{filename}
+    # Caminho principal: uploads/documentos_assinados/{cadastro_id}/{filename}
     file_path = os.path.join(UPLOADS_DIR, "documentos_assinados", cadastro_id, nome_seguro)
 
     if os.path.exists(file_path):
         return FileResponse(file_path, filename=nome_seguro, media_type="application/octet-stream")
 
+    # Fallback: tentar caminhos alternativos para arquivos legados
+    caminhos_alternativos = [
+        # Caminho antigo: uploads/{cadastro_id}/assinados/{filename}
+        os.path.join(UPLOADS_DIR, cadastro_id, "assinados", nome_seguro),
+        os.path.join(UPLOADS_DIR, cadastro_id, "assinados", filename),
+        # Tentar com nome original sem sanitizar
+        os.path.join(UPLOADS_DIR, "documentos_assinados", cadastro_id, filename),
+        # Caminho /app/ hardcoded antigo
+        f"/app/uploads/documentos_assinados/{cadastro_id}/{nome_seguro}",
+        f"/app/uploads/{cadastro_id}/assinados/{nome_seguro}",
+    ]
+
+    for caminho in caminhos_alternativos:
+        if os.path.exists(caminho):
+            logger.info(f"Documento assinado encontrado em caminho alternativo: {caminho}")
+            return FileResponse(caminho, filename=nome_seguro or filename, media_type="application/octet-stream")
+
+    logger.error(f"Documento assinado não encontrado: {file_path}, tentativas: {caminhos_alternativos}")
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
 
 
@@ -2635,8 +2654,8 @@ async def admin_listar_todos_documentos(
                     nome = doc.get("nome", arquivo)
 
                 if arquivo:
-                    # Arquivos assinados estão em UPLOADS_DIR/cadastro_id/assinados/filename
-                    caminho = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", arquivo)
+                    # Arquivos assinados estão em UPLOADS_DIR/documentos_assinados/cadastro_id/filename
+                    caminho = os.path.join(UPLOADS_DIR, "documentos_assinados", cadastro_id, arquivo)
                     documentos_cliente["documentos"].append({
                         "id": f"assinado_{cadastro_id}_{arquivo}",
                         "tipo": "documento_assinado",
@@ -3046,8 +3065,8 @@ async def admin_deletar_documentos_selecionados(
                     # Documentos assinados
                     cadastro_id = partes[1]
                     arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
-                    # Arquivos assinados estão em UPLOADS_DIR/cadastro_id/assinados/filename
-                    caminho = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", arquivo)
+                    # Arquivos assinados estão em UPLOADS_DIR/documentos_assinados/cadastro_id/filename
+                    caminho = os.path.join(UPLOADS_DIR, "documentos_assinados", cadastro_id, arquivo)
 
                     if os.path.exists(caminho):
                         os.remove(caminho)
@@ -3177,8 +3196,8 @@ async def admin_download_documento_backup(
         elif tipo == "assinado":
             cadastro_id = partes[1]
             arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
-            # Arquivos assinados estão em UPLOADS_DIR/cadastro_id/assinados/filename
-            caminho = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", arquivo)
+            # Arquivos assinados estão em UPLOADS_DIR/documentos_assinados/cadastro_id/filename
+            caminho = os.path.join(UPLOADS_DIR, "documentos_assinados", cadastro_id, arquivo)
             nome_arquivo = arquivo
 
         elif tipo == "extra":
@@ -3300,9 +3319,9 @@ async def admin_download_documentos_selecionados(
                     elif tipo == "assinado":
                         cadastro_id = partes[1]
                         arquivo = "_".join(partes[2:]) if len(partes) > 2 else ""
-                        caminho = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", arquivo)
+                        caminho = os.path.join(UPLOADS_DIR, "documentos_assinados", cadastro_id, arquivo)
                         nome_arquivo = arquivo
-                        pasta = f"{cadastro_id}/assinados/"
+                        pasta = f"documentos_assinados/{cadastro_id}/"
 
                     elif tipo == "extra":
                         db_id = int(partes[1])
@@ -4605,8 +4624,8 @@ async def verificar_e_baixar_assinatura(
                     "message": f"Erro ao baixar documento: HTTP {response.status_code}"
                 }
 
-            # Criar pasta para documentos assinados (mesmo caminho usado no download)
-            pasta_assinados = os.path.join(UPLOADS_DIR, cadastro_id, "assinados")
+            # Criar pasta para documentos assinados (consistente com download)
+            pasta_assinados = os.path.join(UPLOADS_DIR, "documentos_assinados", cadastro_id)
             os.makedirs(pasta_assinados, exist_ok=True)
 
             # Nome do arquivo

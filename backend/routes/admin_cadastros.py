@@ -539,14 +539,41 @@ async def admin_download_documento(
     if not doc:
         raise HTTPException(status_code=404, detail="Documento não encontrado")
 
-    if not os.path.exists(doc["arquivo_path"]):
-        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+    arquivo_path = doc["arquivo_path"]
 
-    return FileResponse(
-        doc["arquivo_path"],
-        filename=doc["nome_original"],
-        media_type="application/octet-stream"
-    )
+    # Tentar caminho original
+    if os.path.exists(arquivo_path):
+        return FileResponse(
+            arquivo_path,
+            filename=doc["nome_original"],
+            media_type="application/octet-stream"
+        )
+
+    # Fallback: tentar caminhos alternativos para arquivos legados
+    caminhos_alternativos = []
+
+    # Se caminho começa com /app/, tentar sem o prefixo
+    if arquivo_path.startswith("/app/"):
+        caminhos_alternativos.append(arquivo_path[5:])  # Remove /app/
+        caminhos_alternativos.append(os.path.join(UPLOADS_DIR, arquivo_path[13:]))  # Remove /app/uploads/
+
+    # Tentar reconstruir caminho a partir dos dados do documento
+    if doc.get("cadastro_id") and doc.get("nome_arquivo"):
+        caminhos_alternativos.append(
+            os.path.join(UPLOADS_DIR, "documentos_admin", doc["cadastro_id"], doc["nome_arquivo"])
+        )
+
+    for caminho in caminhos_alternativos:
+        if os.path.exists(caminho):
+            logger.info(f"Documento encontrado em caminho alternativo: {caminho}")
+            return FileResponse(
+                caminho,
+                filename=doc["nome_original"],
+                media_type="application/octet-stream"
+            )
+
+    logger.error(f"Arquivo não encontrado: {arquivo_path}, tentativas: {caminhos_alternativos}")
+    raise HTTPException(status_code=404, detail="Arquivo não encontrado")
 
 
 # ============================================
@@ -577,14 +604,41 @@ async def admin_download_documento_extra(
     if not doc:
         raise HTTPException(status_code=404, detail="Documento não encontrado")
 
-    if not os.path.exists(doc["arquivo_path"]):
-        raise HTTPException(status_code=404, detail="Arquivo não encontrado")
+    arquivo_path = doc["arquivo_path"]
 
-    return FileResponse(
-        doc["arquivo_path"],
-        filename=doc["nome_original"],
-        media_type="application/octet-stream"
-    )
+    # Tentar caminho original
+    if os.path.exists(arquivo_path):
+        return FileResponse(
+            arquivo_path,
+            filename=doc["nome_original"],
+            media_type="application/octet-stream"
+        )
+
+    # Fallback: tentar caminhos alternativos para arquivos legados
+    caminhos_alternativos = []
+
+    # Se caminho começa com /app/, tentar sem o prefixo
+    if arquivo_path.startswith("/app/"):
+        caminhos_alternativos.append(arquivo_path[5:])  # Remove /app/
+        caminhos_alternativos.append(os.path.join(UPLOADS_DIR, arquivo_path[13:]))  # Remove /app/uploads/
+
+    # Tentar reconstruir caminho a partir dos dados do documento
+    if doc.get("cadastro_id") and doc.get("nome_arquivo"):
+        caminhos_alternativos.append(
+            os.path.join(UPLOADS_DIR, "documentos_extras", doc["cadastro_id"], doc["nome_arquivo"])
+        )
+
+    for caminho in caminhos_alternativos:
+        if os.path.exists(caminho):
+            logger.info(f"Documento encontrado em caminho alternativo: {caminho}")
+            return FileResponse(
+                caminho,
+                filename=doc["nome_original"],
+                media_type="application/octet-stream"
+            )
+
+    logger.error(f"Arquivo não encontrado: {arquivo_path}, tentativas: {caminhos_alternativos}")
+    raise HTTPException(status_code=404, detail="Arquivo não encontrado")
 
 
 @router.delete("/documentos-extras/{doc_id}")
