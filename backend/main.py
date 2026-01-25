@@ -61,6 +61,11 @@ from modules.database import (
     salvar_financeiro,
     buscar_financeiro,
     atualizar_status_prestacao,
+    # Documentos (usados em /api/cliente/documentos)
+    listar_documentos_admin,
+    buscar_documento_admin,
+    listar_documentos_extras,
+    buscar_documento_extra,
 )
 
 # Modelos Pydantic
