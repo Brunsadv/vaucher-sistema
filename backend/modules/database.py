@@ -51,7 +51,7 @@ def init_db():
         cur.execute("""
             CREATE TABLE IF NOT EXISTS cadastros (
                 id VARCHAR(20) PRIMARY KEY,
-                data VARCHAR(20),
+                data VARCHAR(50),
                 data_hora TIMESTAMP,
                 status VARCHAR(20) DEFAULT 'pendente',
                 dados JSONB,
@@ -82,6 +82,12 @@ def init_db():
                     ALTER TABLE cadastros ADD COLUMN atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP;
                 END IF;
             END $$;
+        """)
+
+        # Migração: aumentar tamanho do campo data de VARCHAR(20) para VARCHAR(50)
+        # O campo estava muito pequeno para ISO timestamps (ex: 2026-01-25T02:20:32.075846)
+        cur.execute("""
+            ALTER TABLE cadastros ALTER COLUMN data TYPE VARCHAR(50);
         """)
 
         # Tabela de usuários
