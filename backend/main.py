@@ -875,15 +875,16 @@ async def receber_documentos_assinados(cadastro_id: str, arquivos: List[UploadFi
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
     
-    # Criar pasta para documentos assinados
-    pasta_assinados = f"/app/uploads/documentos_assinados/{cadastro_id}"
+    # Criar pasta para documentos assinados (usando UPLOADS_DIR para consistência)
+    pasta_assinados = os.path.join(UPLOADS_DIR, "documentos_assinados", cadastro_id)
     os.makedirs(pasta_assinados, exist_ok=True)
-    
+
     # Salvar arquivos
     arquivos_salvos = []
     for arquivo in arquivos:
-        nome_arquivo = arquivo.filename
-        caminho = f"{pasta_assinados}/{nome_arquivo}"
+        # Sanitizar nome do arquivo para segurança
+        nome_arquivo = sanitizar_nome_arquivo(arquivo.filename)
+        caminho = os.path.join(pasta_assinados, nome_arquivo)
         
         with open(caminho, "wb") as f:
             conteudo = await arquivo.read()
@@ -1403,11 +1404,15 @@ async def cliente_enviar_documentos_assinados(
 @app.get("/api/cadastros/{cadastro_id}/assinados/{filename}")
 def download_documento_assinado(cadastro_id: str, filename: str):
     """Faz download de um documento assinado pelo cliente."""
-    file_path = os.path.join(UPLOADS_DIR, cadastro_id, "assinados", filename)
-    
+    # Sanitizar filename para segurança
+    nome_seguro = sanitizar_nome_arquivo(filename)
+
+    # Caminho correto: uploads/documentos_assinados/{cadastro_id}/{filename}
+    file_path = os.path.join(UPLOADS_DIR, "documentos_assinados", cadastro_id, nome_seguro)
+
     if os.path.exists(file_path):
-        return FileResponse(file_path, filename=filename, media_type="application/octet-stream")
-    
+        return FileResponse(file_path, filename=nome_seguro, media_type="application/octet-stream")
+
     raise HTTPException(status_code=404, detail="Arquivo não encontrado")
 
 
@@ -1675,9 +1680,20 @@ async def portal_cliente_download_documento(
                     if url:
                         # Se a URL for um arquivo local
                         if url.startswith("/") or url.startswith("./"):
-                            arquivo_path = url
-                            if url.startswith("/app/"):
-                                arquivo_path = url.replace("/app/", UPLOADS_DIR.replace("uploads", ""))
+                            # Construir caminho de forma segura
+                            if url.startswith("/app/uploads/"):
+                                # Extrair caminho relativo após /app/uploads/
+                                relative_path = url[len("/app/uploads/"):]
+                                arquivo_path = os.path.join(UPLOADS_DIR, relative_path)
+                            elif url.startswith("/app/"):
+                                # Outros caminhos /app/
+                                relative_path = url[len("/app/"):]
+                                arquivo_path = os.path.join(BASE_DIR, relative_path)
+                            elif url.startswith("./"):
+                                arquivo_path = os.path.join(BASE_DIR, url[2:])
+                            else:
+                                arquivo_path = url
+
                             if os.path.exists(arquivo_path):
                                 nome = doc.get("nome") or os.path.basename(arquivo_path)
                                 return FileResponse(
@@ -4109,13 +4125,13 @@ async def upload_documento_final(
     if extensao not in ['.pdf', '.docx', '.doc']:
         raise HTTPException(status_code=400, detail="Arquivo deve ser PDF ou DOCX")
 
-    # Criar pasta para documentos finais
-    pasta_finais = f"/app/uploads/documentos_finais/{cadastro_id}"
+    # Criar pasta para documentos finais (usando UPLOADS_DIR para consistência)
+    pasta_finais = os.path.join(UPLOADS_DIR, "documentos_finais", cadastro_id)
     os.makedirs(pasta_finais, exist_ok=True)
 
     # Nome do arquivo final
     nome_arquivo = f"{tipo_documento}_final{extensao}"
-    caminho_final = f"{pasta_finais}/{nome_arquivo}"
+    caminho_final = os.path.join(pasta_finais, nome_arquivo)
 
     # Salvar arquivo
     try:
