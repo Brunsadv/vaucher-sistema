@@ -500,6 +500,45 @@ def init_db():
 
         logger.info("Tabela de banners verificada/criada!")
 
+        # ========== INSIGHTS (BLOG, ARTIGOS, JURISPRUDÊNCIA) ==========
+
+        # Tabela de insights para a landing page
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS insights (
+                id VARCHAR(20) PRIMARY KEY,
+                slug VARCHAR(150) UNIQUE NOT NULL,
+                categoria VARCHAR(30) NOT NULL,
+                titulo VARCHAR(255) NOT NULL,
+                titulo_en VARCHAR(255),
+                titulo_es VARCHAR(255),
+                resumo TEXT NOT NULL,
+                resumo_en TEXT,
+                resumo_es TEXT,
+                conteudo TEXT NOT NULL,
+                conteudo_en TEXT,
+                conteudo_es TEXT,
+                fonte VARCHAR(255),
+                fonte_url VARCHAR(500),
+                imagem_path VARCHAR(500),
+                tags JSONB DEFAULT '[]',
+                destaque BOOLEAN DEFAULT FALSE,
+                status VARCHAR(20) DEFAULT 'rascunho',
+                autor_id INTEGER,
+                autor_nome VARCHAR(255),
+                data_publicacao TIMESTAMP,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_insights_categoria ON insights(categoria)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_insights_status ON insights(status)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_insights_destaque ON insights(destaque)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_insights_data_pub ON insights(data_publicacao DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_insights_slug ON insights(slug)")
+
+        logger.info("Tabela de insights verificada/criada!")
+
         # ========== PRAZOS PROCESSUAIS ==========
 
         # Tabela de prazos processuais

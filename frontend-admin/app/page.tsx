@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt, Scale, MessageSquare, Calendar, Gavel, CreditCard, Building, ChevronDown, ChevronUp, HardDrive, Archive, RefreshCw } from 'lucide-react'
+import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt, Scale, MessageSquare, Calendar, Gavel, CreditCard, Building, ChevronDown, ChevronUp, HardDrive, Archive, RefreshCw, Newspaper } from 'lucide-react'
 import PWAInstallPrompt from '@/components/PWAInstallPrompt'
+import InsightsManager from '@/components/InsightsManager'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -2597,6 +2598,9 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
 // Estado do Modal de Backup
   const [showBackupModal, setShowBackupModal] = useState(false)
 
+  // Estado do Modal de Insights
+  const [showInsightsModal, setShowInsightsModal] = useState(false)
+
   // Estado do Modal de Importação do Astrea
   const [showImportarAstreaModal, setShowImportarAstreaModal] = useState(false)
 
@@ -4900,6 +4904,15 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
               <div className="flex items-center gap-2">
                 {user.is_admin && (
                   <button
+                    onClick={() => setShowInsightsModal(true)}
+                    className="p-2 bg-white/10 hover:bg-white/20 rounded-lg"
+                    title="Gerenciar Insights"
+                  >
+                    <Newspaper className="w-5 h-5" />
+                  </button>
+                )}
+                {user.is_admin && (
+                  <button
                     onClick={() => setShowBackupModal(true)}
                     className="p-2 bg-white/10 hover:bg-white/20 rounded-lg"
                     title="Backup e Documentos"
@@ -5180,6 +5193,10 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       )}
       {showBackupModal && (
         <BackupModal user={user} onClose={() => setShowBackupModal(false)} />
+      )}
+
+      {showInsightsModal && (
+        <InsightsManager token={user.token} onClose={() => setShowInsightsModal(false)} />
       )}
 
       {showImportarAstreaModal && (
