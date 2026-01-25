@@ -18,72 +18,42 @@ import shutil
 from datetime import datetime, timezone
 
 # Rate Limiting
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-# MIGRADO PARA modules/config.py
-# try:
-#     from zoneinfo import ZoneInfo
-# except ImportError:
-#     from backports.zoneinfo import ZoneInfo
+
 import uuid
-import hashlib
-import logging
 import httpx
 import base64
 import secrets
 from io import BytesIO
 from dateutil.relativedelta import relativedelta
-from decimal import Decimal
 
-# ============================================
-# MIGRAÇÃO MODULAR - 18/01/2026
-# Importar configurações do módulo config.py
-# ============================================
+# Configurações
 from modules.config import (
-    FUSO_CUIABA,
-    converter_para_cuiaba,
     BASE_DIR,
     MODELOS_DIR,
     UPLOADS_DIR,
     GERADOS_DIR,
     STATIC_DIR,
-    DATABASE_URL,
     RESEND_API_KEY,
     FROM_EMAIL,
-    ADMIN_INICIAL_SENHA,
-    TOKEN_SECRET,
-    LOGO_URL,
     ALLOWED_ORIGINS,
     logger,
-    limiter,  # Rate limiter compartilhado
+    limiter,
 )
 
-# Funções de segurança (migrado em 19/01/2026, atualizado 23/01/2026)
+# Funções de segurança
 from modules.security import (
-    hash_senha,
-    verificar_senha,
-    senha_precisa_atualizacao,
-    gerar_token,
-    decodificar_token,
-    gerar_token_cliente,
     decodificar_token_cliente,
     criar_email_html,
     validar_arquivo,
     sanitizar_nome_arquivo,
 )
 
-# Funções de banco de dados (migrado em 19/01/2026, expandido 24/01/2026)
+# Funções de banco de dados
 from modules.database import (
     get_db,
     init_db,
-    buscar_usuario_por_email,
-    listar_usuarios,
-    criar_usuario,
-    atualizar_usuario,
-    deletar_usuario,
-    verificar_termos_aceitos,
-    registrar_aceite_termos,
     salvar_cadastro,
     carregar_cadastros,
     buscar_cadastro,
@@ -91,125 +61,30 @@ from modules.database import (
     salvar_financeiro,
     buscar_financeiro,
     atualizar_status_prestacao,
-    marcar_prestacao_assinada,
-    # Banners/Notícias
-    listar_banners,
-    buscar_banner,
-    criar_banner,
-    atualizar_banner,
-    deletar_banner,
-    # Processos (múltiplos por cliente)
-    criar_processo,
-    listar_processos,
-    buscar_processo,
-    atualizar_processo,
-    deletar_processo,
-    # Andamentos de processo
-    criar_andamento_processo,
-    listar_andamentos_processo,
-    deletar_andamento_processo,
-    # Contratos de honorários
-    criar_contrato_honorarios,
-    listar_contratos,
-    buscar_contrato,
-    atualizar_contrato,
-    deletar_contrato,
-    # Parcelas
-    listar_parcelas,
-    atualizar_parcela,
-    marcar_parcela_paga,
-    # Comprovantes
-    criar_comprovante,
-    listar_comprovantes_pendentes,
-    aprovar_comprovante,
-    rejeitar_comprovante,
-    # Andamentos legacy (por cadastro)
-    listar_andamentos,
-    criar_andamento,
-    deletar_andamento,
-    # Mensagens
-    listar_mensagens,
-    criar_mensagem,
-    marcar_mensagens_lidas,
-    contar_mensagens_nao_lidas,
-    # Documentos admin
-    criar_documento_admin,
-    listar_documentos_admin,
-    buscar_documento_admin,
-    deletar_documento_admin,
-    # Documentos extras
-    criar_documento_extra,
-    listar_documentos_extras,
-    buscar_documento_extra,
-    deletar_documento_extra,
-    # Processo info (legacy)
-    buscar_processo_info,
-    salvar_processo_info,
-    # Autenticação cliente
-    criar_cliente_auth,
-    buscar_cliente_auth,
-    buscar_cliente_por_email,
-    atualizar_senha_cliente,
-    registrar_acesso_cliente,
 )
 
-# Módulo de Prazos Processuais (adicionado em 23/01/2026)
-from modules.prazos import (
-    criar_prazo,
-    listar_prazos_processo,
-    listar_prazos_pendentes,
-    listar_todos_prazos,
-    atualizar_prazo,
-    concluir_prazo,
-    cancelar_prazo,
-    deletar_prazo,
-    gerar_prazos_movimento,
-    processar_andamentos_para_prazos,
-    obter_resumo_prazos,
-    calcular_data_prazo,
-)
-
-# Modelos Pydantic (migrado em 19/01/2026)
+# Modelos Pydantic
 from modules.models import (
     DadosCliente,
-    LoginRequest,
-    LoginResponse,
-    NovoUsuario,
-    AtualizarUsuario,
-    AlterarSenha,
-    DepositoItem,
-    SucumbenciaItem,
-    RetencaoItem,
-    DadosResidenciaMedica,
     SalvarRascunhoDemanda,
     FinanceiroData,
-    ClienteLogin,
-    ClienteAlterarSenha,
-    ProcessoInfoModel,
-    AndamentoModel,
-    MensagemEnvio,
     SolicitacaoAtualizacao,
     EnvioAtualizacao,
     RejeicaoAtualizacao,
 )
 
-# Gerador de documentos (migrado em 19/01/2026)
-from modules.documents import (
-    GeradorDocumentos,
-    gerador,
-    gerar_peticao_auxilio_moradia,
-)
+# Gerador de documentos
+from modules.documents import gerador, gerar_peticao_auxilio_moradia
 
-# Funções de e-mail (migrado em 19/01/2026)
+# Funções de e-mail
 from modules.email import enviar_email_resend, enviar_email_assinatura_digital
 
-# Assinatura digital (criado em 19/01/2026)
+# Assinatura digital
 from modules.assinatura import (
     gerar_link_govbr,
     criar_documento_zapsign,
     verificar_status_documento,
     obter_documento_assinado,
-    gerar_html_botoes_assinatura,
 )
 
 # PostgreSQL
