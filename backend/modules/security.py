@@ -190,7 +190,13 @@ def validar_mime_type(conteudo: bytes, filename: str) -> tuple[bool, str]:
     if ext not in MAGIC_BYTES:
         return True, ""
 
-    # Verifica se algum dos magic bytes corresponde
+    # Para PDFs, buscar %PDF nos primeiros 1024 bytes (pode ter whitespace/BOM no início)
+    if ext == '.pdf':
+        if b'%PDF' in conteudo[:1024]:
+            return True, ""
+        return False, f"O conteúdo do arquivo não corresponde à extensão {ext}."
+
+    # Para outros tipos, verificar magic bytes no offset especificado
     for magic, offset in MAGIC_BYTES[ext]:
         if len(conteudo) >= offset + len(magic):
             if conteudo[offset:offset + len(magic)] == magic:
