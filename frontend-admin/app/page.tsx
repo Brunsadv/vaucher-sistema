@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt, Scale, MessageSquare, Calendar, Gavel, CreditCard, Building, ChevronDown, ChevronUp, HardDrive, Archive, RefreshCw, Newspaper } from 'lucide-react'
+import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt, Scale, MessageSquare, Calendar, Gavel, CreditCard, Building, ChevronDown, ChevronUp, HardDrive, Archive, RefreshCw, Newspaper, Bell } from 'lucide-react'
 import PWAInstallPrompt from '@/components/PWAInstallPrompt'
 import InsightsManager from '@/components/InsightsManager'
 
@@ -2627,7 +2627,8 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
   const [atualizacaoSelecionada, setAtualizacaoSelecionada] = useState<AtualizacaoCadastral | null>(null)
   const [showModalRejeitar, setShowModalRejeitar] = useState(false)
   const [motivoRejeicao, setMotivoRejeicao] = useState('')
-  
+  const [showNotificacoesDropdown, setShowNotificacoesDropdown] = useState(false)
+
   const tiposDemanda: Record<string, string> = {
     'adicional_insalubridade': 'Adicional de Insalubridade',
     'adicional_periculosidade': 'Adicional de Periculosidade',
@@ -2679,6 +2680,27 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       }
     } catch (error) {
       console.error('Erro ao buscar atualizações pendentes:', error)
+    }
+  }
+
+  const navegarParaNotificacao = async (atualizacao: AtualizacaoCadastral) => {
+    // Fechar dropdown
+    setShowNotificacoesDropdown(false)
+
+    // Buscar o cadastro completo
+    try {
+      const response = await fetch(`${API_URL}/api/cadastros/${atualizacao.cadastro_id}`, {
+        headers: { 'Authorization': `Bearer ${user.token}` }
+      })
+
+      if (response.ok) {
+        const cadastroData = await response.json()
+        setSelectedCadastro(cadastroData)
+        // Abrir modal de detalhes da atualização
+        verDetalhesAtualizacao(atualizacao)
+      }
+    } catch (error) {
+      console.error('Erro ao navegar para notificação:', error)
     }
   }
 
@@ -4929,6 +4951,76 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                     <Users className="w-5 h-5" />
                   </button>
                 )}
+                {/* Sininho de Notificações */}
+                <div className="relative">
+                  <button
+                    onClick={() => setShowNotificacoesDropdown(!showNotificacoesDropdown)}
+                    className="p-2 bg-white/10 hover:bg-white/20 rounded-lg relative"
+                    title="Notificações"
+                  >
+                    <Bell className="w-5 h-5" />
+                    {atualizacoesPendentes.length > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs w-5 h-5 flex items-center justify-center rounded-full font-bold">
+                        {atualizacoesPendentes.length > 9 ? '9+' : atualizacoesPendentes.length}
+                      </span>
+                    )}
+                  </button>
+                  {showNotificacoesDropdown && (
+                    <div className="absolute right-0 top-12 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 z-50 max-h-96 overflow-y-auto">
+                      <div className="p-3 border-b border-gray-100 flex justify-between items-center">
+                        <h3 className="font-semibold text-gray-800">Notificações</h3>
+                        <button
+                          onClick={() => setShowNotificacoesDropdown(false)}
+                          className="text-gray-400 hover:text-gray-600"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                      {atualizacoesPendentes.length === 0 ? (
+                        <div className="p-4 text-center text-gray-500">
+                          <Bell className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                          <p>Nenhuma notificação</p>
+                        </div>
+                      ) : (
+                        <div className="divide-y divide-gray-100">
+                          {atualizacoesPendentes.map((atualizacao) => (
+                            <button
+                              key={atualizacao.id}
+                              onClick={() => navegarParaNotificacao(atualizacao)}
+                              className="w-full p-3 hover:bg-gray-50 text-left transition-colors"
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="w-8 h-8 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+                                  <RefreshCw className="w-4 h-4 text-amber-600" />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-gray-800 truncate">
+                                    {atualizacao.nome_cliente}
+                                  </p>
+                                  <p className="text-sm text-gray-500">
+                                    {atualizacao.tipo === 'solicitada' ? 'Atualização solicitada' : 'Atualização espontânea'}
+                                  </p>
+                                  <p className="text-xs text-gray-400 mt-1">
+                                    {atualizacao.enviado_em
+                                      ? new Date(atualizacao.enviado_em).toLocaleDateString('pt-BR', {
+                                          day: '2-digit',
+                                          month: '2-digit',
+                                          hour: '2-digit',
+                                          minute: '2-digit'
+                                        })
+                                      : ''
+                                    }
+                                  </p>
+                                </div>
+                                <Eye className="w-4 h-4 text-gray-400" />
+                              </div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <button
                   onClick={() => setShowAlterarSenhaModal(true)}
                   className="p-2 bg-white/10 hover:bg-white/20 rounded-lg"
