@@ -79,10 +79,13 @@ async def consultar_datajud(numero_processo: str) -> dict:
         "Content-Type": "application/json"
     }
 
+    # Limpar número do processo (remover formatação CNJ)
+    numero_limpo = numero_processo.replace("-", "").replace(".", "").replace(" ", "")
+
     body = {
         "query": {
             "match": {
-                "numeroProcesso": numero_processo
+                "numeroProcesso": numero_limpo
             }
         },
         "size": 1
