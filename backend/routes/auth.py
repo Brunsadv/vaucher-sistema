@@ -47,6 +47,8 @@ def login(request: Request, data: LoginRequest):
     if usuario and verificar_senha(data.senha, usuario['senha_hash']):
         # Migra senha legada para bcrypt se necessário
         if senha_precisa_atualizacao(usuario['senha_hash']):
+            conn = None
+            cur = None
             try:
                 novo_hash = hash_senha(data.senha)
                 conn = get_db()
@@ -55,11 +57,14 @@ def login(request: Request, data: LoginRequest):
                     cur.execute("UPDATE usuarios SET senha_hash = %s WHERE id = %s",
                                 (novo_hash, usuario['id']))
                     conn.commit()
-                    cur.close()
-                    conn.close()
                     logger.info(f"Senha migrada para bcrypt: {usuario['email']}")
             except Exception as e:
                 logger.error(f"Erro ao migrar senha: {e}")
+            finally:
+                if cur:
+                    cur.close()
+                if conn:
+                    conn.close()
 
         token = gerar_token(usuario["id"], usuario["email"], usuario["is_admin"])
         termos_aceitos = verificar_termos_aceitos(usuario["id"])
@@ -147,24 +152,29 @@ def alterar_senha_usuario(user_id: int, dados: AlterarSenha, usuario: dict = Dep
     if not conn:
         raise HTTPException(status_code=500, detail="Erro de conexão")
 
+    cur = None
     try:
         cur = conn.cursor()
         cur.execute("UPDATE usuarios SET senha_hash = %s WHERE id = %s", (senha_hash, user_id))
         if cur.rowcount == 0:
             raise HTTPException(status_code=404, detail="Usuário não encontrado")
         conn.commit()
-        cur.close()
-        conn.close()
         return {"success": True, "message": "Senha alterada com sucesso"}
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Erro ao alterar senha: {e}")
         raise HTTPException(status_code=500, detail="Erro ao alterar senha")
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 
 @router.post("/alterar-senha")
-def alterar_minha_senha(dados: AlterarSenha, usuario: dict = Depends(verificar_token)):
+@limiter.limit("5/minute")
+def alterar_minha_senha(request: Request, dados: AlterarSenha, usuario: dict = Depends(verificar_token)):
     """Permite ao usuário alterar sua própria senha."""
     usuario_db = buscar_usuario_por_email(usuario["email"])
 
@@ -176,13 +186,17 @@ def alterar_minha_senha(dados: AlterarSenha, usuario: dict = Depends(verificar_t
     if not conn:
         raise HTTPException(status_code=500, detail="Erro de conexão")
 
+    cur = None
     try:
         cur = conn.cursor()
         cur.execute("UPDATE usuarios SET senha_hash = %s WHERE id = %s", (novo_hash, usuario["id"]))
         conn.commit()
-        cur.close()
-        conn.close()
         return {"success": True, "message": "Senha alterada com sucesso"}
     except Exception as e:
         logger.error(f"Erro ao alterar senha: {e}")
         raise HTTPException(status_code=500, detail="Erro ao alterar senha")
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()

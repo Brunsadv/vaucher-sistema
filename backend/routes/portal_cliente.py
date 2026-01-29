@@ -101,6 +101,8 @@ async def portal_cliente_login(request: Request, dados: ClienteLogin):
 
     # Migra senha legada para bcrypt se necessário
     if senha_precisa_atualizacao(cliente["senha_hash"]):
+        conn = None
+        cur = None
         try:
             novo_hash = hash_senha(dados.senha)
             conn = get_db()
@@ -109,11 +111,14 @@ async def portal_cliente_login(request: Request, dados: ClienteLogin):
                 cur.execute("UPDATE clientes_acesso SET senha_hash = %s WHERE cadastro_id = %s",
                             (novo_hash, cliente['cadastro_id']))
                 conn.commit()
-                cur.close()
-                conn.close()
                 logger.info(f"Senha cliente migrada para bcrypt: {cliente['cadastro_id']}")
         except Exception as e:
             logger.error(f"Erro ao migrar senha cliente: {e}")
+        finally:
+            if cur:
+                cur.close()
+            if conn:
+                conn.close()
 
     registrar_acesso_cliente(cliente["cadastro_id"])
     token = gerar_token_cliente(cliente["cadastro_id"], cliente["email"])
@@ -129,7 +134,9 @@ async def portal_cliente_login(request: Request, dados: ClienteLogin):
 
 
 @router.post("/alterar-senha")
+@limiter.limit("5/minute")
 async def portal_cliente_alterar_senha(
+    request: Request,
     dados: ClienteAlterarSenha,
     cliente: dict = Depends(verificar_token_cliente)
 ):

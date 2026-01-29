@@ -149,23 +149,24 @@ async def atualizar_processo_datajud(
     if not conn:
         raise HTTPException(status_code=500, detail="Erro de conexão")
 
+    cur = None
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT * FROM processos WHERE id = %s", (processo_id,))
         processo = cur.fetchone()
 
         if not processo:
-            cur.close()
-            conn.close()
-            raise HTTPException(status_code=404, detail="Processo não encontrado")
+            raise HTTPException(status_code=404, detail="Processo não encontrado no sistema")
 
         numero_processo = processo["numero_processo"]
         resultado = await consultar_datajud(numero_processo)
 
         if "erro" in resultado:
-            cur.close()
-            conn.close()
-            raise HTTPException(status_code=400, detail=resultado["erro"])
+            erro_msg = resultado["erro"]
+            # Mensagem mais clara para o usuário
+            if "não encontrado" in erro_msg.lower():
+                erro_msg = f"Processo {numero_processo} não encontrado no DataJud. Verifique se o número está correto ou se o processo já foi indexado pelo CNJ."
+            raise HTTPException(status_code=400, detail=erro_msg)
 
         dados_cnj = resultado["dados"]
 
@@ -228,10 +229,8 @@ async def atualizar_processo_datajud(
                 andamentos_adicionados += 1
 
         conn.commit()
-        cur.close()
-        conn.close()
 
-        # Gerar prazos automáticos
+        # Gerar prazos automáticos (após fechar conexão principal)
         prazos_resultado = processar_andamentos_para_prazos(processo_id)
         prazos_criados = prazos_resultado.get("prazos_criados", 0)
 
@@ -248,9 +247,12 @@ async def atualizar_processo_datajud(
         raise
     except Exception as e:
         logger.error(f"Erro ao atualizar processo do DataJud: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if cur:
+            cur.close()
         if conn:
             conn.close()
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/atualizar-todos")
