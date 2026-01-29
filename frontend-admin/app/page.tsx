@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { FileText, Check, User, Briefcase, FolderOpen, Clock, CheckCircle, Eye, Send, Users, Filter, Search, ArrowLeft, LogOut, FileCheck, AlertCircle, Download, Lock, Mail, Shield, Paperclip, X, FileUp, Upload, Plus, Trash2, Edit, Key, UserPlus, Settings, FileSpreadsheet, DollarSign, Calculator, Receipt, Scale, MessageSquare, Calendar, Gavel, CreditCard, Building, ChevronDown, ChevronUp, HardDrive, Archive, RefreshCw, Newspaper, Bell } from 'lucide-react'
 import PWAInstallPrompt from '@/components/PWAInstallPrompt'
 import InsightsManager from '@/components/InsightsManager'
+import { ToastProvider, useToast } from '@/components/Toast'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -1664,6 +1665,7 @@ const EnviarEmailModal = ({
 }
 // Modal de Backup e Gerenciamento de Documentos
 const BackupModal = ({ user, onClose }: { user: UserData, onClose: () => void }) => {
+  const toast = useToast()
   const [loading, setLoading] = useState(true)
   const [clientes, setClientes] = useState<ClienteDocumentos[]>([])
   const [resumo, setResumo] = useState<BackupResumo | null>(null)
@@ -1758,10 +1760,10 @@ const BackupModal = ({ user, onClose }: { user: UserData, onClose: () => void })
         a.remove()
         window.URL.revokeObjectURL(url)
       } else {
-        alert('Erro ao gerar backup completo')
+        toast.error('Erro ao gerar backup completo')
       }
     } catch (err) {
-      alert('Erro de conexão')
+      toast.error('Erro de conexão')
     } finally {
       setBaixandoBackup(false)
     }
@@ -1769,7 +1771,7 @@ const BackupModal = ({ user, onClose }: { user: UserData, onClose: () => void })
 
   const handleBackupSelecionados = async () => {
     if (selecionados.size === 0) {
-      alert('Selecione pelo menos um documento')
+      toast.info('Selecione pelo menos um documento')
       return
     }
 
@@ -1797,10 +1799,10 @@ const BackupModal = ({ user, onClose }: { user: UserData, onClose: () => void })
         a.remove()
         window.URL.revokeObjectURL(url)
       } else {
-        alert('Erro ao gerar backup')
+        toast.error('Erro ao gerar backup')
       }
     } catch (err) {
-      alert('Erro de conexão')
+      toast.error('Erro de conexão')
     } finally {
       setBaixandoBackup(false)
     }
@@ -1808,7 +1810,7 @@ const BackupModal = ({ user, onClose }: { user: UserData, onClose: () => void })
 
   const handleDeletarSelecionados = async () => {
     if (selecionados.size === 0) {
-      alert('Selecione pelo menos um documento')
+      toast.info('Selecione pelo menos um documento')
       return
     }
 
@@ -1826,15 +1828,15 @@ const BackupModal = ({ user, onClose }: { user: UserData, onClose: () => void })
       })
       if (response.ok) {
         const data = await response.json()
-        alert(`${data.deletados || 0} documento(s) deletado(s) com sucesso`)
+        toast.success(`${data.deletados || 0} documento(s) deletado(s) com sucesso`)
         setSelecionados(new Set())
         setConfirmDelete(false)
         carregarDocumentos()
       } else {
-        alert('Erro ao deletar documentos')
+        toast.error('Erro ao deletar documentos')
       }
     } catch (err) {
-      alert('Erro de conexão')
+      toast.error('Erro de conexão')
     } finally {
       setDeletando(false)
     }
@@ -2550,6 +2552,7 @@ const ImportarAstreaModal = ({ user, onClose, onImportSuccess }: { user: UserDat
 
 // Dashboard Administrativo Principal
 const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => void }) => {
+  const toast = useToast()
   const [cadastros, setCadastros] = useState<Cadastro[]>([])
   const [selectedCadastro, setSelectedCadastro] = useState<Cadastro | null>(null)
   const [filterStatus, setFilterStatus] = useState('todos')
@@ -2724,15 +2727,15 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       const data = await response.json()
       
       if (response.ok) {
-        alert(`Solicitação enviada com sucesso!${data.email_enviado ? ' O cliente foi notificado por e-mail.' : ''}`)
+        toast.success(`Solicitação enviada com sucesso!${data.email_enviado ? ' O cliente foi notificado por e-mail.' : ''}`)
         setShowModalSolicitarAtualizacao(false)
         setMotivoSolicitacao('')
       } else {
-        alert(data.detail || 'Erro ao solicitar atualização')
+        toast.error(data.detail || 'Erro ao solicitar atualização')
       }
     } catch (error) {
       console.error('Erro:', error)
-      alert('Erro ao solicitar atualização')
+      toast.error('Erro ao solicitar atualização')
     } finally {
       setLoadingSolicitacao(false)
     }
@@ -2770,7 +2773,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       )
       
       if (response.ok) {
-        alert('Atualização aprovada com sucesso!')
+        toast.success('Atualização aprovada com sucesso!')
         setShowModalVerAtualizacao(false)
         setAtualizacaoSelecionada(null)
         buscarAtualizacoesPendentes()
@@ -2781,11 +2784,11 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
         }
       } else {
         const data = await response.json()
-        alert(data.detail || 'Erro ao aprovar atualização')
+        toast.error(data.detail || 'Erro ao aprovar atualização')
       }
     } catch (error) {
       console.error('Erro:', error)
-      alert('Erro ao aprovar atualização')
+      toast.error('Erro ao aprovar atualização')
     }
   }
 
@@ -2806,7 +2809,7 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       )
       
       if (response.ok) {
-        alert('Atualização rejeitada. O cliente foi notificado.')
+        toast.success('Atualização rejeitada. O cliente foi notificado.')
         setShowModalRejeitar(false)
         setShowModalVerAtualizacao(false)
         setMotivoRejeicao('')
@@ -2814,11 +2817,11 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
         buscarAtualizacoesPendentes()
       } else {
         const data = await response.json()
-        alert(data.detail || 'Erro ao rejeitar atualização')
+        toast.error(data.detail || 'Erro ao rejeitar atualização')
       }
     } catch (error) {
       console.error('Erro:', error)
-      alert('Erro ao rejeitar atualização')
+      toast.error('Erro ao rejeitar atualização')
     }
   }
 
@@ -3410,14 +3413,13 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
       if (response.ok && data.success) {
         setCadastros(prev => prev.filter(c => c.id !== id))
         setSelectedCadastro(null)
-        setMensagemSucesso('Cadastro excluído com sucesso!')
-        setTimeout(() => setMensagemSucesso(''), 3000)
+        toast.success('Cadastro excluído com sucesso!')
       } else {
-        alert(data.detail || 'Erro ao excluir cadastro')
+        toast.error(data.detail || 'Erro ao excluir cadastro')
       }
     } catch (err) {
       console.error('Erro ao deletar:', err)
-      alert('Erro de conexão. Tente novamente.')
+      toast.error('Erro de conexão. Tente novamente.')
     }
   }
 
@@ -4337,11 +4339,11 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                                   setDocumentosDemanda(docsData.documentos || [])
                                 }
                               } else {
-                                alert(data.detail || 'Erro ao importar documentos')
+                                toast.error(data.detail || 'Erro ao importar documentos')
                               }
                             } catch (error) {
                               console.error('Erro:', error)
-                              alert('Erro ao importar documentos')
+                              toast.error('Erro ao importar documentos')
                             }
                           }}
                           className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg flex items-center gap-1"
@@ -4410,15 +4412,15 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                             if (!e.target.files || e.target.files.length === 0) return
                             const tipoDoc = (document.getElementById('tipo-doc-demanda') as HTMLSelectElement).value
                             if (!tipoDoc) {
-                              alert('Selecione o tipo do documento')
+                              toast.info('Selecione o tipo do documento')
                               return
                             }
-                            
+
                             for (const file of Array.from(e.target.files)) {
                               const formData = new FormData()
                               formData.append('arquivo', file)
                               formData.append('descricao', tipoDoc === 'outro' ? 'Documento adicional' : tipoDoc)
-                              
+
                               try {
                                 const response = await fetch(`${API_URL}/api/cadastros/${c.id}/documento-demanda/${tipoDoc}`, {
                                   method: 'POST',
@@ -4426,11 +4428,11 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                                 })
                                 const data = await response.json()
                                 if (!response.ok) {
-                                  alert(data.detail || 'Erro ao enviar documento')
+                                  toast.error(data.detail || 'Erro ao enviar documento')
                                 }
                               } catch (error) {
                                 console.error('Erro:', error)
-                                alert('Erro ao enviar documento')
+                                toast.error('Erro ao enviar documento')
                               }
                             }
                             
@@ -4696,10 +4698,10 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                               setSelectedCadastro(cadData)
                             }
                           } else {
-                            alert(data.detail || 'Erro ao enviar')
+                            toast.error(data.detail || 'Erro ao enviar')
                           }
                         } catch (err) {
-                          alert('Erro de conexão')
+                          toast.error('Erro de conexão')
                         }
                         e.target.value = ''
                       }}
@@ -4870,16 +4872,15 @@ const AdminDashboard = ({ user, onLogout }: { user: UserData, onLogout: () => vo
                       const data = await response.json()
                       
                       if (response.ok) {
-                        setMensagemSucesso(`Solicitação enviada com sucesso!${data.email_enviado ? ' O cliente foi notificado por e-mail.' : ''}`)
+                        toast.success(`Solicitação enviada com sucesso!${data.email_enviado ? ' O cliente foi notificado por e-mail.' : ''}`)
                         setShowModalSolicitarAtualizacao(false)
                         setMotivoSolicitacao('')
-                        setTimeout(() => setMensagemSucesso(''), 5000)
                       } else {
-                        alert(data.detail || 'Erro ao solicitar atualização')
+                        toast.error(data.detail || 'Erro ao solicitar atualização')
                       }
                     } catch (error) {
                       console.error('Erro:', error)
-                      alert('Erro ao solicitar atualização. Verifique sua conexão.')
+                      toast.error('Erro ao solicitar atualização. Verifique sua conexão.')
                     } finally {
                       setLoadingSolicitacao(false)
                     }
@@ -5465,17 +5466,17 @@ export default function Home() {
 
   if (!user) {
     return (
-      <>
+      <ToastProvider>
         <LoginScreen onLogin={handleLogin} />
         <PWAInstallPrompt />
-      </>
+      </ToastProvider>
     )
   }
 
   return (
-    <>
+    <ToastProvider>
       <AdminDashboard user={user} onLogout={handleLogout} />
       <PWAInstallPrompt />
-    </>
+    </ToastProvider>
   )
 }

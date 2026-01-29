@@ -569,6 +569,25 @@ def init_db():
 
         logger.info("Tabela de prazos processuais verificada/criada!")
 
+        # ========== ÍNDICES DE PERFORMANCE ==========
+        # Índices para queries frequentes
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_cadastros_email ON cadastros((dados->>'email'))")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_cadastros_cpf ON cadastros((dados->>'cpf'))")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_cadastros_status ON cadastros(status)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_cadastros_data ON cadastros(data_hora DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_processos_cadastro ON processos(cadastro_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_processos_numero ON processos(numero_processo)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_processos_status ON processos(status)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_andamentos_processo ON processo_andamentos(processo_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_andamentos_data ON processo_andamentos(data DESC)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_contratos_cadastro ON contratos_honorarios(cadastro_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_mensagens_cadastro ON mensagens(cadastro_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_mensagens_lida ON mensagens(lida)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_clientes_acesso_cadastro ON clientes_acesso(cadastro_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_clientes_acesso_email ON clientes_acesso(email)")
+
+        logger.info("Índices de performance verificados/criados!")
+
         conn.commit()
 
         # Criar usuário admin inicial se não existir
@@ -775,18 +794,42 @@ def salvar_cadastro(cadastro: dict) -> bool:
         return False
 
 
-def carregar_cadastros() -> List[dict]:
-    """Carrega todos os cadastros do banco."""
+def carregar_cadastros(limit: int = None, offset: int = 0, status: str = None) -> List[dict]:
+    """
+    Carrega cadastros do banco com paginação opcional.
+
+    Args:
+        limit: Número máximo de registros (None = todos)
+        offset: Pular os primeiros N registros
+        status: Filtrar por status específico
+
+    Returns:
+        Lista de cadastros
+    """
     conn = get_db()
     if not conn:
         return []
 
+    cur = None
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM cadastros ORDER BY data_hora DESC")
+
+        # Construir query com filtros opcionais
+        query = "SELECT * FROM cadastros"
+        params = []
+
+        if status:
+            query += " WHERE status = %s"
+            params.append(status)
+
+        query += " ORDER BY data_hora DESC"
+
+        if limit:
+            query += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
+
+        cur.execute(query, params if params else None)
         rows = cur.fetchall()
-        cur.close()
-        conn.close()
 
         cadastros = []
         for row in rows:
@@ -807,6 +850,43 @@ def carregar_cadastros() -> List[dict]:
     except Exception as e:
         logger.error(f"Erro ao carregar cadastros: {e}")
         return []
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+
+def contar_cadastros(status: str = None) -> int:
+    """
+    Conta o total de cadastros para paginação.
+
+    Args:
+        status: Filtrar por status específico
+
+    Returns:
+        Total de cadastros
+    """
+    conn = get_db()
+    if not conn:
+        return 0
+
+    cur = None
+    try:
+        cur = conn.cursor()
+        if status:
+            cur.execute("SELECT COUNT(*) FROM cadastros WHERE status = %s", (status,))
+        else:
+            cur.execute("SELECT COUNT(*) FROM cadastros")
+        return cur.fetchone()[0]
+    except Exception as e:
+        logger.error(f"Erro ao contar cadastros: {e}")
+        return 0
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 
 def buscar_cadastro(cadastro_id: str) -> Optional[dict]:

@@ -56,6 +56,7 @@ from modules.database import (
     init_db,
     salvar_cadastro,
     carregar_cadastros,
+    contar_cadastros,
     buscar_cadastro,
     atualizar_status,
     salvar_financeiro,
@@ -372,9 +373,38 @@ async def criar_cadastro(dados: DadosCliente):
         raise HTTPException(status_code=500, detail="Erro ao salvar cadastro")
 
 @app.get("/api/cadastros")
-def listar_cadastros():
-    """Lista todos os cadastros (painel admin)."""
-    return carregar_cadastros()
+def listar_cadastros(
+    limit: int = None,
+    offset: int = 0,
+    status: str = None,
+    paginated: bool = False
+):
+    """
+    Lista cadastros (painel admin).
+
+    Args:
+        limit: Número máximo de registros (opcional)
+        offset: Pular os primeiros N registros
+        status: Filtrar por status específico
+        paginated: Se True, retorna objeto com total e cadastros
+
+    Returns:
+        Lista de cadastros ou objeto paginado
+    """
+    cadastros = carregar_cadastros(limit=limit, offset=offset, status=status)
+
+    # Retorno retrocompatível: se não pedir paginação, retorna lista simples
+    if not paginated:
+        return cadastros
+
+    # Retorno paginado com metadados
+    total = contar_cadastros(status=status)
+    return {
+        "cadastros": cadastros,
+        "total": total,
+        "limit": limit,
+        "offset": offset
+    }
 
 @app.get("/api/cadastros/{cadastro_id}")
 def obter_cadastro(cadastro_id: str):
