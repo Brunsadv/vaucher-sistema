@@ -190,19 +190,41 @@ def validar_mime_type(conteudo: bytes, filename: str) -> tuple[bool, str]:
     if ext not in MAGIC_BYTES:
         return True, ""
 
-    # Para PDFs, buscar %PDF nos primeiros 1024 bytes (pode ter whitespace/BOM no início)
+    # Pegar os primeiros bytes para análise
+    header = conteudo[:1024]
+
+    # PDF: buscar %PDF nos primeiros 1024 bytes
     if ext == '.pdf':
-        if b'%PDF' in conteudo[:1024]:
+        if b'%PDF' in header:
             return True, ""
-        return False, f"O conteúdo do arquivo não corresponde à extensão {ext}."
+        return False, "Arquivo PDF inválido."
 
-    # Para outros tipos, verificar magic bytes no offset especificado
-    for magic, offset in MAGIC_BYTES[ext]:
-        if len(conteudo) >= offset + len(magic):
-            if conteudo[offset:offset + len(magic)] == magic:
-                return True, ""
+    # Imagens JPG/JPEG: verificar assinatura FFD8FF
+    if ext in ['.jpg', '.jpeg']:
+        if header[:3] == b'\xff\xd8\xff':
+            return True, ""
+        return False, "Arquivo JPG inválido."
 
-    return False, f"O conteúdo do arquivo não corresponde à extensão {ext}. O arquivo pode estar corrompido ou ter sido renomeado."
+    # Imagem PNG: verificar assinatura
+    if ext == '.png':
+        if header[:8] == b'\x89PNG\r\n\x1a\n':
+            return True, ""
+        return False, "Arquivo PNG inválido."
+
+    # DOC/XLS (OLE): verificar assinatura D0CF11E0
+    if ext in ['.doc', '.xls']:
+        if header[:4] == b'\xd0\xcf\x11\xe0':
+            return True, ""
+        return False, f"Arquivo {ext.upper()[1:]} inválido."
+
+    # DOCX/XLSX (ZIP/Office Open XML): verificar assinatura PK
+    if ext in ['.docx', '.xlsx']:
+        if header[:2] == b'PK':
+            return True, ""
+        return False, f"Arquivo {ext.upper()[1:]} inválido."
+
+    # Fallback: aceita se passou as validações anteriores
+    return True, ""
 
 
 def sanitizar_nome_arquivo(filename: str) -> str:
