@@ -18,6 +18,8 @@ from modules.security import (
     senha_precisa_atualizacao,
     gerar_token_cliente,
     criar_email_html,
+    validar_arquivo,
+    validar_mime_type,
 )
 from modules.email import enviar_email_resend
 from modules.database import (
@@ -399,6 +401,18 @@ async def portal_cliente_enviar_comprovante(
     cliente: dict = Depends(verificar_token_cliente)
 ):
     """Cliente envia comprovante de pagamento."""
+    # Validar extensão e tamanho
+    valido, erro = validar_arquivo(arquivo.filename, arquivo.size or 0)
+    if not valido:
+        raise HTTPException(status_code=400, detail=f"Arquivo inválido: {erro}")
+
+    conteudo = await arquivo.read()
+
+    # Validar tipo real do arquivo (magic bytes)
+    valido_mime, erro_mime = validar_mime_type(conteudo, arquivo.filename)
+    if not valido_mime:
+        raise HTTPException(status_code=400, detail=f"Arquivo rejeitado: {erro_mime}")
+
     conn = get_db()
     if not conn:
         raise HTTPException(status_code=500, detail="Erro de conexão")
@@ -421,7 +435,7 @@ async def portal_cliente_enviar_comprovante(
         if parcela["status"] == "pago":
             raise HTTPException(status_code=400, detail="Parcela já está paga")
 
-        # Salvar arquivo
+        # Salvar arquivo (conteudo já foi lido acima)
         comprovantes_dir = os.path.join(UPLOADS_DIR, "comprovantes", cliente["cadastro_id"])
         os.makedirs(comprovantes_dir, exist_ok=True)
 
@@ -430,7 +444,6 @@ async def portal_cliente_enviar_comprovante(
         caminho_arquivo = os.path.join(comprovantes_dir, nome_arquivo)
 
         with open(caminho_arquivo, "wb") as f:
-            conteudo = await arquivo.read()
             f.write(conteudo)
 
         # Criar registro do comprovante
@@ -534,17 +547,28 @@ async def portal_cliente_enviar_documento_extra(
     cliente: dict = Depends(verificar_token_cliente)
 ):
     """Cliente envia documento extra para o escritório."""
+    # Validar extensão e tamanho
+    valido, erro = validar_arquivo(arquivo.filename, arquivo.size or 0)
+    if not valido:
+        raise HTTPException(status_code=400, detail=f"Arquivo inválido: {erro}")
+
+    conteudo = await arquivo.read()
+
+    # Validar tipo real do arquivo (magic bytes)
+    valido_mime, erro_mime = validar_mime_type(conteudo, arquivo.filename)
+    if not valido_mime:
+        raise HTTPException(status_code=400, detail=f"Arquivo rejeitado: {erro_mime}")
+
     # Criar diretório para documentos extras
     docs_dir = os.path.join(UPLOADS_DIR, "documentos_extras", cliente["cadastro_id"])
     os.makedirs(docs_dir, exist_ok=True)
 
-    # Salvar arquivo
+    # Salvar arquivo (conteudo já foi lido acima)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     nome_arquivo = f"{timestamp}_{arquivo.filename}"
     caminho_arquivo = os.path.join(docs_dir, nome_arquivo)
 
     with open(caminho_arquivo, "wb") as f:
-        conteudo = await arquivo.read()
         f.write(conteudo)
 
     # Criar registro no banco

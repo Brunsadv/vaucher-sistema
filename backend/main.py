@@ -47,6 +47,7 @@ from modules.security import (
     decodificar_token_cliente,
     criar_email_html,
     validar_arquivo,
+    validar_mime_type,
     sanitizar_nome_arquivo,
 )
 
@@ -915,17 +916,34 @@ async def receber_documentos_assinados(cadastro_id: str, arquivos: List[UploadFi
 
     # Salvar arquivos
     arquivos_salvos = []
+    erros_validacao = []
     for arquivo in arquivos:
+        # Validar extensão e tamanho
+        valido, erro = validar_arquivo(arquivo.filename, arquivo.size or 0)
+        if not valido:
+            erros_validacao.append(f"{arquivo.filename}: {erro}")
+            continue
+
+        conteudo = await arquivo.read()
+
+        # Validar tipo real do arquivo (magic bytes)
+        valido_mime, erro_mime = validar_mime_type(conteudo, arquivo.filename)
+        if not valido_mime:
+            erros_validacao.append(f"{arquivo.filename}: {erro_mime}")
+            continue
+
         # Sanitizar nome do arquivo para segurança
         nome_arquivo = sanitizar_nome_arquivo(arquivo.filename)
         caminho = os.path.join(pasta_assinados, nome_arquivo)
-        
+
         with open(caminho, "wb") as f:
-            conteudo = await arquivo.read()
             f.write(conteudo)
-        
+
         arquivos_salvos.append(nome_arquivo)
         logger.info(f"Arquivo salvo: {caminho}")
+
+    if erros_validacao and not arquivos_salvos:
+        raise HTTPException(status_code=400, detail=f"Arquivos rejeitados: {'; '.join(erros_validacao)}")
     
     # Atualizar cadastro no banco
     conn = get_db()
@@ -977,10 +995,18 @@ async def upload_documento(
     Se tipo_documento ou categoria for especificado, salva na tabela documentos_demanda.
     Caso contrário, salva na lista de documentos genérica do cadastro.
     """
-    # Validar arquivo
+    # Validar extensão e tamanho
     valido, erro = validar_arquivo(arquivo.filename, arquivo.size or 0)
     if not valido:
         raise HTTPException(status_code=400, detail=f"Arquivo inválido: {erro}")
+
+    # Ler conteúdo para validar MIME type
+    content = await arquivo.read()
+
+    # Validar tipo real do arquivo (magic bytes)
+    valido_mime, erro_mime = validar_mime_type(content, arquivo.filename)
+    if not valido_mime:
+        raise HTTPException(status_code=400, detail=f"Arquivo rejeitado: {erro_mime}")
 
     logger.info(f"Upload recebido para cadastro {cadastro_id}: {arquivo.filename}, tipo: {tipo_documento}, categoria: {categoria}")
 
@@ -999,8 +1025,8 @@ async def upload_documento(
         ext = os.path.splitext(arquivo.filename)[1]
         nome_arquivo = f"{tipo}_{uuid.uuid4().hex[:8]}{ext}"
         arquivo_path = os.path.join(cliente_dir, nome_arquivo)
-        
-        content = await arquivo.read()
+
+        # content já foi lido acima para validação
         with open(arquivo_path, "wb") as f:
             f.write(content)
         
@@ -1021,7 +1047,7 @@ async def upload_documento(
 
         nome_seguro = sanitizar_nome_arquivo(arquivo.filename)
         file_path = os.path.join(cliente_dir, nome_seguro)
-        content = await arquivo.read()
+        # content já foi lido acima para validação
         with open(file_path, "wb") as f:
             f.write(content)
 
@@ -1085,13 +1111,26 @@ async def upload_documentos_categorizados(
     for i, arquivo in enumerate(arquivos):
         # Determinar categoria
         categoria = lista_categorias[i] if i < len(lista_categorias) else "documento_geral"
-        
+
         try:
+            # Validar extensão e tamanho
+            valido, erro = validar_arquivo(arquivo.filename, arquivo.size or 0)
+            if not valido:
+                erros.append({"nome": arquivo.filename, "erro": erro})
+                continue
+
+            content = await arquivo.read()
+
+            # Validar tipo real do arquivo (magic bytes)
+            valido_mime, erro_mime = validar_mime_type(content, arquivo.filename)
+            if not valido_mime:
+                erros.append({"nome": arquivo.filename, "erro": erro_mime})
+                continue
+
             ext = os.path.splitext(arquivo.filename)[1]
             nome_arquivo = f"{categoria}_{uuid.uuid4().hex[:8]}{ext}"
             arquivo_path = os.path.join(cliente_dir, nome_arquivo)
-            
-            content = await arquivo.read()
+
             with open(arquivo_path, "wb") as f:
                 f.write(content)
             
@@ -3981,28 +4020,39 @@ async def buscar_rascunho_demanda(cadastro_id: str, tipo_demanda: str):
 
 @app.post("/api/cadastros/{cadastro_id}/documento-demanda/{tipo_documento}")
 async def upload_documento_demanda(
-    cadastro_id: str, 
+    cadastro_id: str,
     tipo_documento: str,
     arquivo: UploadFile = File(...),
     descricao: str = Form("")
 ):
     """Faz upload de um documento específico da demanda."""
+    # Validar extensão e tamanho
+    valido, erro = validar_arquivo(arquivo.filename, arquivo.size or 0)
+    if not valido:
+        raise HTTPException(status_code=400, detail=f"Arquivo inválido: {erro}")
+
+    content = await arquivo.read()
+
+    # Validar tipo real do arquivo (magic bytes)
+    valido_mime, erro_mime = validar_mime_type(content, arquivo.filename)
+    if not valido_mime:
+        raise HTTPException(status_code=400, detail=f"Arquivo rejeitado: {erro_mime}")
+
     cadastro = buscar_cadastro(cadastro_id)
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
-    
+
     # Criar diretório para documentos da demanda
     cliente_dir = os.path.join(UPLOADS_DIR, "documentos_demanda", cadastro_id)
     os.makedirs(cliente_dir, exist_ok=True)
-    
+
     # Gerar nome único para o arquivo
     ext = os.path.splitext(arquivo.filename)[1]
     nome_arquivo = f"{tipo_documento}_{uuid.uuid4().hex[:8]}{ext}"
     arquivo_path = os.path.join(cliente_dir, nome_arquivo)
-    
-    # Salvar arquivo
+
+    # Salvar arquivo (content já foi lido acima)
     with open(arquivo_path, "wb") as f:
-        content = await arquivo.read()
         f.write(content)
     
     # Salvar referência no banco
@@ -4169,14 +4219,22 @@ async def upload_documento_final(
     if tipo_documento not in ["contrato", "procuracao", "prestacao_contas"]:
         raise HTTPException(status_code=400, detail="Tipo de documento deve ser 'contrato', 'procuracao' ou 'prestacao_contas'")
 
-    cadastro = buscar_cadastro(cadastro_id)
-    if not cadastro:
-        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
-
     # Verificar extensão do arquivo
     extensao = os.path.splitext(arquivo.filename)[1].lower()
     if extensao not in ['.pdf', '.docx', '.doc']:
         raise HTTPException(status_code=400, detail="Arquivo deve ser PDF ou DOCX")
+
+    # Ler conteúdo para validar MIME type
+    conteudo = await arquivo.read()
+
+    # Validar tipo real do arquivo (magic bytes)
+    valido_mime, erro_mime = validar_mime_type(conteudo, arquivo.filename)
+    if not valido_mime:
+        raise HTTPException(status_code=400, detail=f"Arquivo rejeitado: {erro_mime}")
+
+    cadastro = buscar_cadastro(cadastro_id)
+    if not cadastro:
+        raise HTTPException(status_code=404, detail="Cadastro não encontrado")
 
     # Criar pasta para documentos finais (usando UPLOADS_DIR para consistência)
     pasta_finais = os.path.join(UPLOADS_DIR, "documentos_finais", cadastro_id)
@@ -4186,9 +4244,8 @@ async def upload_documento_final(
     nome_arquivo = f"{tipo_documento}_final{extensao}"
     caminho_final = os.path.join(pasta_finais, nome_arquivo)
 
-    # Salvar arquivo
+    # Salvar arquivo (conteudo já foi lido acima)
     try:
-        conteudo = await arquivo.read()
         with open(caminho_final, "wb") as f:
             f.write(conteudo)
         logger.info(f"Documento final salvo: {caminho_final}")

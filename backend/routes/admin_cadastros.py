@@ -16,7 +16,7 @@ from psycopg2.extras import RealDictCursor
 
 from modules.config import logger, UPLOADS_DIR, RESEND_API_KEY
 from modules.auth import verificar_admin
-from modules.security import criar_email_html
+from modules.security import criar_email_html, validar_arquivo, validar_mime_type
 from modules.email import enviar_email_resend
 from modules.database import (
     get_db,
@@ -333,15 +333,29 @@ async def admin_enviar_documentos(
     os.makedirs(docs_dir, exist_ok=True)
 
     arquivos_salvos = []
+    erros_validacao = []
 
     for arquivo in arquivos:
+        # Validar extensão e tamanho
+        valido, erro = validar_arquivo(arquivo.filename, arquivo.size or 0)
+        if not valido:
+            erros_validacao.append(f"{arquivo.filename}: {erro}")
+            continue
+
+        conteudo = await arquivo.read()
+
+        # Validar tipo real do arquivo (magic bytes)
+        valido_mime, erro_mime = validar_mime_type(conteudo, arquivo.filename)
+        if not valido_mime:
+            erros_validacao.append(f"{arquivo.filename}: {erro_mime}")
+            continue
+
         # Salvar arquivo
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         nome_arquivo = f"{timestamp}_{arquivo.filename}"
         caminho_arquivo = os.path.join(docs_dir, nome_arquivo)
 
         with open(caminho_arquivo, "wb") as f:
-            conteudo = await arquivo.read()
             f.write(conteudo)
 
         # Criar registro no banco
@@ -424,6 +438,18 @@ async def admin_upload_documento(
     usuario: dict = Depends(verificar_admin)
 ):
     """Admin envia documento para o cliente (endpoint alternativo)."""
+    # Validar extensão e tamanho
+    valido, erro = validar_arquivo(arquivo.filename, arquivo.size or 0)
+    if not valido:
+        raise HTTPException(status_code=400, detail=f"Arquivo inválido: {erro}")
+
+    conteudo = await arquivo.read()
+
+    # Validar tipo real do arquivo (magic bytes)
+    valido_mime, erro_mime = validar_mime_type(conteudo, arquivo.filename)
+    if not valido_mime:
+        raise HTTPException(status_code=400, detail=f"Arquivo rejeitado: {erro_mime}")
+
     cadastro = buscar_cadastro(cadastro_id)
     if not cadastro:
         raise HTTPException(status_code=404, detail="Cadastro não encontrado")
@@ -432,13 +458,12 @@ async def admin_upload_documento(
     docs_dir = os.path.join(UPLOADS_DIR, "documentos_admin", cadastro_id)
     os.makedirs(docs_dir, exist_ok=True)
 
-    # Salvar arquivo
+    # Salvar arquivo (conteudo já foi lido acima)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     nome_arquivo = f"{timestamp}_{arquivo.filename}"
     caminho_arquivo = os.path.join(docs_dir, nome_arquivo)
 
     with open(caminho_arquivo, "wb") as f:
-        conteudo = await arquivo.read()
         f.write(conteudo)
 
     # Criar registro no banco

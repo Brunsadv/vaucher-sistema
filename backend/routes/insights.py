@@ -13,7 +13,7 @@ import json
 
 from modules.config import logger, UPLOADS_DIR
 from modules.auth import verificar_admin
-from modules.security import validar_arquivo, sanitizar_nome_arquivo
+from modules.security import validar_arquivo, validar_mime_type, sanitizar_nome_arquivo
 
 router = APIRouter(prefix="/api", tags=["Insights"])
 
@@ -157,10 +157,17 @@ async def criar_insight(
         # Processar imagem se enviada
         imagem_path = None
         if imagem and imagem.filename:
-            # Validar arquivo
+            # Validar extensão e tamanho
             is_valid, error = validar_arquivo(imagem.filename, imagem.size or 0)
             if not is_valid:
                 raise HTTPException(status_code=400, detail=error)
+
+            content = await imagem.read()
+
+            # Validar tipo real do arquivo (magic bytes)
+            valido_mime, erro_mime = validar_mime_type(content, imagem.filename)
+            if not valido_mime:
+                raise HTTPException(status_code=400, detail=f"Imagem rejeitada: {erro_mime}")
 
             # Salvar imagem
             ext = os.path.splitext(imagem.filename)[1]
@@ -168,7 +175,6 @@ async def criar_insight(
             caminho_completo = os.path.join(INSIGHTS_UPLOAD_DIR, nome_arquivo)
 
             with open(caminho_completo, "wb") as f:
-                content = await imagem.read()
                 f.write(content)
 
             imagem_path = f"insights/{nome_arquivo}"
@@ -305,6 +311,13 @@ async def atualizar_insight(
             if not is_valid:
                 raise HTTPException(status_code=400, detail=error)
 
+            content = await imagem.read()
+
+            # Validar tipo real do arquivo (magic bytes)
+            valido_mime, erro_mime = validar_mime_type(content, imagem.filename)
+            if not valido_mime:
+                raise HTTPException(status_code=400, detail=f"Imagem rejeitada: {erro_mime}")
+
             # Deletar imagem antiga
             if imagem_path:
                 old_path = os.path.join(UPLOADS_DIR, imagem_path)
@@ -317,7 +330,6 @@ async def atualizar_insight(
             caminho_completo = os.path.join(INSIGHTS_UPLOAD_DIR, nome_arquivo)
 
             with open(caminho_completo, "wb") as f:
-                content = await imagem.read()
                 f.write(content)
 
             imagem_path = f"insights/{nome_arquivo}"

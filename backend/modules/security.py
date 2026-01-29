@@ -27,6 +27,19 @@ JWT_ALGORITHM = "HS256"
 ALLOWED_FILE_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx'}
 MAX_FILE_SIZE_MB = 10
 
+# Magic bytes para validação de tipo real de arquivo
+# Formato: { extensão: [(magic_bytes, offset)] }
+MAGIC_BYTES = {
+    '.pdf': [(b'%PDF', 0)],
+    '.jpg': [(b'\xff\xd8\xff', 0)],
+    '.jpeg': [(b'\xff\xd8\xff', 0)],
+    '.png': [(b'\x89PNG\r\n\x1a\n', 0)],
+    '.doc': [(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1', 0)],  # OLE compound
+    '.docx': [(b'PK\x03\x04', 0)],  # ZIP (Office Open XML)
+    '.xls': [(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1', 0)],  # OLE compound
+    '.xlsx': [(b'PK\x03\x04', 0)],  # ZIP (Office Open XML)
+}
+
 # ============================================
 # FUNÇÕES DE HASH DE SENHA (BCRYPT)
 # ============================================
@@ -156,6 +169,35 @@ def validar_arquivo(filename: str, content_length: int = 0) -> tuple[bool, str]:
             return False, "Nome do arquivo contém caracteres inválidos"
 
     return True, ""
+
+
+def validar_mime_type(conteudo: bytes, filename: str) -> tuple[bool, str]:
+    """
+    Valida o tipo real do arquivo verificando os magic bytes.
+    Retorna (válido, mensagem_erro).
+
+    Isso impede que arquivos maliciosos sejam enviados com extensão falsa
+    (ex: um .exe renomeado para .pdf).
+    """
+    import os
+
+    if not conteudo:
+        return False, "Arquivo vazio"
+
+    ext = os.path.splitext(filename)[1].lower()
+
+    # Se a extensão não está na lista de magic bytes, aceita (extensão já validada antes)
+    if ext not in MAGIC_BYTES:
+        return True, ""
+
+    # Verifica se algum dos magic bytes corresponde
+    for magic, offset in MAGIC_BYTES[ext]:
+        if len(conteudo) >= offset + len(magic):
+            if conteudo[offset:offset + len(magic)] == magic:
+                return True, ""
+
+    return False, f"O conteúdo do arquivo não corresponde à extensão {ext}. O arquivo pode estar corrompido ou ter sido renomeado."
+
 
 def sanitizar_nome_arquivo(filename: str) -> str:
     """Sanitiza o nome do arquivo para evitar path traversal."""
