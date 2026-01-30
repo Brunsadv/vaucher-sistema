@@ -155,7 +155,7 @@ def google_login_cliente():
 @router.get("/auth/google/callback")
 async def google_callback_cliente(code: str = None, state: str = None, error: str = None):
     """Callback do Google OAuth para cliente."""
-    frontend_url = "https://appcliente.vaucherealvares.com"
+    frontend_url = "https://appcliente.vaucherealvares.com/login"
 
     if error:
         return RedirectResponse(f"{frontend_url}?error=google_auth_failed")

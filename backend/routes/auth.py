@@ -106,7 +106,7 @@ def google_login():
 @router.get("/auth/google/callback")
 async def google_callback(code: str = None, state: str = None, error: str = None):
     """Callback do Google OAuth para admin."""
-    frontend_url = "https://appadmin.vaucherealvares.com"
+    frontend_url = "https://appadmin.vaucherealvares.com/login"
 
     if error:
         return RedirectResponse(f"{frontend_url}?error=google_auth_failed")
