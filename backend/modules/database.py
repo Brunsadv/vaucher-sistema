@@ -117,6 +117,19 @@ def init_db():
             END $$;
         """)
 
+        # Adicionar coluna google_id para OAuth (migração)
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'usuarios' AND column_name = 'google_id'
+                ) THEN
+                    ALTER TABLE usuarios ADD COLUMN google_id VARCHAR(255) UNIQUE;
+                END IF;
+            END $$;
+        """)
+
         # Tabela financeiro - estrutura completa
         cur.execute("""
             CREATE TABLE IF NOT EXISTS financeiro (
@@ -185,6 +198,19 @@ def init_db():
                 ultimo_acesso TIMESTAMP,
                 UNIQUE(cadastro_id)
             )
+        """)
+
+        # Adicionar coluna google_id para OAuth em clientes_auth (migração)
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'clientes_auth' AND column_name = 'google_id'
+                ) THEN
+                    ALTER TABLE clientes_auth ADD COLUMN google_id VARCHAR(255) UNIQUE;
+                END IF;
+            END $$;
         """)
 
         # Tabela de informações do processo
@@ -628,6 +654,43 @@ def buscar_usuario_por_email(email: str) -> Optional[dict]:
     except Exception as e:
         logger.error(f"Erro ao buscar usuário: {e}")
         return None
+
+
+def buscar_usuario_por_google_id(google_id: str) -> Optional[dict]:
+    """Busca um usuário pelo Google ID (OAuth)."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM usuarios WHERE google_id = %s AND ativo = TRUE", (google_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar usuário por Google ID: {e}")
+        return None
+
+
+def vincular_google_usuario(user_id: int, google_id: str) -> bool:
+    """Vincula uma conta Google a um usuário existente."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE usuarios SET google_id = %s WHERE id = %s", (google_id, user_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info(f"Google ID vinculado ao usuário {user_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao vincular Google ao usuário: {e}")
+        return False
 
 
 def listar_usuarios() -> List[dict]:
@@ -2474,6 +2537,48 @@ def buscar_cliente_por_email(email: str) -> dict:
     except Exception as e:
         logger.error(f"Erro ao buscar cliente por email: {e}")
         return None
+
+
+def buscar_cliente_por_google_id(google_id: str) -> dict:
+    """Busca cliente pelo Google ID (OAuth)."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("""
+            SELECT ca.*, c.dados->>'email' as email, c.dados->>'nome' as nome, c.id as cadastro_id
+            FROM clientes_auth ca
+            JOIN cadastros c ON ca.cadastro_id = c.id
+            WHERE ca.google_id = %s AND ca.ativo = TRUE
+        """, (google_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as e:
+        logger.error(f"Erro ao buscar cliente por Google ID: {e}")
+        return None
+
+
+def vincular_google_cliente(cadastro_id: str, google_id: str) -> bool:
+    """Vincula uma conta Google a um cliente existente."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE clientes_auth SET google_id = %s WHERE cadastro_id = %s", (google_id, cadastro_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        logger.info(f"Google ID vinculado ao cliente {cadastro_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao vincular Google ao cliente: {e}")
+        return False
 
 
 def atualizar_senha_cliente(cadastro_id: str, nova_senha: str) -> bool:

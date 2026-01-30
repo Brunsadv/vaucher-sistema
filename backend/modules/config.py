@@ -76,6 +76,12 @@ FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
 ADMIN_INICIAL_SENHA = os.getenv("ADMIN_INICIAL_SENHA", "VaucherAdmin2024!")
 TOKEN_SECRET = os.getenv("TOKEN_SECRET", "vaucher_alvares_secret_key_2024")
 
+# Google OAuth
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI_ADMIN = os.getenv("GOOGLE_REDIRECT_URI_ADMIN", "https://vaucher-sistema-production.up.railway.app/api/auth/google/callback")
+GOOGLE_REDIRECT_URI_CLIENTE = os.getenv("GOOGLE_REDIRECT_URI_CLIENTE", "https://vaucher-sistema-production.up.railway.app/api/cliente/auth/google/callback")
+
 # URL da logo para e-mails
 LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher_e_Alvares-06.jpg"
 

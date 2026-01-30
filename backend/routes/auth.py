@@ -4,6 +4,8 @@ Refatorado em 23/01/2026
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi.responses import RedirectResponse
+from urllib.parse import urlencode
 
 from modules.config import logger, limiter
 from modules.security import (
@@ -13,9 +15,12 @@ from modules.security import (
     gerar_token,
 )
 from modules.auth import verificar_admin, verificar_token
+from modules.oauth import get_google_auth_url, verify_google_token, validate_oauth_state
 from modules.database import (
     get_db,
     buscar_usuario_por_email,
+    buscar_usuario_por_google_id,
+    vincular_google_usuario,
     verificar_termos_aceitos,
     registrar_aceite_termos,
     listar_usuarios,
@@ -83,6 +88,75 @@ def login(request: Request, data: LoginRequest):
 def logout():
     """Encerra a sessão do usuário."""
     return {"success": True}
+
+
+# ============================================
+# AUTENTICAÇÃO GOOGLE - ADMIN
+# ============================================
+
+@router.get("/auth/google")
+def google_login():
+    """Inicia o fluxo de autenticação com Google para admin."""
+    auth_url = get_google_auth_url(user_type="admin")
+    if not auth_url:
+        raise HTTPException(status_code=500, detail="Google OAuth não configurado")
+    return {"auth_url": auth_url}
+
+
+@router.get("/auth/google/callback")
+async def google_callback(code: str = None, state: str = None, error: str = None):
+    """Callback do Google OAuth para admin."""
+    frontend_url = "https://appadmin.vaucherealvares.com"
+
+    if error:
+        return RedirectResponse(f"{frontend_url}?error=google_auth_failed")
+
+    if not code or not state:
+        return RedirectResponse(f"{frontend_url}?error=invalid_request")
+
+    # Validar state (proteção CSRF)
+    user_type = validate_oauth_state(state)
+    if user_type != "admin":
+        return RedirectResponse(f"{frontend_url}?error=invalid_state")
+
+    # Verificar token do Google
+    google_user = await verify_google_token(code, user_type="admin")
+    if not google_user:
+        return RedirectResponse(f"{frontend_url}?error=google_verification_failed")
+
+    email = google_user["email"]
+    google_id = google_user["google_id"]
+
+    # Estratégia 1: Verificar se Google ID já está vinculado
+    usuario = buscar_usuario_por_google_id(google_id)
+
+    if not usuario:
+        # Estratégia 2: Verificar se email existe no banco
+        usuario = buscar_usuario_por_email(email)
+
+        if usuario:
+            # Vincular conta Google ao usuário existente
+            vincular_google_usuario(usuario["id"], google_id)
+            logger.info(f"Google vinculado ao usuário: {email}")
+        else:
+            # Usuário não encontrado - rejeitar
+            params = urlencode({"error": "user_not_found", "email": email})
+            return RedirectResponse(f"{frontend_url}?{params}")
+
+    # Gerar token JWT
+    token = gerar_token(usuario["id"], usuario["email"], usuario["is_admin"])
+    termos_aceitos = verificar_termos_aceitos(usuario["id"])
+
+    # Redirecionar para frontend com token
+    params = urlencode({
+        "token": token,
+        "nome": usuario["nome"],
+        "email": usuario["email"],
+        "is_admin": str(usuario["is_admin"]).lower(),
+        "termos_aceitos": str(termos_aceitos).lower(),
+        "google_login": "true"
+    })
+    return RedirectResponse(f"{frontend_url}?{params}")
 
 
 @router.post("/aceitar-termos")

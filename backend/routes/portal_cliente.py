@@ -6,12 +6,14 @@ Refatorado em 24/01/2026
 import os
 import json
 from datetime import datetime
+from urllib.parse import urlencode
 from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, Form
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, RedirectResponse
 from pydantic import BaseModel
 
 from modules.config import logger, limiter, UPLOADS_DIR
 from modules.auth import verificar_token_cliente
+from modules.oauth import get_google_auth_url, verify_google_token, validate_oauth_state
 from modules.security import (
     verificar_senha,
     hash_senha,
@@ -26,6 +28,8 @@ from modules.database import (
     get_db,
     buscar_cadastro,
     buscar_cliente_por_email,
+    buscar_cliente_por_google_id,
+    vincular_google_cliente,
     buscar_cliente_auth,
     registrar_acesso_cliente,
     atualizar_senha_cliente,
@@ -133,6 +137,86 @@ async def portal_cliente_login(request: Request, dados: ClienteLogin):
         "email": cliente["email"],
         "primeiro_acesso": cliente.get("primeiro_acesso", False)
     }
+
+
+# ============================================
+# AUTENTICAÇÃO GOOGLE - CLIENTE
+# ============================================
+
+@router.get("/auth/google")
+def google_login_cliente():
+    """Inicia o fluxo de autenticação com Google para cliente."""
+    auth_url = get_google_auth_url(user_type="cliente")
+    if not auth_url:
+        raise HTTPException(status_code=500, detail="Google OAuth não configurado")
+    return {"auth_url": auth_url}
+
+
+@router.get("/auth/google/callback")
+async def google_callback_cliente(code: str = None, state: str = None, error: str = None):
+    """Callback do Google OAuth para cliente."""
+    frontend_url = "https://appcliente.vaucherealvares.com"
+
+    if error:
+        return RedirectResponse(f"{frontend_url}?error=google_auth_failed")
+
+    if not code or not state:
+        return RedirectResponse(f"{frontend_url}?error=invalid_request")
+
+    # Validar state (proteção CSRF)
+    user_type = validate_oauth_state(state)
+    if user_type != "cliente":
+        return RedirectResponse(f"{frontend_url}?error=invalid_state")
+
+    # Verificar token do Google
+    google_user = await verify_google_token(code, user_type="cliente")
+    if not google_user:
+        return RedirectResponse(f"{frontend_url}?error=google_verification_failed")
+
+    email = google_user["email"]
+    google_id = google_user["google_id"]
+
+    # Estratégia 1: Verificar se Google ID já está vinculado
+    cliente = buscar_cliente_por_google_id(google_id)
+
+    if not cliente:
+        # Estratégia 2: Verificar se email existe no cadastros
+        cliente = buscar_cliente_por_email(email)
+
+        if cliente:
+            # Verificar se cliente tem acesso habilitado
+            if not cliente.get("senha_hash"):
+                params = urlencode({"error": "access_not_enabled", "email": email})
+                return RedirectResponse(f"{frontend_url}?{params}")
+
+            if not cliente.get("ativo", True):
+                return RedirectResponse(f"{frontend_url}?error=access_disabled")
+
+            # Vincular conta Google ao cliente existente
+            vincular_google_cliente(cliente["cadastro_id"], google_id)
+            logger.info(f"Google vinculado ao cliente: {email}")
+        else:
+            # Cliente não encontrado
+            params = urlencode({"error": "client_not_found", "email": email})
+            return RedirectResponse(f"{frontend_url}?{params}")
+
+    # Registrar acesso
+    registrar_acesso_cliente(cliente["cadastro_id"])
+
+    # Gerar token JWT
+    token = gerar_token_cliente(cliente["cadastro_id"], cliente["email"])
+
+    # Redirecionar para frontend com token
+    primeiro_acesso = "true" if cliente.get("primeiro_acesso", False) else "false"
+    params = urlencode({
+        "token": token,
+        "cadastro_id": cliente["cadastro_id"],
+        "nome": cliente["nome"],
+        "email": cliente["email"],
+        "primeiro_acesso": primeiro_acesso,
+        "google_login": "true"
+    })
+    return RedirectResponse(f"{frontend_url}?{params}")
 
 
 @router.post("/alterar-senha")
