@@ -2911,6 +2911,44 @@ def gerar_senha_backup() -> str:
     return ''.join(secrets.choice(alfabeto) for _ in range(16))
 
 
+async def enviar_senha_backup_email(email_admin: str, nome_admin: str, senha: str, nome_backup: str):
+    """Envia a senha do backup por email para o admin que solicitou."""
+    if not RESEND_API_KEY:
+        logger.warning("RESEND_API_KEY não configurada - senha do backup não enviada por email")
+        return
+
+    conteudo = f"""
+        <p style="font-size: 16px;">Olá, <strong>{nome_admin}</strong>!</p>
+
+        <p>Você solicitou um backup do sistema. O arquivo está protegido com criptografia AES-256.</p>
+
+        <div style="background-color: #f5f5f5; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 0;"><strong>Arquivo:</strong> {nome_backup}</p>
+            <p style="margin: 10px 0;"><strong>Senha:</strong>
+                <code style="background: #e0e0e0; padding: 3px 8px; border-radius: 4px; font-size: 18px;">{senha}</code>
+            </p>
+        </div>
+
+        <p style="color: #666; font-size: 14px;">
+            <strong>Importante:</strong> Use o 7-Zip ou WinRAR para abrir o arquivo.
+            O Windows Explorer não suporta criptografia AES-256 nativamente.
+        </p>
+
+        <p style="color: #999; font-size: 12px;">Este email é automático. Não compartilhe a senha.</p>
+    """
+    corpo_html = criar_email_html(conteudo)
+
+    try:
+        await enviar_email_resend(
+            email_admin,
+            f"Senha do Backup - {nome_backup}",
+            corpo_html
+        )
+        logger.info(f"Senha do backup enviada por email para {email_admin}")
+    except Exception as e:
+        logger.error(f"Erro ao enviar senha do backup por email: {e}")
+
+
 class BackupRequest(BaseModel):
     documentos_ids: List[str]  # Lista de IDs dos documentos selecionados
     incluir_dados_json: bool = True  # Se inclui JSON com dados dos clientes
@@ -3073,11 +3111,19 @@ async def admin_download_backup(
         cur.close()
         conn.close()
 
-        # Retornar o ZIP criptografado com senha no header
+        # Retornar o ZIP criptografado e enviar senha por email
         zip_buffer.seek(0)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"backup_vaucher_alvares_{timestamp}.zip"
+
+        # Enviar senha por email ao admin
+        await enviar_senha_backup_email(
+            usuario.get("email"),
+            usuario.get("nome", "Admin"),
+            senha_backup,
+            filename
+        )
 
         return StreamingResponse(
             zip_buffer,
@@ -3534,16 +3580,25 @@ async def admin_download_documentos_selecionados(
         if arquivos_adicionados == 0:
             raise HTTPException(status_code=404, detail="Nenhum arquivo encontrado para download")
 
-        # Preparar resposta com senha no header
+        # Preparar resposta e enviar senha por email
         zip_buffer.seek(0)
         from datetime import datetime
         data_atual = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"backup_selecionados_{data_atual}.zip"
+
+        # Enviar senha por email ao admin
+        await enviar_senha_backup_email(
+            usuario.get("email"),
+            usuario.get("nome", "Admin"),
+            senha_backup,
+            filename
+        )
 
         return StreamingResponse(
             zip_buffer,
             media_type="application/zip",
             headers={
-                "Content-Disposition": f'attachment; filename="backup_selecionados_{data_atual}.zip"',
+                "Content-Disposition": f'attachment; filename="{filename}"',
                 "X-Backup-Password": senha_backup,
                 "Access-Control-Expose-Headers": "X-Backup-Password"
             }
@@ -3675,6 +3730,14 @@ async def admin_download_backup_completo(
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"backup_completo_vaucher_alvares_{timestamp}.zip"
+
+        # Enviar senha por email ao admin
+        await enviar_senha_backup_email(
+            usuario.get("email"),
+            usuario.get("nome", "Admin"),
+            senha_backup,
+            filename
+        )
 
         return StreamingResponse(
             zip_buffer,
