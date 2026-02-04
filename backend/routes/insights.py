@@ -414,6 +414,17 @@ async def deletar_insight(insight_id: str, admin=Depends(verificar_admin)):
         conn.commit()
         cur.close()
 
+        # Registrar auditoria
+        from modules.database import registrar_auditoria
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="insights",
+            registro_id=insight_id,
+            usuario_id=admin.get("id"),
+            usuario_email=admin.get("email"),
+            detalhes=f"Insight {insight_id} deletado"
+        )
+
         logger.info(f"Insight deletado: {insight_id} por {admin.get('nome')}")
 
         return {"sucesso": True, "mensagem": "Insight deletado com sucesso"}

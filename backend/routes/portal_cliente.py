@@ -54,6 +54,8 @@ from modules.database import (
     buscar_documento_admin,
     # Comprovantes
     criar_comprovante,
+    # Auditoria
+    registrar_auditoria,
 )
 
 from psycopg2.extras import RealDictCursor
@@ -114,7 +116,7 @@ async def portal_cliente_login(request: Request, dados: ClienteLogin):
             conn = get_db()
             if conn:
                 cur = conn.cursor()
-                cur.execute("UPDATE clientes_acesso SET senha_hash = %s WHERE cadastro_id = %s",
+                cur.execute("UPDATE clientes_auth SET senha_hash = %s WHERE cadastro_id = %s",
                             (novo_hash, cliente['cadastro_id']))
                 conn.commit()
                 logger.info(f"Senha cliente migrada para bcrypt: {cliente['cadastro_id']}")
@@ -733,6 +735,13 @@ async def portal_cliente_deletar_documento_extra(
         raise HTTPException(status_code=404, detail="Documento não encontrado")
 
     if deletar_documento_extra(doc_id):
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="documentos_extras",
+            registro_id=doc_id,
+            dados_anteriores=doc,
+            detalhes=f"Documento extra '{doc.get('nome_original')}' deletado pelo cliente {cliente['cadastro_id']}"
+        )
         return {"success": True, "message": "Documento deletado"}
 
     raise HTTPException(status_code=500, detail="Erro ao deletar documento")

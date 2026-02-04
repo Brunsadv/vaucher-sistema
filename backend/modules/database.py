@@ -636,8 +636,7 @@ def init_db():
         cur.execute("CREATE INDEX IF NOT EXISTS idx_contratos_cadastro ON contratos_honorarios(cadastro_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_mensagens_cadastro ON mensagens(cadastro_id)")
         cur.execute("CREATE INDEX IF NOT EXISTS idx_mensagens_lida ON mensagens(lida)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_clientes_acesso_cadastro ON clientes_acesso(cadastro_id)")
-        cur.execute("CREATE INDEX IF NOT EXISTS idx_clientes_acesso_email ON clientes_acesso(email)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_clientes_auth_cadastro ON clientes_auth(cadastro_id)")
 
         logger.info("Índices de performance verificados/criados!")
 

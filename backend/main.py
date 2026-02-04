@@ -13,7 +13,6 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 import os
 import json
-import zipfile
 import shutil
 import string
 from datetime import datetime, timezone
@@ -75,6 +74,8 @@ from modules.database import (
     buscar_documento_extra,
     # Auth cliente (usado em verificar_token_cliente)
     buscar_cliente_auth,
+    # Auditoria
+    registrar_auditoria,
 )
 
 # Modelos Pydantic
@@ -441,15 +442,26 @@ def deletar_cadastro(cadastro_id: str, usuario: dict = Depends(verificar_admin))
         conn.commit()
         cur.close()
         conn.close()
-        
+
         cliente_uploads = os.path.join(UPLOADS_DIR, cadastro_id)
         cliente_gerados = os.path.join(GERADOS_DIR, cadastro_id)
-        
+
         if os.path.exists(cliente_uploads):
             shutil.rmtree(cliente_uploads)
         if os.path.exists(cliente_gerados):
             shutil.rmtree(cliente_gerados)
-        
+
+        # Registrar auditoria
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="cadastros",
+            registro_id=cadastro_id,
+            dados_anteriores={"nome": cadastro.get("dados", {}).get("nome"), "status": cadastro.get("status")},
+            usuario_id=usuario.get("id"),
+            usuario_email=usuario.get("email"),
+            detalhes=f"Cadastro {cadastro_id} deletado permanentemente com arquivos"
+        )
+
         logger.info(f"Cadastro {cadastro_id} deletado com sucesso")
         return {"success": True, "message": "Cadastro deletado com sucesso"}
     except Exception as e:
@@ -1286,10 +1298,19 @@ def remover_deposito(cadastro_id: str, idx: int, usuario: dict = Depends(verific
     if idx < 0 or idx >= len(depositos):
         raise HTTPException(status_code=400, detail="Índice inválido")
 
-    depositos.pop(idx)
+    deposito_removido = depositos.pop(idx)
     financeiro["depositos"] = depositos
 
     if salvar_financeiro(cadastro_id, financeiro):
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="financeiro",
+            registro_id=cadastro_id,
+            dados_anteriores=deposito_removido,
+            usuario_id=usuario.get("id"),
+            usuario_email=usuario.get("email"),
+            detalhes=f"Depósito removido do cadastro {cadastro_id}"
+        )
         return {"success": True, "message": "Depósito removido", "depositos": depositos}
     raise HTTPException(status_code=500, detail="Erro ao remover depósito")
 
@@ -1334,10 +1355,19 @@ def remover_sucumbencia(cadastro_id: str, idx: int, usuario: dict = Depends(veri
     if idx < 0 or idx >= len(sucumbencias):
         raise HTTPException(status_code=400, detail="Índice inválido")
 
-    sucumbencias.pop(idx)
+    sucumbencia_removida = sucumbencias.pop(idx)
     financeiro["sucumbencias"] = sucumbencias
 
     if salvar_financeiro(cadastro_id, financeiro):
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="financeiro",
+            registro_id=cadastro_id,
+            dados_anteriores=sucumbencia_removida,
+            usuario_id=usuario.get("id"),
+            usuario_email=usuario.get("email"),
+            detalhes=f"Sucumbência removida do cadastro {cadastro_id}"
+        )
         return {"success": True, "message": "Sucumbência removida", "sucumbencias": sucumbencias}
     raise HTTPException(status_code=500, detail="Erro ao remover sucumbência")
 
@@ -1382,10 +1412,19 @@ def remover_retencao(cadastro_id: str, idx: int, usuario: dict = Depends(verific
     if idx < 0 or idx >= len(retencoes):
         raise HTTPException(status_code=400, detail="Índice inválido")
 
-    retencoes.pop(idx)
+    retencao_removida = retencoes.pop(idx)
     financeiro["retencoes"] = retencoes
 
     if salvar_financeiro(cadastro_id, financeiro):
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="financeiro",
+            registro_id=cadastro_id,
+            dados_anteriores=retencao_removida,
+            usuario_id=usuario.get("id"),
+            usuario_email=usuario.get("email"),
+            detalhes=f"Retenção removida do cadastro {cadastro_id}"
+        )
         return {"success": True, "message": "Retenção removida", "retencoes": retencoes}
     raise HTTPException(status_code=500, detail="Erro ao remover retenção")
 
@@ -5999,6 +6038,16 @@ async def limpar_todos_processos_impl(admin):
         conn.commit()
         cur.close()
         conn.close()
+
+        # Registrar auditoria - operação crítica
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="processos",
+            registro_id="TODOS",
+            usuario_id=admin.get("id"),
+            usuario_email=admin.get("email"),
+            detalhes=f"LIMPEZA TOTAL: {total_processos} processos e {total_andamentos} andamentos deletados"
+        )
 
         logger.info(f"Admin {admin.get('nome')} deletou {total_processos} processos e {total_andamentos} andamentos")
 

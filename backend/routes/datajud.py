@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 import httpx
 from psycopg2.extras import RealDictCursor
 
+import os
 from modules.config import logger
 from modules.database import get_db
 from modules.prazos import processar_andamentos_para_prazos
@@ -36,7 +37,7 @@ TRIBUNAIS_DATAJUD = {
     "5.21": "trt21", "5.22": "trt22", "5.23": "trt23", "5.24": "trt24",
 }
 
-DATAJUD_API_KEY = "cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw=="
+DATAJUD_API_KEY = os.getenv("DATAJUD_API_KEY", "cDZHYzlZa0JadVREZDJCendQbXY6SkJlTzNjLV9TRENyQk1RdnFKZGRQdw==")
 DATAJUD_BASE_URL = "https://api-publica.datajud.cnj.jus.br"
 
 
