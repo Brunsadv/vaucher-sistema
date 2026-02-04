@@ -595,6 +595,33 @@ def init_db():
 
         logger.info("Tabela de prazos processuais verificada/criada!")
 
+        # ========== LOGS DE AUDITORIA ==========
+
+        # Tabela de logs de auditoria para segurança e compliance
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS logs_auditoria (
+                id SERIAL PRIMARY KEY,
+                usuario_id INTEGER,
+                usuario_email VARCHAR(255),
+                acao VARCHAR(50) NOT NULL,
+                tabela VARCHAR(100),
+                registro_id VARCHAR(100),
+                dados_anteriores JSONB,
+                dados_novos JSONB,
+                ip_address VARCHAR(45),
+                user_agent TEXT,
+                detalhes TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_logs_auditoria_usuario ON logs_auditoria(usuario_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_logs_auditoria_acao ON logs_auditoria(acao)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_logs_auditoria_tabela ON logs_auditoria(tabela)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_logs_auditoria_data ON logs_auditoria(criado_em)")
+
+        logger.info("Tabela de logs de auditoria verificada/criada!")
+
         # ========== ÍNDICES DE PERFORMANCE ==========
         # Índices para queries frequentes
         cur.execute("CREATE INDEX IF NOT EXISTS idx_cadastros_email ON cadastros((dados->>'email'))")
@@ -813,6 +840,72 @@ def atualizar_usuario(user_id: int, nome: str = None, senha: str = None, is_admi
 def deletar_usuario(user_id: int) -> bool:
     """Desativa um usuário (soft delete)."""
     return atualizar_usuario(user_id, ativo=False)
+
+
+# ============================================
+# FUNÇÕES DE AUDITORIA
+# ============================================
+
+def registrar_auditoria(
+    acao: str,
+    tabela: str = None,
+    registro_id: str = None,
+    dados_anteriores: dict = None,
+    dados_novos: dict = None,
+    usuario_id: int = None,
+    usuario_email: str = None,
+    ip_address: str = None,
+    user_agent: str = None,
+    detalhes: str = None
+) -> bool:
+    """
+    Registra uma ação no log de auditoria.
+
+    Args:
+        acao: Tipo de ação (CREATE, UPDATE, DELETE, LOGIN, etc)
+        tabela: Nome da tabela afetada
+        registro_id: ID do registro afetado
+        dados_anteriores: Estado anterior do registro (para UPDATE/DELETE)
+        dados_novos: Novo estado do registro (para CREATE/UPDATE)
+        usuario_id: ID do usuário que realizou a ação
+        usuario_email: Email do usuário
+        ip_address: Endereço IP da requisição
+        user_agent: User-Agent do navegador/cliente
+        detalhes: Informações adicionais sobre a ação
+
+    Returns:
+        True se registrou com sucesso, False caso contrário
+    """
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO logs_auditoria
+            (usuario_id, usuario_email, acao, tabela, registro_id,
+             dados_anteriores, dados_novos, ip_address, user_agent, detalhes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """, (
+            usuario_id,
+            usuario_email,
+            acao,
+            tabela,
+            str(registro_id) if registro_id else None,
+            json.dumps(dados_anteriores) if dados_anteriores else None,
+            json.dumps(dados_novos) if dados_novos else None,
+            ip_address,
+            user_agent,
+            detalhes
+        ))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return True
+    except Exception as e:
+        logger.error(f"Erro ao registrar auditoria: {e}")
+        return False
 
 
 # ============================================

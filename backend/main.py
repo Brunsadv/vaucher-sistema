@@ -15,7 +15,11 @@ import os
 import json
 import zipfile
 import shutil
+import string
 from datetime import datetime, timezone
+
+# Criptografia de backups
+import pyzipper
 
 # Rate Limiting
 from slowapi import _rate_limit_exceeded_handler
@@ -40,6 +44,7 @@ from modules.config import (
     ALLOWED_ORIGINS,
     logger,
     limiter,
+    validar_configuracao,
 )
 
 # Funções de segurança
@@ -168,6 +173,8 @@ app.include_router(insights_router)
 @app.on_event("startup")
 def startup():
     logger.info("Iniciando aplicação...")
+    # Validar configuração obrigatória - falha rápido se faltar variáveis
+    validar_configuracao()
     logger.info(f"RESEND_API_KEY configurada: {bool(RESEND_API_KEY)}")
     logger.info(f"FROM_EMAIL: {FROM_EMAIL}")
     init_db()
@@ -2859,6 +2866,12 @@ def formatar_tamanho(bytes_size: int) -> str:
     return f"{bytes_size:.1f} TB"
 
 
+def gerar_senha_backup() -> str:
+    """Gera uma senha aleatória segura para criptografia de backup."""
+    alfabeto = string.ascii_letters + string.digits + "!@#$%"
+    return ''.join(secrets.choice(alfabeto) for _ in range(16))
+
+
 class BackupRequest(BaseModel):
     documentos_ids: List[str]  # Lista de IDs dos documentos selecionados
     incluir_dados_json: bool = True  # Se inclui JSON com dados dos clientes
@@ -2882,12 +2895,14 @@ async def admin_download_backup(
     
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        # Criar arquivo ZIP em memória
+
+        # Criar arquivo ZIP criptografado em memória
         zip_buffer = BytesIO()
-        
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            
+        senha_backup = gerar_senha_backup()
+
+        with pyzipper.AESZipFile(zip_buffer, 'w', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zip_file:
+            zip_file.setpassword(senha_backup.encode())
+
             # Buscar todos os cadastros para organização
             cur.execute("SELECT id, dados FROM cadastros")
             cadastros = {row["id"]: row for row in cur.fetchall()}
@@ -3018,17 +3033,21 @@ async def admin_download_backup(
         
         cur.close()
         conn.close()
-        
-        # Retornar o ZIP
+
+        # Retornar o ZIP criptografado com senha no header
         zip_buffer.seek(0)
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"backup_vaucher_alvares_{timestamp}.zip"
-        
+
         return StreamingResponse(
             zip_buffer,
             media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "X-Backup-Password": senha_backup,
+                "Access-Control-Expose-Headers": "X-Backup-Password"
+            }
         )
     except Exception as e:
         logger.error(f"Erro ao gerar backup: {e}")
@@ -3351,10 +3370,12 @@ async def admin_download_documentos_selecionados(
         raise HTTPException(status_code=400, detail="Nenhum documento selecionado")
 
     try:
-        # Criar ZIP em memória
+        # Criar ZIP criptografado em memória
         zip_buffer = BytesIO()
+        senha_backup = gerar_senha_backup()
 
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+        with pyzipper.AESZipFile(zip_buffer, 'w', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zip_file:
+            zip_file.setpassword(senha_backup.encode())
             arquivos_adicionados = 0
             nomes_usados = {}  # Para evitar nomes duplicados
 
@@ -3474,7 +3495,7 @@ async def admin_download_documentos_selecionados(
         if arquivos_adicionados == 0:
             raise HTTPException(status_code=404, detail="Nenhum arquivo encontrado para download")
 
-        # Preparar resposta
+        # Preparar resposta com senha no header
         zip_buffer.seek(0)
         from datetime import datetime
         data_atual = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -3483,7 +3504,9 @@ async def admin_download_documentos_selecionados(
             zip_buffer,
             media_type="application/zip",
             headers={
-                "Content-Disposition": f'attachment; filename="backup_selecionados_{data_atual}.zip"'
+                "Content-Disposition": f'attachment; filename="backup_selecionados_{data_atual}.zip"',
+                "X-Backup-Password": senha_backup,
+                "Access-Control-Expose-Headers": "X-Backup-Password"
             }
         )
 
@@ -3508,24 +3531,26 @@ async def admin_download_backup_completo(
     
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        
-        # Criar arquivo ZIP em memória
+
+        # Criar arquivo ZIP criptografado em memória
         zip_buffer = BytesIO()
-        
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            
+        senha_backup = gerar_senha_backup()
+
+        with pyzipper.AESZipFile(zip_buffer, 'w', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zip_file:
+            zip_file.setpassword(senha_backup.encode())
+
             # Buscar todos os cadastros
             cur.execute("SELECT * FROM cadastros ORDER BY data_hora DESC")
             cadastros = cur.fetchall()
-            
+
             todos_dados = []
-            
+
             for cadastro in cadastros:
                 cadastro_id = cadastro["id"]
                 dados = cadastro["dados"] if isinstance(cadastro["dados"], dict) else json.loads(cadastro["dados"] or "{}")
                 nome_cliente = dados.get("nome", "Sem_Nome").replace(" ", "_").replace("/", "-")[:50]
                 pasta_cliente = f"{cadastro_id}_{nome_cliente}"
-                
+
                 cliente_dados = {
                     "cadastro_id": cadastro_id,
                     "nome": dados.get("nome"),
@@ -3606,16 +3631,20 @@ async def admin_download_backup_completo(
         
         cur.close()
         conn.close()
-        
+
         zip_buffer.seek(0)
-        
+
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"backup_completo_vaucher_alvares_{timestamp}.zip"
-        
+
         return StreamingResponse(
             zip_buffer,
             media_type="application/zip",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "X-Backup-Password": senha_backup,
+                "Access-Control-Expose-Headers": "X-Backup-Password"
+            }
         )
     except Exception as e:
         logger.error(f"Erro ao gerar backup completo: {e}")

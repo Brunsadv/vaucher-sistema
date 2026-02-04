@@ -35,6 +35,8 @@ from modules.database import (
     listar_documentos_extras,
     buscar_documento_extra,
     deletar_documento_extra,
+    # Auditoria
+    registrar_auditoria,
 )
 
 
@@ -548,7 +550,20 @@ async def admin_deletar_documento(
     usuario: dict = Depends(verificar_admin)
 ):
     """Admin deleta um documento enviado."""
+    # Buscar dados antes de deletar para auditoria
+    doc_existente = buscar_documento_admin(doc_id)
+
     if deletar_documento_admin(doc_id):
+        # Registrar auditoria
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="documentos_admin",
+            registro_id=doc_id,
+            dados_anteriores=doc_existente,
+            usuario_id=usuario.get("id"),
+            usuario_email=usuario.get("email"),
+            detalhes=f"Documento '{doc_existente.get('nome_original') if doc_existente else doc_id}' deletado"
+        )
         return {"success": True, "message": "Documento deletado"}
 
     raise HTTPException(status_code=500, detail="Erro ao deletar documento")
@@ -672,7 +687,20 @@ async def admin_deletar_documento_extra(
     usuario: dict = Depends(verificar_admin)
 ):
     """Admin deleta um documento extra."""
+    # Buscar dados antes de deletar para auditoria
+    doc_existente = buscar_documento_extra(doc_id)
+
     if deletar_documento_extra(doc_id):
+        # Registrar auditoria
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="documentos_extras",
+            registro_id=doc_id,
+            dados_anteriores=doc_existente,
+            usuario_id=usuario.get("id"),
+            usuario_email=usuario.get("email"),
+            detalhes=f"Documento extra '{doc_existente.get('nome_original') if doc_existente else doc_id}' deletado"
+        )
         return {"success": True, "message": "Documento deletado"}
 
     raise HTTPException(status_code=500, detail="Erro ao deletar documento")

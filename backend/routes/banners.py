@@ -14,6 +14,7 @@ from modules.database import (
     criar_banner,
     atualizar_banner,
     deletar_banner,
+    registrar_auditoria,
 )
 from modules.security import decodificar_token_cliente
 from modules.auth import verificar_admin
@@ -115,6 +116,17 @@ async def deletar_banner_endpoint(banner_id: int, admin=Depends(verificar_admin)
         sucesso = deletar_banner(banner_id)
         if not sucesso:
             raise HTTPException(status_code=500, detail="Erro ao deletar banner")
+
+        # Registrar auditoria
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="banners",
+            registro_id=banner_id,
+            dados_anteriores=banner_existente,
+            usuario_id=admin.get("id"),
+            usuario_email=admin.get("email"),
+            detalhes=f"Banner '{banner_existente.get('titulo')}' deletado"
+        )
 
         logger.info(f"Banner {banner_id} deletado por {admin.get('nome')}")
         return {"sucesso": True, "mensagem": "Banner deletado com sucesso"}

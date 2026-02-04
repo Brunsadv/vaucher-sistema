@@ -45,6 +45,8 @@ from modules.database import (
     criar_mensagem,
     marcar_mensagens_lidas,
     contar_mensagens_nao_lidas,
+    # Auditoria
+    registrar_auditoria,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["Admin - Processos"])
@@ -127,7 +129,20 @@ async def admin_deletar_processo(
     usuario: dict = Depends(verificar_admin)
 ):
     """Admin deleta um processo."""
+    # Buscar dados antes de deletar para auditoria
+    processo_existente = buscar_processo(processo_id)
+
     if deletar_processo(processo_id):
+        # Registrar auditoria
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="processos",
+            registro_id=processo_id,
+            dados_anteriores=processo_existente,
+            usuario_id=usuario.get("id"),
+            usuario_email=usuario.get("email"),
+            detalhes=f"Processo {processo_existente.get('numero_processo') if processo_existente else processo_id} deletado"
+        )
         return {"success": True, "message": "Processo deletado"}
 
     raise HTTPException(status_code=500, detail="Erro ao deletar processo")
@@ -280,7 +295,20 @@ async def admin_deletar_contrato(
     usuario: dict = Depends(verificar_admin)
 ):
     """Admin deleta um contrato."""
+    # Buscar dados antes de deletar para auditoria
+    contrato_existente = buscar_contrato(contrato_id)
+
     if deletar_contrato(contrato_id):
+        # Registrar auditoria
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="contratos_honorarios",
+            registro_id=contrato_id,
+            dados_anteriores=contrato_existente,
+            usuario_id=usuario.get("id"),
+            usuario_email=usuario.get("email"),
+            detalhes=f"Contrato {contrato_id} deletado"
+        )
         return {"success": True, "message": "Contrato deletado"}
 
     raise HTTPException(status_code=500, detail="Erro ao deletar contrato")

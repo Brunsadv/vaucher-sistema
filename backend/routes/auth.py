@@ -27,6 +27,7 @@ from modules.database import (
     criar_usuario,
     atualizar_usuario,
     deletar_usuario,
+    registrar_auditoria,
 )
 from modules.models import (
     LoginRequest,
@@ -209,11 +210,35 @@ def atualizar_usuario_api(user_id: int, dados: AtualizarUsuario, usuario: dict =
 
 @router.delete("/usuarios/{user_id}")
 def deletar_usuario_api(user_id: int, usuario: dict = Depends(verificar_admin)):
-    """Remove um usuário do sistema."""
+    """Remove um usuário do sistema (soft delete - desativa)."""
     if user_id == usuario["id"]:
         raise HTTPException(status_code=400, detail="Você não pode remover seu próprio usuário")
 
+    # Buscar dados antes para auditoria
+    usuario_alvo = buscar_usuario_por_email(None)  # Precisamos buscar por ID
+    conn = get_db()
+    if conn:
+        try:
+            from psycopg2.extras import RealDictCursor
+            cur = conn.cursor(cursor_factory=RealDictCursor)
+            cur.execute("SELECT id, email, nome, is_admin FROM usuarios WHERE id = %s", (user_id,))
+            usuario_alvo = cur.fetchone()
+            cur.close()
+            conn.close()
+        except:
+            pass
+
     if deletar_usuario(user_id):
+        # Registrar auditoria
+        registrar_auditoria(
+            acao="DELETE",
+            tabela="usuarios",
+            registro_id=user_id,
+            dados_anteriores=dict(usuario_alvo) if usuario_alvo else None,
+            usuario_id=usuario.get("id"),
+            usuario_email=usuario.get("email"),
+            detalhes=f"Usuário {usuario_alvo.get('email') if usuario_alvo else user_id} desativado"
+        )
         return {"success": True}
     raise HTTPException(status_code=404, detail="Usuário não encontrado")
 

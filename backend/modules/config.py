@@ -72,9 +72,30 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 RESEND_API_KEY = os.getenv("RESEND_API_KEY")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "onboarding@resend.dev")
 
-# Segurança
-ADMIN_INICIAL_SENHA = os.getenv("ADMIN_INICIAL_SENHA", "VaucherAdmin2024!")
-TOKEN_SECRET = os.getenv("TOKEN_SECRET", "vaucher_alvares_secret_key_2024")
+# Segurança - OBRIGATÓRIOS (sem defaults para forçar configuração)
+TOKEN_SECRET = os.getenv("TOKEN_SECRET")
+ADMIN_INICIAL_SENHA = os.getenv("ADMIN_INICIAL_SENHA")
+
+
+def validar_configuracao():
+    """
+    Valida que todas as variáveis obrigatórias estão configuradas.
+    Deve ser chamada no startup da aplicação.
+    Raises ValueError se alguma variável obrigatória não estiver configurada.
+    """
+    erros = []
+    if not DATABASE_URL:
+        erros.append("DATABASE_URL")
+    if not TOKEN_SECRET:
+        erros.append("TOKEN_SECRET")
+    if not ADMIN_INICIAL_SENHA:
+        erros.append("ADMIN_INICIAL_SENHA")
+
+    if erros:
+        raise ValueError(
+            f"Variáveis de ambiente obrigatórias não configuradas: {', '.join(erros)}. "
+            "Configure no arquivo .env ou nas variáveis de ambiente do servidor (Railway)."
+        )
 
 # Google OAuth
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
