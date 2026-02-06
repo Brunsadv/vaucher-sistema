@@ -120,6 +120,25 @@ app = FastAPI(
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+# Handler para erros de validação - converte array de objetos em mensagem legível
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    """Converte erros de validação do Pydantic em mensagens legíveis."""
+    erros = []
+    for error in exc.errors():
+        campo = error.get("loc", [""])[-1]
+        msg = error.get("msg", "erro desconhecido")
+        erros.append(f"{campo}: {msg}")
+
+    mensagem = "; ".join(erros) if erros else "Erro de validação"
+    return JSONResponse(
+        status_code=422,
+        content={"detail": mensagem}
+    )
+
 # CORS - permitir acesso dos frontends (usando ALLOWED_ORIGINS do config.py)
 app.add_middleware(
     CORSMiddleware,
