@@ -135,12 +135,15 @@ async def criar_insight(
     fonte: Optional[str] = Form(None),
     fonte_url: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
-    destaque: bool = Form(False),
+    destaque: str = Form("false"),
     status: str = Form("rascunho"),
     imagem: Optional[UploadFile] = File(None),
     admin=Depends(verificar_admin)
 ):
     """Cria um novo insight."""
+
+    # Converter destaque de string para boolean
+    destaque_bool = destaque.lower() in ("true", "1", "yes", "sim")
 
     # Validar categoria
     if categoria not in CATEGORIAS_VALIDAS:
@@ -211,7 +214,7 @@ async def criar_insight(
             resumo, resumo_en, resumo_es,
             conteudo, conteudo_en, conteudo_es,
             fonte, fonte_url, imagem_path, json.dumps(tags_list),
-            destaque, status, admin.get('id'), admin.get('nome')
+            destaque_bool, status, admin.get('id'), admin.get('nome')
         ))
 
         conn.commit()
@@ -276,12 +279,15 @@ async def atualizar_insight(
     fonte: Optional[str] = Form(None),
     fonte_url: Optional[str] = Form(None),
     tags: Optional[str] = Form(None),
-    destaque: bool = Form(False),
+    destaque: str = Form("false"),
     status: str = Form("rascunho"),
     imagem: Optional[UploadFile] = File(None),
     admin=Depends(verificar_admin)
 ):
     """Atualiza um insight existente."""
+
+    # Converter destaque de string para boolean
+    destaque_bool = destaque.lower() in ("true", "1", "yes", "sim")
 
     if categoria not in CATEGORIAS_VALIDAS:
         raise HTTPException(
@@ -363,7 +369,7 @@ async def atualizar_insight(
             resumo, resumo_en, resumo_es,
             conteudo, conteudo_en, conteudo_es,
             fonte, fonte_url, imagem_path, json.dumps(tags_list),
-            destaque, status,
+            destaque_bool, status,
             data_publicacao, insight_id
         ))
 
