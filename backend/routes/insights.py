@@ -708,6 +708,45 @@ async def publicar_insight(insight_id: str, admin=Depends(verificar_admin)):
         conn.close()
 
 
+@router.post("/admin/insights/{insight_id}/destaque")
+async def toggle_destaque_insight(insight_id: str, admin=Depends(verificar_admin)):
+    """Ativa/desativa destaque de um insight."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+
+    try:
+        cur = conn.cursor()
+        # Toggle: inverte o valor atual de destaque
+        cur.execute("""
+            UPDATE insights
+            SET destaque = NOT destaque, atualizado_em = NOW()
+            WHERE id = %s
+            RETURNING destaque
+        """, (insight_id,))
+
+        result = cur.fetchone()
+        if not result:
+            raise HTTPException(status_code=404, detail="Insight não encontrado")
+
+        novo_destaque = result[0]
+        conn.commit()
+        cur.close()
+
+        return {
+            "sucesso": True,
+            "destaque": novo_destaque,
+            "mensagem": f"Destaque {'ativado' if novo_destaque else 'desativado'} com sucesso"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao alterar destaque: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @router.post("/admin/insights/{insight_id}/despublicar")
 async def despublicar_insight(insight_id: str, admin=Depends(verificar_admin)):
     """Despublica um insight (volta para rascunho)."""
