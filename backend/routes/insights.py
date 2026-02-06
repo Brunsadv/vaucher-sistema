@@ -120,6 +120,49 @@ async def listar_insights_admin(
         conn.close()
 
 
+@router.get("/admin/insights/estatisticas")
+async def estatisticas_insights(admin=Depends(verificar_admin)):
+    """Retorna estatísticas dos insights. IMPORTANTE: Deve vir ANTES de /admin/insights/{insight_id}"""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+
+    try:
+        from psycopg2.extras import RealDictCursor
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Total por status
+        cur.execute("""
+            SELECT status, COUNT(*) as total
+            FROM insights GROUP BY status
+        """)
+        por_status = {r['status']: r['total'] for r in cur.fetchall()}
+
+        # Total por categoria
+        cur.execute("""
+            SELECT categoria, COUNT(*) as total
+            FROM insights GROUP BY categoria
+        """)
+        por_categoria = {r['categoria']: r['total'] for r in cur.fetchall()}
+
+        # Total geral
+        cur.execute("SELECT COUNT(*) as total FROM insights")
+        total = cur.fetchone()['total']
+
+        cur.close()
+
+        return {
+            "total": total,
+            "por_status": por_status,
+            "por_categoria": por_categoria
+        }
+    except Exception as e:
+        logger.error(f"Erro ao obter estatísticas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @router.post("/admin/insights")
 async def criar_insight(
     request: Request,
@@ -886,50 +929,3 @@ async def servir_imagem_insight(filename: str):
         raise HTTPException(status_code=404, detail="Imagem não encontrada")
 
     return FileResponse(file_path)
-
-
-# ============================================
-# ESTATÍSTICAS
-# ============================================
-
-@router.get("/admin/insights/estatisticas")
-async def estatisticas_insights(admin=Depends(verificar_admin)):
-    """Retorna estatísticas dos insights."""
-    conn = get_db()
-    if not conn:
-        raise HTTPException(status_code=500, detail="Erro de conexão com banco")
-
-    try:
-        from psycopg2.extras import RealDictCursor
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-
-        # Total por status
-        cur.execute("""
-            SELECT status, COUNT(*) as total
-            FROM insights GROUP BY status
-        """)
-        por_status = {r['status']: r['total'] for r in cur.fetchall()}
-
-        # Total por categoria
-        cur.execute("""
-            SELECT categoria, COUNT(*) as total
-            FROM insights GROUP BY categoria
-        """)
-        por_categoria = {r['categoria']: r['total'] for r in cur.fetchall()}
-
-        # Total geral
-        cur.execute("SELECT COUNT(*) as total FROM insights")
-        total = cur.fetchone()['total']
-
-        cur.close()
-
-        return {
-            "total": total,
-            "por_status": por_status,
-            "por_categoria": por_categoria
-        }
-    except Exception as e:
-        logger.error(f"Erro ao obter estatísticas: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
