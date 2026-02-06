@@ -336,6 +336,81 @@ async def obter_insight_admin(insight_id: str, admin=Depends(verificar_admin)):
         conn.close()
 
 
+@router.post("/admin/insights/{insight_id}/imagem")
+async def upload_imagem_insight(
+    insight_id: str,
+    imagem: UploadFile = File(...),
+    admin=Depends(verificar_admin)
+):
+    """Faz upload de imagem para um insight existente."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+
+    try:
+        from psycopg2.extras import RealDictCursor
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Verificar se insight existe
+        cur.execute("SELECT id, imagem_path FROM insights WHERE id = %s", (insight_id,))
+        insight = cur.fetchone()
+
+        if not insight:
+            raise HTTPException(status_code=404, detail="Insight não encontrado")
+
+        # Validar arquivo
+        content = await imagem.read()
+        is_valid, error = validar_arquivo(imagem.filename, len(content))
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error)
+
+        # Validar tipo real do arquivo
+        valido_mime, erro_mime = validar_mime_type(content, imagem.filename)
+        if not valido_mime:
+            raise HTTPException(status_code=400, detail=f"Imagem rejeitada: {erro_mime}")
+
+        # Deletar imagem antiga se existir
+        if insight.get('imagem_path'):
+            old_path = os.path.join(UPLOADS_DIR, insight['imagem_path'])
+            if os.path.exists(old_path):
+                os.remove(old_path)
+
+        # Salvar nova imagem
+        ext = os.path.splitext(imagem.filename)[1]
+        nome_arquivo = f"{uuid.uuid4().hex}{ext}"
+        caminho_completo = os.path.join(INSIGHTS_UPLOAD_DIR, nome_arquivo)
+
+        with open(caminho_completo, "wb") as f:
+            f.write(content)
+
+        imagem_path = f"insights/{nome_arquivo}"
+
+        # Atualizar no banco
+        cur.execute("""
+            UPDATE insights SET imagem_path = %s, atualizado_em = NOW()
+            WHERE id = %s
+        """, (imagem_path, insight_id))
+
+        conn.commit()
+        cur.close()
+
+        logger.info(f"Imagem do insight {insight_id} atualizada por {admin.get('nome')}")
+
+        return {
+            "sucesso": True,
+            "imagem_path": imagem_path,
+            "imagem_url": f"/api/public/insights/imagem/{nome_arquivo}",
+            "mensagem": "Imagem atualizada com sucesso"
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao fazer upload de imagem: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @router.put("/admin/insights/{insight_id}")
 async def atualizar_insight(
     insight_id: str,
