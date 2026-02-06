@@ -122,14 +122,14 @@ async def listar_insights_admin(
 
 @router.post("/admin/insights")
 async def criar_insight(
-    titulo: str = Form(...),
+    titulo: str = Form(None),
     titulo_en: Optional[str] = Form(None),
     titulo_es: Optional[str] = Form(None),
-    categoria: str = Form(...),
-    resumo: str = Form(...),
+    categoria: str = Form(None),
+    resumo: str = Form(None),
     resumo_en: Optional[str] = Form(None),
     resumo_es: Optional[str] = Form(None),
-    conteudo: str = Form(...),
+    conteudo: str = Form(None),
     conteudo_en: Optional[str] = Form(None),
     conteudo_es: Optional[str] = Form(None),
     fonte: Optional[str] = Form(None),
@@ -142,8 +142,29 @@ async def criar_insight(
 ):
     """Cria um novo insight."""
 
+    # Log para diagnóstico
+    logger.info(f"=== CRIAR INSIGHT DEBUG ===")
+    logger.info(f"titulo: '{titulo}' | categoria: '{categoria}' | resumo: '{resumo}' | conteudo: '{conteudo[:50] if conteudo else 'None'}...'")
+
+    # Validar campos obrigatórios manualmente
+    campos_faltando = []
+    if not titulo:
+        campos_faltando.append("titulo")
+    if not categoria:
+        campos_faltando.append("categoria")
+    if not resumo:
+        campos_faltando.append("resumo")
+    if not conteudo:
+        campos_faltando.append("conteudo")
+
+    if campos_faltando:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Campos obrigatórios não preenchidos: {', '.join(campos_faltando)}"
+        )
+
     # Converter destaque de string para boolean
-    destaque_bool = destaque.lower() in ("true", "1", "yes", "sim")
+    destaque_bool = destaque.lower() in ("true", "1", "yes", "sim") if destaque else False
 
     # Validar categoria
     if categoria not in CATEGORIAS_VALIDAS:
