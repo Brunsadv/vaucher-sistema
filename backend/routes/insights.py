@@ -163,9 +163,9 @@ async def estatisticas_insights(admin=Depends(verificar_admin)):
         conn.close()
 
 
-@router.post("/public/insights/corrigir-datas")
-async def corrigir_datas_publicacao():
-    """Corrige insights publicados que não têm data_publicacao. TEMPORARIO."""
+@router.post("/admin/insights/corrigir-datas")
+async def corrigir_datas_publicacao(admin=Depends(verificar_admin)):
+    """Corrige insights publicados que não têm data_publicacao."""
     conn = get_db()
     if not conn:
         raise HTTPException(status_code=500, detail="Erro de conexão com banco")
