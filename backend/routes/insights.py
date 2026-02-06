@@ -682,6 +682,32 @@ async def publicar_insight(insight_id: str, admin=Depends(verificar_admin)):
         conn.close()
 
 
+@router.post("/admin/insights/corrigir-datas")
+async def corrigir_datas_publicacao(admin=Depends(verificar_admin)):
+    """Corrige insights publicados que não têm data_publicacao."""
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE insights
+            SET data_publicacao = criado_em
+            WHERE status = 'publicado' AND data_publicacao IS NULL
+        """)
+        corrigidos = cur.rowcount
+        conn.commit()
+        cur.close()
+
+        return {"sucesso": True, "corrigidos": corrigidos, "mensagem": f"{corrigidos} insight(s) corrigido(s)"}
+    except Exception as e:
+        logger.error(f"Erro ao corrigir datas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
 @router.post("/admin/insights/{insight_id}/despublicar")
 async def despublicar_insight(insight_id: str, admin=Depends(verificar_admin)):
     """Despublica um insight (volta para rascunho)."""
