@@ -115,6 +115,9 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:3001",
     "http://localhost:3002",
+    # Landing Page (site principal)
+    "https://vaucherealvares.com",
+    "https://www.vaucherealvares.com",
     # Domínios de produção
     "https://cadastro.vaucherealvares.com",
     "https://painel.vaucherealvares.com",
