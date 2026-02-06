@@ -310,6 +310,9 @@ async def criar_insight(
         else:
             tags_list = []
 
+        # Se status for publicado, definir data_publicacao
+        data_publicacao = datetime.now() if status == "publicado" else None
+
         cur = conn.cursor()
         cur.execute("""
             INSERT INTO insights (
@@ -319,7 +322,7 @@ async def criar_insight(
                 conteudo, conteudo_en, conteudo_es,
                 fonte, fonte_url, imagem_path, tags,
                 destaque, status, autor_id, autor_nome,
-                criado_em, atualizado_em
+                data_publicacao, criado_em, atualizado_em
             ) VALUES (
                 %s, %s, %s,
                 %s, %s, %s,
@@ -327,6 +330,7 @@ async def criar_insight(
                 %s, %s, %s,
                 %s, %s, %s, %s,
                 %s, %s, %s, %s,
+                %s,
                 NOW(), NOW()
             )
         """, (
@@ -335,7 +339,8 @@ async def criar_insight(
             resumo, resumo_en, resumo_es,
             conteudo, conteudo_en, conteudo_es,
             fonte, fonte_url, imagem_path, json.dumps(tags_list),
-            destaque_bool, status, admin.get('id'), admin.get('nome')
+            destaque_bool, status, admin.get('id'), admin.get('nome'),
+            data_publicacao
         ))
 
         conn.commit()
