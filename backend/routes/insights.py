@@ -415,12 +415,13 @@ async def obter_insight_admin(insight_id: str, admin=Depends(verificar_admin)):
         conn.close()
 
 
-@router.post("/public/insights/{insight_id}/imagem-temp")
+@router.post("/admin/insights/{insight_id}/imagem")
 async def upload_imagem_insight(
     insight_id: str,
-    imagem: UploadFile = File(...)
+    imagem: UploadFile = File(...),
+    admin=Depends(verificar_admin)
 ):
-    """Faz upload de imagem para um insight existente. TEMP."""
+    """Faz upload de imagem para um insight existente."""
     conn = get_db()
     if not conn:
         raise HTTPException(status_code=500, detail="Erro de conexão com banco")
@@ -472,7 +473,7 @@ async def upload_imagem_insight(
         conn.commit()
         cur.close()
 
-        logger.info(f"Imagem do insight {insight_id} atualizada")
+        logger.info(f"Imagem do insight {insight_id} atualizada por {admin.get('nome')}")
 
         return {
             "sucesso": True,
