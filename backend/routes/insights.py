@@ -259,8 +259,13 @@ async def criar_insight(
         insight_id = f"INS-{uuid.uuid4().hex[:8].upper()}"
         slug = gerar_slug(titulo)
 
-        # Processar tags
-        tags_list = [t.strip() for t in tags.split(",")] if tags else []
+        # Processar tags (pode vir como string ou lista)
+        if isinstance(tags, list):
+            tags_list = [t.strip() for t in tags if t]
+        elif isinstance(tags, str) and tags:
+            tags_list = [t.strip() for t in tags.split(",") if t.strip()]
+        else:
+            tags_list = []
 
         cur = conn.cursor()
         cur.execute("""
@@ -493,8 +498,13 @@ async def atualizar_insight(
         if titulo != insight_atual.get('titulo'):
             slug = gerar_slug(titulo)
 
-        # Processar tags
-        tags_list = [t.strip() for t in tags.split(",")] if tags else []
+        # Processar tags (pode vir como string ou lista)
+        if isinstance(tags, list):
+            tags_list = [t.strip() for t in tags if t]
+        elif isinstance(tags, str) and tags:
+            tags_list = [t.strip() for t in tags.split(",") if t.strip()]
+        else:
+            tags_list = []
 
         # Verificar se está publicando pela primeira vez
         data_publicacao = insight_atual.get('data_publicacao')
