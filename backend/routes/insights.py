@@ -708,8 +708,8 @@ async def publicar_insight(insight_id: str, admin=Depends(verificar_admin)):
         conn.close()
 
 
-@router.post("/public/insights/{insight_id}/destaque-temp")
-async def toggle_destaque_insight(insight_id: str):
+@router.post("/admin/insights/{insight_id}/destaque")
+async def toggle_destaque_insight(insight_id: str, admin=Depends(verificar_admin)):
     """Ativa/desativa destaque de um insight."""
     conn = get_db()
     if not conn:
