@@ -3,7 +3,7 @@ Rotas de Insights (Blog, Artigos, Jurisprudência, Alertas)
 Criado em 25/01/2026
 """
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request
 from fastapi.responses import FileResponse
 from datetime import datetime
 from typing import Optional, List
@@ -122,31 +122,85 @@ async def listar_insights_admin(
 
 @router.post("/admin/insights")
 async def criar_insight(
-    titulo: str = Form(None),
-    titulo_en: Optional[str] = Form(None),
-    titulo_es: Optional[str] = Form(None),
-    categoria: str = Form(None),
-    resumo: str = Form(None),
-    resumo_en: Optional[str] = Form(None),
-    resumo_es: Optional[str] = Form(None),
-    conteudo: str = Form(None),
-    conteudo_en: Optional[str] = Form(None),
-    conteudo_es: Optional[str] = Form(None),
-    fonte: Optional[str] = Form(None),
-    fonte_url: Optional[str] = Form(None),
-    tags: Optional[str] = Form(None),
-    destaque: str = Form("false"),
-    status: str = Form("rascunho"),
-    imagem: Optional[UploadFile] = File(None),
+    request: Request,
     admin=Depends(verificar_admin)
 ):
-    """Cria um novo insight."""
+    """Cria um novo insight. Aceita JSON ou FormData."""
 
-    # Log para diagnóstico
+    content_type = request.headers.get("content-type", "")
     logger.info(f"=== CRIAR INSIGHT DEBUG ===")
-    logger.info(f"titulo: '{titulo}' | categoria: '{categoria}' | resumo: '{resumo}' | conteudo: '{conteudo[:50] if conteudo else 'None'}...'")
+    logger.info(f"Content-Type: {content_type}")
 
-    # Validar campos obrigatórios manualmente
+    # Inicializar variáveis
+    titulo = titulo_en = titulo_es = None
+    categoria = resumo = resumo_en = resumo_es = None
+    conteudo = conteudo_en = conteudo_es = None
+    fonte = fonte_url = tags = None
+    destaque = "false"
+    status = "rascunho"
+    imagem = None
+    imagem_content = None
+
+    try:
+        if "application/json" in content_type:
+            # Parse JSON
+            data = await request.json()
+            logger.info(f"Dados JSON recebidos: {list(data.keys())}")
+
+            titulo = data.get("titulo")
+            titulo_en = data.get("titulo_en")
+            titulo_es = data.get("titulo_es")
+            categoria = data.get("categoria")
+            resumo = data.get("resumo")
+            resumo_en = data.get("resumo_en")
+            resumo_es = data.get("resumo_es")
+            conteudo = data.get("conteudo")
+            conteudo_en = data.get("conteudo_en")
+            conteudo_es = data.get("conteudo_es")
+            fonte = data.get("fonte")
+            fonte_url = data.get("fonte_url")
+            tags = data.get("tags")
+            destaque = str(data.get("destaque", "false"))
+            status = data.get("status", "rascunho")
+
+        elif "multipart/form-data" in content_type:
+            # Parse FormData
+            form = await request.form()
+            logger.info(f"Campos FormData recebidos: {list(form.keys())}")
+
+            titulo = form.get("titulo")
+            titulo_en = form.get("titulo_en")
+            titulo_es = form.get("titulo_es")
+            categoria = form.get("categoria")
+            resumo = form.get("resumo")
+            resumo_en = form.get("resumo_en")
+            resumo_es = form.get("resumo_es")
+            conteudo = form.get("conteudo")
+            conteudo_en = form.get("conteudo_en")
+            conteudo_es = form.get("conteudo_es")
+            fonte = form.get("fonte")
+            fonte_url = form.get("fonte_url")
+            tags = form.get("tags")
+            destaque = str(form.get("destaque", "false"))
+            status = form.get("status", "rascunho")
+
+            # Verificar se há imagem
+            imagem_field = form.get("imagem")
+            if imagem_field and hasattr(imagem_field, 'filename') and imagem_field.filename:
+                imagem = imagem_field
+                imagem_content = await imagem.read()
+
+        else:
+            logger.warning(f"Content-Type não suportado: {content_type}")
+            raise HTTPException(status_code=400, detail=f"Content-Type não suportado: {content_type}")
+
+    except json.JSONDecodeError as e:
+        logger.error(f"Erro ao parsear JSON: {e}")
+        raise HTTPException(status_code=400, detail="Erro ao parsear JSON")
+
+    logger.info(f"titulo: '{titulo}' | categoria: '{categoria}' | resumo: '{resumo[:50] if resumo else 'None'}...'")
+
+    # Validar campos obrigatórios
     campos_faltando = []
     if not titulo:
         campos_faltando.append("titulo")
@@ -164,7 +218,7 @@ async def criar_insight(
         )
 
     # Converter destaque de string para boolean
-    destaque_bool = destaque.lower() in ("true", "1", "yes", "sim") if destaque else False
+    destaque_bool = str(destaque).lower() in ("true", "1", "yes", "sim")
 
     # Validar categoria
     if categoria not in CATEGORIAS_VALIDAS:
@@ -180,16 +234,14 @@ async def criar_insight(
     try:
         # Processar imagem se enviada
         imagem_path = None
-        if imagem and imagem.filename:
+        if imagem and imagem.filename and imagem_content:
             # Validar extensão e tamanho
-            is_valid, error = validar_arquivo(imagem.filename, imagem.size or 0)
+            is_valid, error = validar_arquivo(imagem.filename, len(imagem_content))
             if not is_valid:
                 raise HTTPException(status_code=400, detail=error)
 
-            content = await imagem.read()
-
             # Validar tipo real do arquivo (magic bytes)
-            valido_mime, erro_mime = validar_mime_type(content, imagem.filename)
+            valido_mime, erro_mime = validar_mime_type(imagem_content, imagem.filename)
             if not valido_mime:
                 raise HTTPException(status_code=400, detail=f"Imagem rejeitada: {erro_mime}")
 
@@ -199,7 +251,7 @@ async def criar_insight(
             caminho_completo = os.path.join(INSIGHTS_UPLOAD_DIR, nome_arquivo)
 
             with open(caminho_completo, "wb") as f:
-                f.write(content)
+                f.write(imagem_content)
 
             imagem_path = f"insights/{nome_arquivo}"
 
