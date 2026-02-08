@@ -175,6 +175,7 @@ from routes.admin_processos import router as admin_processos_router
 from routes.portal_cliente import router as portal_cliente_router
 from routes.admin_cadastros import router as admin_cadastros_router
 from routes.insights import router as insights_router
+from routes.newsletter import router as newsletter_router
 
 # Registrar routers na aplicação
 app.include_router(auth_router)
@@ -185,6 +186,7 @@ app.include_router(admin_processos_router)
 app.include_router(portal_cliente_router)
 app.include_router(admin_cadastros_router)
 app.include_router(insights_router)
+app.include_router(newsletter_router)
 
 # ============================================
 # INICIALIZAÇÃO DA APLICAÇÃO

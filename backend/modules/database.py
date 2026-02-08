@@ -622,6 +622,31 @@ def init_db():
 
         logger.info("Tabela de logs de auditoria verificada/criada!")
 
+        # ========== NEWSLETTER ==========
+
+        # Tabela de inscrições na newsletter
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS newsletter_inscricoes (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                nome VARCHAR(255),
+                origem VARCHAR(100) DEFAULT 'landing_page',
+                idioma VARCHAR(10) DEFAULT 'pt',
+                ativo BOOLEAN DEFAULT TRUE,
+                confirmado BOOLEAN DEFAULT FALSE,
+                ip_address VARCHAR(45),
+                user_agent TEXT,
+                criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                cancelado_em TIMESTAMP
+            )
+        """)
+
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_newsletter_email ON newsletter_inscricoes(email)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_newsletter_ativo ON newsletter_inscricoes(ativo)")
+
+        logger.info("Tabela de newsletter verificada/criada!")
+
         # ========== ÍNDICES DE PERFORMANCE ==========
         # Índices para queries frequentes
         cur.execute("CREATE INDEX IF NOT EXISTS idx_cadastros_email ON cadastros((dados->>'email'))")
