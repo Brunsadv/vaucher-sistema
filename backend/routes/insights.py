@@ -874,7 +874,7 @@ async def listar_insights_publico(
                 "imagem_url": f"/api/public/insights/imagem/{i['imagem_path'].split('/')[-1]}" if i.get('imagem_path') else None,
                 "fonte": i['fonte'],
                 "fonte_url": i['fonte_url'],
-                "tags": json.loads(i['tags']) if i.get('tags') else [],
+                "tags": i['tags'] if isinstance(i.get('tags'), list) else (json.loads(i['tags']) if i.get('tags') else []),
                 "destaque": i['destaque'],
                 "data_publicacao": i['data_publicacao'].isoformat() if i.get('data_publicacao') else None
             }
@@ -1020,7 +1020,7 @@ async def obter_insight_publico(slug: str, lang: str = "pt"):
             "imagem_url": f"/api/public/insights/imagem/{i['imagem_path'].split('/')[-1]}" if i.get('imagem_path') else None,
             "fonte": i['fonte'],
             "fonte_url": i['fonte_url'],
-            "tags": json.loads(i['tags']) if i.get('tags') else [],
+            "tags": i['tags'] if isinstance(i.get('tags'), list) else (json.loads(i['tags']) if i.get('tags') else []),
             "autor_nome": i['autor_nome'],
             "data_publicacao": i['data_publicacao'].isoformat() if i.get('data_publicacao') else None
         }
