@@ -3,7 +3,7 @@ Rotas de Newsletter
 Criado em 08/02/2026
 """
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel, EmailStr
 from datetime import datetime
 from typing import Optional
