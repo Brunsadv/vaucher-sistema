@@ -76,6 +76,9 @@ from modules.database import (
     buscar_cliente_auth,
     # Auditoria
     registrar_auditoria,
+    # Funções movidas de main.py para database.py (integração Escavador)
+    buscar_processo_por_numero,
+    verificar_andamento_existente,
 )
 
 # Modelos Pydantic
@@ -169,7 +172,8 @@ from modules.auth import verificar_token, verificar_admin, verificar_token_clien
 # Importar e registrar routers dos módulos
 from routes.auth import router as auth_router
 from routes.prazos import router as prazos_router
-from routes.datajud import router as datajud_router
+# from routes.datajud import router as datajud_router  # Substituído pelo Escavador
+from routes.escavador import router as escavador_router
 from routes.banners import router as banners_router
 from routes.admin_processos import router as admin_processos_router
 from routes.portal_cliente import router as portal_cliente_router
@@ -180,7 +184,8 @@ from routes.newsletter import router as newsletter_router
 # Registrar routers na aplicação
 app.include_router(auth_router)
 app.include_router(prazos_router)
-app.include_router(datajud_router)
+# app.include_router(datajud_router)  # Substituído pelo Escavador
+app.include_router(escavador_router)
 app.include_router(banners_router)
 app.include_router(admin_processos_router)
 app.include_router(portal_cliente_router)
@@ -5376,27 +5381,6 @@ def parsear_excel_astrea(arquivo_bytes: bytes) -> dict:
         return {"erro": f"Erro ao processar arquivo: {str(e)}"}
 
 
-def buscar_processo_por_numero(numero_processo: str) -> dict:
-    """Busca um processo pelo número."""
-    conn = get_db()
-    if not conn:
-        return None
-
-    try:
-        cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT * FROM processos WHERE numero_processo = %s", (numero_processo,))
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-
-        if row:
-            return dict(row)
-        return None
-    except Exception as e:
-        logger.error(f"Erro ao buscar processo por número: {e}")
-        return None
-
-
 def buscar_cliente_por_cpf(cpf: str) -> dict:
     """Busca cliente pelo CPF."""
     conn = get_db()
@@ -5556,29 +5540,6 @@ def buscar_clientes_similares(nome: str, limite: int = 5) -> list:
     except Exception as e:
         logger.error(f"Erro ao buscar clientes similares: {e}")
         return []
-
-
-def verificar_andamento_existente(processo_id: int, data: str, descricao: str) -> bool:
-    """Verifica se um andamento já existe (para evitar duplicatas)."""
-    conn = get_db()
-    if not conn:
-        return False
-
-    try:
-        cur = conn.cursor()
-        # Verifica por data + início da descrição (para evitar problemas com texto truncado)
-        cur.execute("""
-            SELECT 1 FROM processo_andamentos
-            WHERE processo_id = %s AND data = %s AND descricao ILIKE %s
-            LIMIT 1
-        """, (processo_id, data, descricao[:100] + "%"))
-        existe = cur.fetchone() is not None
-        cur.close()
-        conn.close()
-        return existe
-    except Exception as e:
-        logger.error(f"Erro ao verificar andamento existente: {e}")
-        return False
 
 
 @app.post("/api/admin/importar-astrea/preview")

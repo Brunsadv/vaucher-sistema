@@ -103,6 +103,14 @@ GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI_ADMIN = os.getenv("GOOGLE_REDIRECT_URI_ADMIN", "https://vaucher-sistema-production.up.railway.app/api/auth/google/callback")
 GOOGLE_REDIRECT_URI_CLIENTE = os.getenv("GOOGLE_REDIRECT_URI_CLIENTE", "https://vaucher-sistema-production.up.railway.app/api/cliente/auth/google/callback")
 
+# Escavador API V2
+ESCAVADOR_API_TOKEN = os.getenv("ESCAVADOR_API_TOKEN")
+ESCAVADOR_API_URL = "https://api.escavador.com/api"
+ESCAVADOR_CALLBACK_URL = os.getenv(
+    "ESCAVADOR_CALLBACK_URL",
+    "https://vaucher-sistema-production.up.railway.app/api/webhook/escavador"
+)
+
 # URL da logo para e-mails
 LOGO_URL = "https://raw.githubusercontent.com/Brunsadv/vaucher-sistema/main/backend/static/Vaucher_e_Alvares-06.jpg"
 

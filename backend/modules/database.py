@@ -595,6 +595,26 @@ def init_db():
 
         logger.info("Tabela de prazos processuais verificada/criada!")
 
+        # ========== MONITORAMENTOS ESCAVADOR ==========
+
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS escavador_monitoramentos (
+                id SERIAL PRIMARY KEY,
+                processo_id INTEGER REFERENCES processos(id) ON DELETE CASCADE,
+                numero_processo VARCHAR(50) NOT NULL,
+                escavador_id VARCHAR(100),
+                frequencia VARCHAR(20) DEFAULT 'semanal',
+                status VARCHAR(20) DEFAULT 'ativo',
+                ultima_atualizacao TIMESTAMP,
+                criado_em TIMESTAMP DEFAULT NOW()
+            )
+        """)
+
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_esc_mon_processo ON escavador_monitoramentos(processo_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_esc_mon_numero ON escavador_monitoramentos(numero_processo)")
+
+        logger.info("Tabela de monitoramentos Escavador verificada/criada!")
+
         # ========== LOGS DE AUDITORIA ==========
 
         # Tabela de logs de auditoria para segurança e compliance
@@ -2739,3 +2759,51 @@ def registrar_acesso_cliente(cadastro_id: str):
         conn.close()
     except Exception as e:
         logger.error(f"Erro ao registrar acesso: {e}")
+
+
+# ============================================
+# FUNÇÕES AUXILIARES - PROCESSOS / ANDAMENTOS
+# ============================================
+
+def buscar_processo_por_numero(numero_processo: str) -> dict:
+    """Busca um processo pelo número."""
+    conn = get_db()
+    if not conn:
+        return None
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT * FROM processos WHERE numero_processo = %s", (numero_processo,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if row:
+            return dict(row)
+        return None
+    except Exception as e:
+        logger.error(f"Erro ao buscar processo por número: {e}")
+        return None
+
+
+def verificar_andamento_existente(processo_id: int, data: str, descricao: str) -> bool:
+    """Verifica se um andamento já existe (para evitar duplicatas)."""
+    conn = get_db()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        # Verifica por data + início da descrição (para evitar problemas com texto truncado)
+        cur.execute("""
+            SELECT 1 FROM processo_andamentos
+            WHERE processo_id = %s AND data = %s AND descricao ILIKE %s
+            LIMIT 1
+        """, (processo_id, data, descricao[:100] + "%"))
+        existe = cur.fetchone() is not None
+        cur.close()
+        conn.close()
+        return existe
+    except Exception as e:
+        logger.error(f"Erro ao verificar andamento existente: {e}")
+        return False
