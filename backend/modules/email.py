@@ -499,6 +499,106 @@ async def enviar_email_atualizacao_solicitada(
     return await enviar_email_resend(destinatario, assunto, corpo_html)
 
 
+async def enviar_email_newsletter_boas_vindas(
+    destinatario: str,
+    idioma: str = "pt"
+) -> bool:
+    """
+    Envia e-mail de boas-vindas para novos inscritos na newsletter.
+
+    Args:
+        destinatario: E-mail do inscrito
+        idioma: Idioma preferido (pt, en, es)
+
+    Returns:
+        bool: True se enviado com sucesso
+    """
+    # Textos por idioma
+    textos = {
+        "pt": {
+            "assunto": "Bem-vindo(a) a Newsletter - Vaucher e Alvares",
+            "titulo": "Obrigado por se inscrever!",
+            "p1": "Voce agora faz parte da nossa lista de contatos e recebera em primeira mao:",
+            "item1": "Artigos sobre direitos trabalhistas e previdenciarios",
+            "item2": "Alertas sobre golpes e fraudes",
+            "item3": "Atualizacoes de jurisprudencia relevante",
+            "item4": "Noticias e novidades do escritorio",
+            "p2": "Fique tranquilo, respeitamos sua privacidade e voce pode cancelar a inscricao a qualquer momento.",
+            "btn": "Visitar Nosso Site",
+            "contato": "Precisa de orientacao juridica? Entre em contato conosco."
+        },
+        "en": {
+            "assunto": "Welcome to the Newsletter - Vaucher e Alvares",
+            "titulo": "Thank you for subscribing!",
+            "p1": "You are now part of our mailing list and will receive first-hand:",
+            "item1": "Articles on labor and social security rights",
+            "item2": "Alerts about scams and fraud",
+            "item3": "Relevant case law updates",
+            "item4": "News and updates from our firm",
+            "p2": "Rest assured, we respect your privacy and you can unsubscribe at any time.",
+            "btn": "Visit Our Website",
+            "contato": "Need legal guidance? Contact us."
+        },
+        "es": {
+            "assunto": "Bienvenido(a) al Boletin - Vaucher e Alvares",
+            "titulo": "Gracias por suscribirte!",
+            "p1": "Ahora formas parte de nuestra lista de contactos y recibiras de primera mano:",
+            "item1": "Articulos sobre derechos laborales y previsionales",
+            "item2": "Alertas sobre estafas y fraudes",
+            "item3": "Actualizaciones de jurisprudencia relevante",
+            "item4": "Noticias y novedades del despacho",
+            "p2": "Estate tranquilo, respetamos tu privacidad y puedes cancelar la suscripcion en cualquier momento.",
+            "btn": "Visitar Nuestro Sitio",
+            "contato": "Necesitas orientacion juridica? Contactanos."
+        }
+    }
+
+    t = textos.get(idioma, textos["pt"])
+
+    corpo_html = f"""
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+        {get_email_header()}
+
+        <div style="padding: 40px 30px;">
+            <h2 style="color: #1a1a2e; margin: 0 0 20px 0; font-size: 24px; font-weight: 600;">
+                {t["titulo"]}
+            </h2>
+
+            <p style="color: #4a5568; font-size: 16px; line-height: 1.6; margin: 0 0 25px 0;">
+                {t["p1"]}
+            </p>
+
+            <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); padding: 25px; border-radius: 12px; margin: 25px 0;">
+                <ul style="color: #4a5568; font-size: 15px; line-height: 2; margin: 0; padding-left: 20px;">
+                    <li>{t["item1"]}</li>
+                    <li>{t["item2"]}</li>
+                    <li>{t["item3"]}</li>
+                    <li>{t["item4"]}</li>
+                </ul>
+            </div>
+
+            <p style="color: #6c757d; font-size: 14px; line-height: 1.6; margin: 25px 0;">
+                {t["p2"]}
+            </p>
+
+            <div style="text-align: center; margin: 35px 0;">
+                {get_button(t["btn"], f"{SITE_URL}/insights.html")}
+            </div>
+
+            <div style="background-color: #e8f4fd; padding: 15px 20px; border-radius: 8px; margin: 25px 0; border-left: 4px solid #2196F3;">
+                <p style="margin: 0; color: #1565c0; font-size: 14px;">
+                    {t["contato"]}
+                </p>
+            </div>
+        </div>
+
+        {get_email_footer()}
+    </div>
+    """
+
+    return await enviar_email_resend(destinatario, t["assunto"], corpo_html)
+
+
 async def enviar_email_parcela_vencendo(
     destinatario: str,
     nome: str,

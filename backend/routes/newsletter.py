@@ -12,6 +12,7 @@ import re
 from modules.config import logger
 from modules.database import get_db
 from modules.auth import verificar_admin
+from modules.email import enviar_email_newsletter_boas_vindas
 
 router = APIRouter(prefix="/api", tags=["Newsletter"])
 
@@ -80,6 +81,18 @@ async def inscrever_newsletter(dados: NewsletterInscricao, request: Request):
         cur.close()
 
         logger.info(f"Nova inscricao newsletter: {dados.email}")
+
+        # Enviar e-mail de boas-vindas (em background, nao bloqueia a resposta)
+        try:
+            import asyncio
+            asyncio.create_task(enviar_email_newsletter_boas_vindas(
+                dados.email.lower(),
+                dados.idioma or "pt"
+            ))
+            logger.info(f"E-mail de boas-vindas agendado para: {dados.email}")
+        except Exception as email_error:
+            logger.error(f"Erro ao agendar e-mail de boas-vindas: {email_error}")
+            # Nao falha a inscricao se o e-mail falhar
 
         return {
             "sucesso": True,
