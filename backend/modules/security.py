@@ -23,8 +23,14 @@ CLIENT_TOKEN_EXPIRATION_HOURS = 72  # Tokens de cliente expiram em 72 horas
 # Algoritmo JWT
 JWT_ALGORITHM = "HS256"
 
-# Extensões permitidas para upload de arquivos
-ALLOWED_FILE_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx'}
+# ============================================
+# CONFIGURACOES DE UPLOAD (LEGADO)
+# IMPORTANTE: Para novas implementacoes, usar modules/upload_policy.py
+# que contem politica completa alinhada com PJe CNJ
+# ============================================
+
+# Extensões permitidas para upload de arquivos (compatibilidade)
+ALLOWED_FILE_EXTENSIONS = {'.pdf', '.jpg', '.jpeg', '.png', '.doc', '.docx', '.xls', '.xlsx', '.mp3', '.mp4', '.ogg'}
 MAX_FILE_SIZE_MB = 10
 
 # Magic bytes para validação de tipo real de arquivo
@@ -38,6 +44,9 @@ MAGIC_BYTES = {
     '.docx': [(b'PK\x03\x04', 0)],  # ZIP (Office Open XML)
     '.xls': [(b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1', 0)],  # OLE compound
     '.xlsx': [(b'PK\x03\x04', 0)],  # ZIP (Office Open XML)
+    '.mp3': [(b'ID3', 0), (b'\xff\xfb', 0)],  # MP3
+    '.mp4': [(b'\x00\x00\x00', 0)],  # MP4 (ftyp)
+    '.ogg': [(b'OggS', 0)],  # OGG
 }
 
 # ============================================
