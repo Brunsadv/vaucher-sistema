@@ -786,7 +786,7 @@ def listar_usuarios() -> List[dict]:
 
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, email, nome, is_admin, papel, ativo, criado_em, termos_aceitos_em FROM usuarios ORDER BY criado_em DESC")
+        cur.execute("SELECT id, email, nome, is_admin, papel, ativo, criado_em, termos_aceitos_em FROM usuarios WHERE ativo = TRUE ORDER BY criado_em DESC")
         rows = cur.fetchall()
         cur.close()
         conn.close()
