@@ -15,7 +15,7 @@ from pydantic import BaseModel, EmailStr
 from psycopg2.extras import RealDictCursor
 
 from modules.config import logger, UPLOADS_DIR, RESEND_API_KEY
-from modules.auth import verificar_admin
+from modules.auth import verificar_token, verificar_papel, verificar_nao_estagiario
 from modules.security import criar_email_html, validar_arquivo, validar_mime_type
 from modules.email import enviar_email_resend
 from modules.database import (
@@ -83,7 +83,7 @@ class ProcessoInfoModel(BaseModel):
 @router.post("/clientes/{cadastro_id}/habilitar-acesso")
 async def admin_habilitar_acesso_cliente(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin habilita acesso ao portal para um cliente."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -147,7 +147,7 @@ async def admin_habilitar_acesso_cliente(
 @router.post("/clientes/{cadastro_id}/desabilitar-acesso")
 async def admin_desabilitar_acesso_cliente(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin desabilita acesso ao portal de um cliente."""
     conn = get_db()
@@ -168,7 +168,7 @@ async def admin_desabilitar_acesso_cliente(
 @router.get("/clientes/{cadastro_id}/acesso")
 async def admin_verificar_acesso_cliente(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Verifica se o cliente tem acesso ao portal."""
     auth = buscar_cliente_auth(cadastro_id)
@@ -186,7 +186,7 @@ async def admin_verificar_acesso_cliente(
 @router.post("/clientes")
 async def admin_criar_cliente(
     dados: ClienteManual,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin cria um novo cliente manualmente."""
     logger.info(f"Admin {usuario['email']} criando cliente: {dados.nome}")
@@ -282,7 +282,7 @@ async def admin_criar_cliente(
 @router.get("/clientes/{cadastro_id}/processo")
 async def admin_obter_processo(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin obtém informações do processo."""
     processo = buscar_processo_info(cadastro_id)
@@ -302,7 +302,7 @@ async def admin_obter_processo(
 async def admin_salvar_processo(
     cadastro_id: str,
     dados: ProcessoInfoModel,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin salva informações do processo."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -323,7 +323,7 @@ async def admin_salvar_processo(
 async def admin_enviar_documentos(
     cadastro_id: str,
     arquivos: List[UploadFile] = File(...),
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin envia documentos para o cliente."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -437,7 +437,7 @@ async def admin_upload_documento(
     cadastro_id: str,
     arquivo: UploadFile = File(...),
     descricao: str = Form(""),
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin envia documento para o cliente (endpoint alternativo)."""
     # Validar extensão e tamanho
@@ -533,7 +533,7 @@ async def admin_upload_documento(
 @router.get("/clientes/{cadastro_id}/documentos-enviados")
 async def admin_listar_documentos_enviados(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin lista documentos enviados para o cliente."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -547,7 +547,7 @@ async def admin_listar_documentos_enviados(
 @router.delete("/documentos/{doc_id}")
 async def admin_deletar_documento(
     doc_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_nao_estagiario)
 ):
     """Admin deleta um documento enviado."""
     # Buscar dados antes de deletar para auditoria
@@ -572,7 +572,7 @@ async def admin_deletar_documento(
 @router.get("/documentos/{doc_id}/download")
 async def admin_download_documento(
     doc_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin baixa um documento enviado."""
     doc = buscar_documento_admin(doc_id)
@@ -623,7 +623,7 @@ async def admin_download_documento(
 @router.get("/clientes/{cadastro_id}/documentos-extras")
 async def admin_listar_documentos_extras(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin lista documentos extras enviados pelo cliente."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -637,7 +637,7 @@ async def admin_listar_documentos_extras(
 @router.get("/documentos-extras/{doc_id}/download")
 async def admin_download_documento_extra(
     doc_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin baixa um documento extra enviado pelo cliente."""
     doc = buscar_documento_extra(doc_id)
@@ -684,7 +684,7 @@ async def admin_download_documento_extra(
 @router.delete("/documentos-extras/{doc_id}")
 async def admin_deletar_documento_extra(
     doc_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_nao_estagiario)
 ):
     """Admin deleta um documento extra."""
     # Buscar dados antes de deletar para auditoria

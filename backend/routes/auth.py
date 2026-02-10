@@ -72,13 +72,15 @@ def login(request: Request, data: LoginRequest):
                 if conn:
                     conn.close()
 
-        token = gerar_token(usuario["id"], usuario["email"], usuario["is_admin"])
+        papel = usuario.get("papel", "admin")
+        token = gerar_token(usuario["id"], usuario["email"], usuario["is_admin"], papel)
         termos_aceitos = verificar_termos_aceitos(usuario["id"])
         return LoginResponse(
             success=True,
             token=token,
             nome=usuario['nome'],
             is_admin=usuario['is_admin'],
+            papel=papel,
             termos_aceitos=termos_aceitos
         )
 
@@ -145,7 +147,8 @@ async def google_callback(code: str = None, state: str = None, error: str = None
             return RedirectResponse(f"{frontend_url}?{params}")
 
     # Gerar token JWT
-    token = gerar_token(usuario["id"], usuario["email"], usuario["is_admin"])
+    papel = usuario.get("papel", "admin")
+    token = gerar_token(usuario["id"], usuario["email"], usuario["is_admin"], papel)
     termos_aceitos = verificar_termos_aceitos(usuario["id"])
 
     # Redirecionar para frontend com token
@@ -154,6 +157,7 @@ async def google_callback(code: str = None, state: str = None, error: str = None
         "nome": usuario["nome"],
         "email": usuario["email"],
         "is_admin": str(usuario["is_admin"]).lower(),
+        "papel": papel,
         "termos_aceitos": str(termos_aceitos).lower(),
         "google_login": "true"
     })
@@ -161,7 +165,7 @@ async def google_callback(code: str = None, state: str = None, error: str = None
 
 
 @router.post("/aceitar-termos")
-def aceitar_termos(usuario: dict = Depends(verificar_admin)):
+def aceitar_termos(usuario: dict = Depends(verificar_token)):
     """Registra o aceite dos termos de uso pelo usuário."""
     if registrar_aceite_termos(usuario["id"]):
         return {"success": True, "message": "Termos aceitos com sucesso"}
@@ -169,7 +173,7 @@ def aceitar_termos(usuario: dict = Depends(verificar_admin)):
 
 
 @router.get("/verificar-termos")
-def verificar_termos(usuario: dict = Depends(verificar_admin)):
+def verificar_termos(usuario: dict = Depends(verificar_token)):
     """Verifica se o usuário já aceitou os termos de uso."""
     aceitos = verificar_termos_aceitos(usuario["id"])
     return {"termos_aceitos": aceitos}
@@ -192,8 +196,8 @@ def criar_usuario_api(dados: NovoUsuario, usuario: dict = Depends(verificar_admi
     if existente:
         raise HTTPException(status_code=400, detail="E-mail já cadastrado")
 
-    senha_hash = hash_senha(dados.senha)
-    novo_id = criar_usuario(dados.nome, dados.email, senha_hash, dados.is_admin)
+    # criar_usuario faz o hash internamente
+    novo_id = criar_usuario(dados.email, dados.senha, dados.nome, dados.is_admin, dados.papel)
 
     if novo_id:
         return {"success": True, "id": novo_id}
@@ -203,7 +207,7 @@ def criar_usuario_api(dados: NovoUsuario, usuario: dict = Depends(verificar_admi
 @router.put("/usuarios/{user_id}")
 def atualizar_usuario_api(user_id: int, dados: AtualizarUsuario, usuario: dict = Depends(verificar_admin)):
     """Atualiza dados de um usuário."""
-    if atualizar_usuario(user_id, dados.nome, dados.email, dados.is_admin, dados.ativo):
+    if atualizar_usuario(user_id, nome=dados.nome, senha=dados.senha, is_admin=dados.is_admin, ativo=dados.ativo, papel=dados.papel):
         return {"success": True}
     raise HTTPException(status_code=404, detail="Usuário não encontrado")
 

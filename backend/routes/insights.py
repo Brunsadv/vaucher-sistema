@@ -12,7 +12,7 @@ import uuid
 import json
 
 from modules.config import logger, UPLOADS_DIR
-from modules.auth import verificar_admin
+from modules.auth import verificar_token, verificar_papel
 from modules.security import validar_arquivo, validar_mime_type, sanitizar_nome_arquivo
 
 router = APIRouter(prefix="/api", tags=["Insights"])
@@ -62,7 +62,7 @@ async def listar_insights_admin(
     status: Optional[str] = None,
     limite: int = 50,
     offset: int = 0,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_token)
 ):
     """Lista todos os insights para o admin."""
     conn = get_db()
@@ -121,7 +121,7 @@ async def listar_insights_admin(
 
 
 @router.get("/admin/insights/estatisticas")
-async def estatisticas_insights(admin=Depends(verificar_admin)):
+async def estatisticas_insights(admin=Depends(verificar_token)):
     """Retorna estatísticas dos insights. IMPORTANTE: Deve vir ANTES de /admin/insights/{insight_id}"""
     conn = get_db()
     if not conn:
@@ -164,7 +164,7 @@ async def estatisticas_insights(admin=Depends(verificar_admin)):
 
 
 @router.post("/admin/insights/corrigir-datas")
-async def corrigir_datas_publicacao(admin=Depends(verificar_admin)):
+async def corrigir_datas_publicacao(admin=Depends(verificar_papel("admin", "advogado", "secretaria"))):
     """Corrige insights publicados que não têm data_publicacao."""
     conn = get_db()
     if not conn:
@@ -192,7 +192,7 @@ async def corrigir_datas_publicacao(admin=Depends(verificar_admin)):
 @router.post("/admin/insights")
 async def criar_insight(
     request: Request,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_papel("admin", "advogado", "secretaria"))
 ):
     """Cria um novo insight. Aceita JSON ou FormData."""
 
@@ -388,7 +388,7 @@ async def criar_insight(
 
 
 @router.get("/admin/insights/{insight_id}")
-async def obter_insight_admin(insight_id: str, admin=Depends(verificar_admin)):
+async def obter_insight_admin(insight_id: str, admin=Depends(verificar_token)):
     """Obtém um insight específico para edição."""
     conn = get_db()
     if not conn:
@@ -419,7 +419,7 @@ async def obter_insight_admin(insight_id: str, admin=Depends(verificar_admin)):
 async def upload_imagem_insight(
     insight_id: str,
     imagem: UploadFile = File(...),
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_papel("admin", "advogado", "secretaria"))
 ):
     """Faz upload de imagem para um insight existente."""
     conn = get_db()
@@ -494,7 +494,7 @@ async def upload_imagem_insight(
 async def atualizar_insight(
     insight_id: str,
     request: Request,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_papel("admin", "advogado", "secretaria"))
 ):
     """Atualiza um insight existente. Aceita JSON ou FormData."""
 
@@ -669,7 +669,7 @@ async def atualizar_insight(
 
 
 @router.delete("/admin/insights/{insight_id}")
-async def deletar_insight(insight_id: str, admin=Depends(verificar_admin)):
+async def deletar_insight(insight_id: str, admin=Depends(verificar_papel("admin", "advogado", "secretaria"))):
     """Deleta um insight."""
     conn = get_db()
     if not conn:
@@ -721,7 +721,7 @@ async def deletar_insight(insight_id: str, admin=Depends(verificar_admin)):
 
 
 @router.post("/admin/insights/{insight_id}/publicar")
-async def publicar_insight(insight_id: str, admin=Depends(verificar_admin)):
+async def publicar_insight(insight_id: str, admin=Depends(verificar_papel("admin", "advogado", "secretaria"))):
     """Publica um insight (muda status para publicado)."""
     conn = get_db()
     if not conn:
@@ -754,7 +754,7 @@ async def publicar_insight(insight_id: str, admin=Depends(verificar_admin)):
 
 
 @router.post("/admin/insights/{insight_id}/destaque")
-async def toggle_destaque_insight(insight_id: str, admin=Depends(verificar_admin)):
+async def toggle_destaque_insight(insight_id: str, admin=Depends(verificar_papel("admin", "advogado", "secretaria"))):
     """Ativa/desativa destaque de um insight."""
     conn = get_db()
     if not conn:
@@ -793,7 +793,7 @@ async def toggle_destaque_insight(insight_id: str, admin=Depends(verificar_admin
 
 
 @router.post("/admin/insights/{insight_id}/despublicar")
-async def despublicar_insight(insight_id: str, admin=Depends(verificar_admin)):
+async def despublicar_insight(insight_id: str, admin=Depends(verificar_papel("admin", "advogado", "secretaria"))):
     """Despublica um insight (volta para rascunho)."""
     conn = get_db()
     if not conn:

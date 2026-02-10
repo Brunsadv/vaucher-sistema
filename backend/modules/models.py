@@ -49,6 +49,7 @@ class LoginResponse(BaseModel):
     token: Optional[str] = None
     nome: Optional[str] = None
     is_admin: Optional[bool] = None
+    papel: Optional[str] = None
     message: Optional[str] = None
     termos_aceitos: Optional[bool] = None
 
@@ -58,6 +59,7 @@ class NovoUsuario(BaseModel):
     senha: str
     nome: str
     is_admin: bool = False
+    papel: str = "admin"
 
 
 class AtualizarUsuario(BaseModel):
@@ -65,6 +67,7 @@ class AtualizarUsuario(BaseModel):
     senha: Optional[str] = None
     is_admin: Optional[bool] = None
     ativo: Optional[bool] = None
+    papel: Optional[str] = None
 
 
 class AlterarSenha(BaseModel):

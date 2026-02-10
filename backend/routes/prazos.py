@@ -19,7 +19,7 @@ from modules.prazos import (
     obter_resumo_prazos,
     calcular_data_prazo,
 )
-from modules.auth import verificar_admin
+from modules.auth import verificar_token, verificar_papel
 
 router = APIRouter(prefix="/api/admin", tags=["Prazos Processuais"])
 
@@ -31,7 +31,7 @@ router = APIRouter(prefix="/api/admin", tags=["Prazos Processuais"])
 @router.get("/prazos")
 async def listar_prazos_admin(
     status: str = None,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_token)
 ):
     """Lista todos os prazos, opcionalmente filtrados por status."""
     prazos = listar_todos_prazos(status)
@@ -41,7 +41,7 @@ async def listar_prazos_admin(
 @router.get("/prazos/pendentes")
 async def listar_prazos_pendentes_admin(
     dias: int = 30,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_token)
 ):
     """Lista prazos pendentes nos próximos X dias."""
     prazos = listar_prazos_pendentes(dias_limite=dias)
@@ -49,7 +49,7 @@ async def listar_prazos_pendentes_admin(
 
 
 @router.get("/prazos/resumo")
-async def obter_resumo_prazos_admin(admin=Depends(verificar_admin)):
+async def obter_resumo_prazos_admin(admin=Depends(verificar_token)):
     """Retorna resumo estatístico dos prazos."""
     resumo = obter_resumo_prazos()
     return resumo
@@ -58,7 +58,7 @@ async def obter_resumo_prazos_admin(admin=Depends(verificar_admin)):
 @router.get("/processos/{processo_id}/prazos")
 async def listar_prazos_processo_admin(
     processo_id: int,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_token)
 ):
     """Lista prazos de um processo específico."""
     prazos = listar_prazos_processo(processo_id)
@@ -69,7 +69,7 @@ async def listar_prazos_processo_admin(
 async def criar_prazo_admin(
     processo_id: int,
     dados: dict,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_papel("admin", "advogado"))
 ):
     """Cria um novo prazo manualmente."""
     data_inicio = dados.get("data_inicio")
@@ -113,7 +113,7 @@ async def criar_prazo_admin(
 async def atualizar_prazo_admin(
     prazo_id: int,
     dados: dict,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_papel("admin", "advogado"))
 ):
     """Atualiza um prazo existente."""
     sucesso = atualizar_prazo(prazo_id, dados)
@@ -126,7 +126,7 @@ async def atualizar_prazo_admin(
 @router.post("/prazos/{prazo_id}/concluir")
 async def concluir_prazo_admin(
     prazo_id: int,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_papel("admin", "advogado"))
 ):
     """Marca um prazo como concluído."""
     usuario = admin.get("nome", "Admin")
@@ -142,7 +142,7 @@ async def concluir_prazo_admin(
 async def cancelar_prazo_admin(
     prazo_id: int,
     dados: dict = None,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_papel("admin", "advogado"))
 ):
     """Cancela um prazo."""
     motivo = dados.get("motivo") if dados else None
@@ -157,7 +157,7 @@ async def cancelar_prazo_admin(
 @router.delete("/prazos/{prazo_id}")
 async def deletar_prazo_admin(
     prazo_id: int,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_papel("admin", "advogado"))
 ):
     """Deleta um prazo."""
     sucesso = deletar_prazo(prazo_id)
@@ -171,7 +171,7 @@ async def deletar_prazo_admin(
 @router.post("/processos/{processo_id}/gerar-prazos")
 async def gerar_prazos_processo_admin(
     processo_id: int,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_papel("admin", "advogado"))
 ):
     """Processa andamentos de um processo e gera prazos automáticos."""
     resultado = processar_andamentos_para_prazos(processo_id)
@@ -185,7 +185,7 @@ async def gerar_prazos_processo_admin(
 @router.get("/clientes/{cadastro_id}/prazos")
 async def listar_prazos_cliente_admin(
     cadastro_id: str,
-    admin=Depends(verificar_admin)
+    admin=Depends(verificar_token)
 ):
     """Lista prazos pendentes de um cliente específico."""
     prazos = listar_prazos_pendentes(cadastro_id=cadastro_id, dias_limite=365)

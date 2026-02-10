@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from typing import Optional
 
 from modules.config import logger
-from modules.auth import verificar_admin
+from modules.auth import verificar_token, verificar_papel, verificar_nao_estagiario
 from modules.email import enviar_email_resend
 from modules.database import (
     get_db,
@@ -73,7 +73,7 @@ class MensagemEnvio(BaseModel):
 @router.get("/clientes/{cadastro_id}/processos")
 async def admin_listar_processos(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin lista todos os processos de um cliente."""
     processos = listar_processos(cadastro_id)
@@ -84,7 +84,7 @@ async def admin_listar_processos(
 async def admin_criar_processo(
     cadastro_id: str,
     dados: dict,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Admin cria novo processo para o cliente."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -101,7 +101,7 @@ async def admin_criar_processo(
 @router.get("/processos/{processo_id}")
 async def admin_obter_processo_por_id(
     processo_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin obtém um processo específico."""
     processo = buscar_processo(processo_id)
@@ -114,7 +114,7 @@ async def admin_obter_processo_por_id(
 async def admin_atualizar_processo(
     processo_id: int,
     dados: dict,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Admin atualiza um processo."""
     if atualizar_processo(processo_id, dados):
@@ -126,7 +126,7 @@ async def admin_atualizar_processo(
 @router.delete("/processos/{processo_id}")
 async def admin_deletar_processo(
     processo_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Admin deleta um processo."""
     # Buscar dados antes de deletar para auditoria
@@ -155,7 +155,7 @@ async def admin_deletar_processo(
 @router.get("/processos/{processo_id}/andamentos")
 async def admin_listar_andamentos_processo(
     processo_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin lista andamentos de um processo."""
     andamentos = listar_andamentos_processo(processo_id, apenas_visiveis=False)
@@ -166,7 +166,7 @@ async def admin_listar_andamentos_processo(
 async def admin_criar_andamento_processo(
     processo_id: int,
     dados: dict,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Admin cria andamento para um processo."""
     andamento_id = criar_andamento_processo(
@@ -184,7 +184,7 @@ async def admin_criar_andamento_processo(
 @router.delete("/processo-andamentos/{andamento_id}")
 async def admin_deletar_andamento_processo(
     andamento_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Admin deleta um andamento de processo."""
     if deletar_andamento_processo(andamento_id):
@@ -200,7 +200,7 @@ async def admin_deletar_andamento_processo(
 @router.get("/clientes/{cadastro_id}/andamentos")
 async def admin_listar_andamentos(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin lista todos os andamentos."""
     andamentos = listar_andamentos(cadastro_id, apenas_visiveis=False)
@@ -211,7 +211,7 @@ async def admin_listar_andamentos(
 async def admin_criar_andamento(
     cadastro_id: str,
     dados: AndamentoModel,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Admin cria novo andamento."""
     if criar_andamento(cadastro_id, dados.data, dados.descricao, dados.visivel_cliente):
@@ -223,7 +223,7 @@ async def admin_criar_andamento(
 @router.delete("/andamentos/{andamento_id}")
 async def admin_deletar_andamento(
     andamento_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Admin deleta um andamento."""
     if deletar_andamento(andamento_id):
@@ -239,7 +239,7 @@ async def admin_deletar_andamento(
 @router.get("/clientes/{cadastro_id}/contratos")
 async def admin_listar_contratos(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin lista contratos de um cliente."""
     contratos = listar_contratos(cadastro_id)
@@ -250,7 +250,7 @@ async def admin_listar_contratos(
 async def admin_criar_contrato(
     cadastro_id: str,
     dados: dict,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Admin cria novo contrato de honorarios."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -267,7 +267,7 @@ async def admin_criar_contrato(
 @router.get("/contratos/{contrato_id}")
 async def admin_obter_contrato(
     contrato_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin obtém um contrato específico."""
     contrato = buscar_contrato(contrato_id)
@@ -280,7 +280,7 @@ async def admin_obter_contrato(
 async def admin_atualizar_contrato(
     contrato_id: int,
     dados: dict,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Admin atualiza um contrato."""
     if atualizar_contrato(contrato_id, dados):
@@ -292,7 +292,7 @@ async def admin_atualizar_contrato(
 @router.delete("/contratos/{contrato_id}")
 async def admin_deletar_contrato(
     contrato_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Admin deleta um contrato."""
     # Buscar dados antes de deletar para auditoria
@@ -322,7 +322,7 @@ async def admin_deletar_contrato(
 async def admin_atualizar_parcela(
     parcela_id: int,
     dados: dict,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "secretaria"))
 ):
     """Admin atualiza uma parcela."""
     if atualizar_parcela(parcela_id, dados):
@@ -334,7 +334,7 @@ async def admin_atualizar_parcela(
 @router.post("/parcelas/{parcela_id}/marcar-pago")
 async def admin_marcar_parcela_paga(
     parcela_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "secretaria"))
 ):
     """Admin marca uma parcela como paga."""
     if marcar_parcela_paga(parcela_id):
@@ -349,7 +349,7 @@ async def admin_marcar_parcela_paga(
 
 @router.get("/comprovantes/pendentes")
 async def admin_listar_comprovantes_pendentes(
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "secretaria"))
 ):
     """Admin lista comprovantes pendentes de verificação."""
     comprovantes = listar_comprovantes_pendentes()
@@ -359,7 +359,7 @@ async def admin_listar_comprovantes_pendentes(
 @router.post("/comprovantes/{comprovante_id}/aprovar")
 async def admin_aprovar_comprovante(
     comprovante_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "secretaria"))
 ):
     """Admin aprova um comprovante e marca parcela como paga."""
     if aprovar_comprovante(comprovante_id, usuario["email"]):
@@ -372,7 +372,7 @@ async def admin_aprovar_comprovante(
 async def admin_rejeitar_comprovante(
     comprovante_id: int,
     dados: dict,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "secretaria"))
 ):
     """Admin rejeita um comprovante."""
     if rejeitar_comprovante(comprovante_id, usuario["email"], dados.get("motivo")):
@@ -388,7 +388,7 @@ async def admin_rejeitar_comprovante(
 @router.get("/clientes/{cadastro_id}/mensagens")
 async def admin_listar_mensagens(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin lista mensagens de um cliente."""
     marcar_mensagens_lidas(cadastro_id, "escritorio")
@@ -400,7 +400,7 @@ async def admin_listar_mensagens(
 async def admin_enviar_mensagem(
     cadastro_id: str,
     dados: MensagemEnvio,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado", "secretaria"))
 ):
     """Admin envia mensagem para o cliente."""
     if not dados.texto.strip():
@@ -456,7 +456,7 @@ async def admin_enviar_mensagem(
 
 
 @router.get("/mensagens/nao-lidas")
-async def admin_mensagens_nao_lidas(usuario: dict = Depends(verificar_admin)):
+async def admin_mensagens_nao_lidas(usuario: dict = Depends(verificar_token)):
     """Conta total de mensagens não lidas de clientes."""
     count = contar_mensagens_nao_lidas(remetente="cliente")
     return {"nao_lidas": count}
@@ -465,7 +465,7 @@ async def admin_mensagens_nao_lidas(usuario: dict = Depends(verificar_admin)):
 @router.get("/clientes/{cadastro_id}/mensagens/nao-lidas")
 async def admin_mensagens_nao_lidas_cliente(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Conta mensagens não lidas de um cliente específico."""
     count = contar_mensagens_nao_lidas(cadastro_id, "cliente")

@@ -33,7 +33,8 @@ def verificar_token(authorization: str = Header(None)) -> dict:
         "id": usuario_db["id"],
         "email": usuario_db["email"],
         "nome": usuario_db["nome"],
-        "is_admin": usuario_db["is_admin"]
+        "is_admin": usuario_db["is_admin"],
+        "papel": usuario_db.get("papel", "admin")
     }
 
 
@@ -43,8 +44,33 @@ def verificar_admin(authorization: str = Header(None)) -> dict:
     Usado como dependência do FastAPI: Depends(verificar_admin)
     """
     usuario = verificar_token(authorization)
-    if not usuario.get("is_admin"):
+    if usuario.get("papel") != "admin" and not usuario.get("is_admin"):
         raise HTTPException(status_code=403, detail="Acesso negado. Apenas administradores.")
+    return usuario
+
+
+def verificar_papel(*papeis_permitidos):
+    """
+    Factory de dependência que verifica se o papel do usuário está na lista permitida.
+    Uso: Depends(verificar_papel("admin", "advogado"))
+    """
+    def dependency(authorization: str = Header(None)) -> dict:
+        usuario = verificar_token(authorization)
+        papel = usuario.get("papel", "admin")
+        if papel not in papeis_permitidos:
+            raise HTTPException(status_code=403, detail="Sem permissão para esta ação")
+        return usuario
+    return dependency
+
+
+def verificar_nao_estagiario(authorization: str = Header(None)) -> dict:
+    """
+    Bloqueia estagiários em rotas de exclusão (DELETE).
+    Todos os outros papéis podem deletar.
+    """
+    usuario = verificar_token(authorization)
+    if usuario.get("papel") == "estagiario":
+        raise HTTPException(status_code=403, detail="Estagiários não podem deletar registros")
     return usuario
 
 

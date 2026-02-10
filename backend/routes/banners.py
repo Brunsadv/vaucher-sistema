@@ -17,7 +17,7 @@ from modules.database import (
     registrar_auditoria,
 )
 from modules.security import decodificar_token_cliente
-from modules.auth import verificar_admin
+from modules.auth import verificar_token, verificar_papel
 
 router = APIRouter(tags=["Banners e Notícias"])
 
@@ -43,7 +43,7 @@ class BannerModel(BaseModel):
 # ============================================
 
 @router.get("/api/admin/banners")
-async def listar_banners_admin(admin=Depends(verificar_admin)):
+async def listar_banners_admin(admin=Depends(verificar_token)):
     """Lista todos os banners (admin)."""
     try:
         banners = listar_banners(apenas_ativos=False)
@@ -54,7 +54,7 @@ async def listar_banners_admin(admin=Depends(verificar_admin)):
 
 
 @router.get("/api/admin/banners/{banner_id}")
-async def obter_banner_admin(banner_id: int, admin=Depends(verificar_admin)):
+async def obter_banner_admin(banner_id: int, admin=Depends(verificar_token)):
     """Obtém um banner específico (admin)."""
     banner = buscar_banner(banner_id)
     if not banner:
@@ -63,7 +63,7 @@ async def obter_banner_admin(banner_id: int, admin=Depends(verificar_admin)):
 
 
 @router.post("/api/admin/banners")
-async def criar_banner_endpoint(banner: BannerModel, admin=Depends(verificar_admin)):
+async def criar_banner_endpoint(banner: BannerModel, admin=Depends(verificar_papel("admin", "advogado", "secretaria"))):
     """Cria um novo banner."""
     try:
         dados = banner.dict()
@@ -83,7 +83,7 @@ async def criar_banner_endpoint(banner: BannerModel, admin=Depends(verificar_adm
 
 
 @router.put("/api/admin/banners/{banner_id}")
-async def atualizar_banner_endpoint(banner_id: int, banner: BannerModel, admin=Depends(verificar_admin)):
+async def atualizar_banner_endpoint(banner_id: int, banner: BannerModel, admin=Depends(verificar_papel("admin", "advogado", "secretaria"))):
     """Atualiza um banner existente."""
     try:
         banner_existente = buscar_banner(banner_id)
@@ -106,7 +106,7 @@ async def atualizar_banner_endpoint(banner_id: int, banner: BannerModel, admin=D
 
 
 @router.delete("/api/admin/banners/{banner_id}")
-async def deletar_banner_endpoint(banner_id: int, admin=Depends(verificar_admin)):
+async def deletar_banner_endpoint(banner_id: int, admin=Depends(verificar_papel("admin", "advogado", "secretaria"))):
     """Deleta um banner."""
     try:
         banner_existente = buscar_banner(banner_id)

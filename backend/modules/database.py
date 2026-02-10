@@ -130,6 +130,20 @@ def init_db():
             END $$;
         """)
 
+        # Adicionar coluna papel para RBAC (migração)
+        # Valores: admin, advogado, secretaria, estagiario
+        cur.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'usuarios' AND column_name = 'papel'
+                ) THEN
+                    ALTER TABLE usuarios ADD COLUMN papel VARCHAR(20) DEFAULT 'admin';
+                END IF;
+            END $$;
+        """)
+
         # Tabela financeiro - estrutura completa
         cur.execute("""
             CREATE TABLE IF NOT EXISTS financeiro (
@@ -772,7 +786,7 @@ def listar_usuarios() -> List[dict]:
 
     try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
-        cur.execute("SELECT id, email, nome, is_admin, ativo, criado_em, termos_aceitos_em FROM usuarios ORDER BY criado_em DESC")
+        cur.execute("SELECT id, email, nome, is_admin, papel, ativo, criado_em, termos_aceitos_em FROM usuarios ORDER BY criado_em DESC")
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -821,7 +835,7 @@ def registrar_aceite_termos(user_id: int) -> bool:
         return False
 
 
-def criar_usuario(email: str, senha: str, nome: str, is_admin: bool = False) -> bool:
+def criar_usuario(email: str, senha: str, nome: str, is_admin: bool = False, papel: str = "admin") -> bool:
     """Cria um novo usuário."""
     conn = get_db()
     if not conn:
@@ -831,9 +845,9 @@ def criar_usuario(email: str, senha: str, nome: str, is_admin: bool = False) -> 
         cur = conn.cursor()
         senha_hash_user = hash_senha(senha)
         cur.execute("""
-            INSERT INTO usuarios (email, senha_hash, nome, is_admin)
-            VALUES (%s, %s, %s, %s)
-        """, (email, senha_hash_user, nome, is_admin))
+            INSERT INTO usuarios (email, senha_hash, nome, is_admin, papel)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (email, senha_hash_user, nome, is_admin, papel))
         conn.commit()
         cur.close()
         conn.close()
@@ -843,7 +857,7 @@ def criar_usuario(email: str, senha: str, nome: str, is_admin: bool = False) -> 
         return False
 
 
-def atualizar_usuario(user_id: int, nome: str = None, senha: str = None, is_admin: bool = None, ativo: bool = None) -> bool:
+def atualizar_usuario(user_id: int, nome: str = None, senha: str = None, is_admin: bool = None, ativo: bool = None, papel: str = None) -> bool:
     """Atualiza um usuário."""
     conn = get_db()
     if not conn:
@@ -867,6 +881,9 @@ def atualizar_usuario(user_id: int, nome: str = None, senha: str = None, is_admi
         if ativo is not None:
             updates.append("ativo = %s")
             values.append(ativo)
+        if papel is not None:
+            updates.append("papel = %s")
+            values.append(papel)
 
         if updates:
             values.append(user_id)

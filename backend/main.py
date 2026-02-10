@@ -163,7 +163,7 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # ============================================
 
 # Importar funções de autenticação do módulo centralizado
-from modules.auth import verificar_token, verificar_admin, verificar_token_cliente
+from modules.auth import verificar_token, verificar_admin, verificar_token_cliente, verificar_papel, verificar_nao_estagiario
 
 # ============================================
 # ROTAS MODULARES (Refatoração 23/01/2026)
@@ -450,7 +450,7 @@ def obter_cadastro(cadastro_id: str):
     raise HTTPException(status_code=404, detail="Cadastro não encontrado")
 
 @app.delete("/api/cadastros/{cadastro_id}")
-def deletar_cadastro(cadastro_id: str, usuario: dict = Depends(verificar_admin)):
+def deletar_cadastro(cadastro_id: str, usuario: dict = Depends(verificar_nao_estagiario)):
     """Deleta um cadastro permanentemente (apenas admin)."""
     logger.info(f"Deletando cadastro: {cadastro_id} por {usuario['email']}")
     
@@ -1284,7 +1284,7 @@ class LancamentoItem(BaseModel):
 
 
 @app.post("/api/cadastros/{cadastro_id}/financeiro/depositos")
-def adicionar_deposito(cadastro_id: str, item: LancamentoItem, usuario: dict = Depends(verificar_admin)):
+def adicionar_deposito(cadastro_id: str, item: LancamentoItem, usuario: dict = Depends(verificar_papel("admin", "secretaria"))):
     """Adiciona um depósito aos dados financeiros."""
     financeiro = buscar_financeiro(cadastro_id)
     if not financeiro:
@@ -1314,7 +1314,7 @@ def adicionar_deposito(cadastro_id: str, item: LancamentoItem, usuario: dict = D
 
 
 @app.delete("/api/cadastros/{cadastro_id}/financeiro/depositos/{idx}")
-def remover_deposito(cadastro_id: str, idx: int, usuario: dict = Depends(verificar_admin)):
+def remover_deposito(cadastro_id: str, idx: int, usuario: dict = Depends(verificar_papel("admin", "secretaria"))):
     """Remove um depósito dos dados financeiros."""
     financeiro = buscar_financeiro(cadastro_id)
     if not financeiro:
@@ -1342,7 +1342,7 @@ def remover_deposito(cadastro_id: str, idx: int, usuario: dict = Depends(verific
 
 
 @app.post("/api/cadastros/{cadastro_id}/financeiro/sucumbencias")
-def adicionar_sucumbencia(cadastro_id: str, item: LancamentoItem, usuario: dict = Depends(verificar_admin)):
+def adicionar_sucumbencia(cadastro_id: str, item: LancamentoItem, usuario: dict = Depends(verificar_papel("admin", "secretaria"))):
     """Adiciona uma sucumbência aos dados financeiros."""
     financeiro = buscar_financeiro(cadastro_id)
     if not financeiro:
@@ -1371,7 +1371,7 @@ def adicionar_sucumbencia(cadastro_id: str, item: LancamentoItem, usuario: dict 
 
 
 @app.delete("/api/cadastros/{cadastro_id}/financeiro/sucumbencias/{idx}")
-def remover_sucumbencia(cadastro_id: str, idx: int, usuario: dict = Depends(verificar_admin)):
+def remover_sucumbencia(cadastro_id: str, idx: int, usuario: dict = Depends(verificar_papel("admin", "secretaria"))):
     """Remove uma sucumbência dos dados financeiros."""
     financeiro = buscar_financeiro(cadastro_id)
     if not financeiro:
@@ -1399,7 +1399,7 @@ def remover_sucumbencia(cadastro_id: str, idx: int, usuario: dict = Depends(veri
 
 
 @app.post("/api/cadastros/{cadastro_id}/financeiro/retencoes")
-def adicionar_retencao(cadastro_id: str, item: LancamentoItem, usuario: dict = Depends(verificar_admin)):
+def adicionar_retencao(cadastro_id: str, item: LancamentoItem, usuario: dict = Depends(verificar_papel("admin", "secretaria"))):
     """Adiciona uma retenção aos dados financeiros."""
     financeiro = buscar_financeiro(cadastro_id)
     if not financeiro:
@@ -1428,7 +1428,7 @@ def adicionar_retencao(cadastro_id: str, item: LancamentoItem, usuario: dict = D
 
 
 @app.delete("/api/cadastros/{cadastro_id}/financeiro/retencoes/{idx}")
-def remover_retencao(cadastro_id: str, idx: int, usuario: dict = Depends(verificar_admin)):
+def remover_retencao(cadastro_id: str, idx: int, usuario: dict = Depends(verificar_papel("admin", "secretaria"))):
     """Remove uma retenção dos dados financeiros."""
     financeiro = buscar_financeiro(cadastro_id)
     if not financeiro:
@@ -1908,7 +1908,7 @@ async def portal_cliente_download_documento(
 async def admin_criar_clientes_lote(
     arquivo: UploadFile = File(...),
     habilitar_portal: bool = Form(default=False),
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado", "secretaria"))
 ):
     """
     Admin cria múltiplos clientes a partir de arquivo TXT.
@@ -2120,7 +2120,7 @@ async def admin_criar_clientes_lote(
 @app.get("/api/admin/comprovantes/{comprovante_id}/download")
 async def admin_download_comprovante(
     comprovante_id: int,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Admin baixa um comprovante."""
     conn = get_db()
@@ -2159,7 +2159,7 @@ async def admin_download_comprovante(
 async def solicitar_atualizacao_cadastral(
     cadastro_id: str,
     dados: SolicitacaoAtualizacao,
-    admin = Depends(verificar_admin)
+    admin = Depends(verificar_token)
 ):
     """Admin solicita que cliente atualize seus dados cadastrais."""
     conn = get_db()
@@ -2230,7 +2230,7 @@ async def solicitar_atualizacao_cadastral(
 
 
 @app.get("/api/admin/atualizacoes-pendentes")
-async def listar_atualizacoes_pendentes(admin = Depends(verificar_admin)):
+async def listar_atualizacoes_pendentes(admin = Depends(verificar_token)):
     """Lista todas as atualizações cadastrais pendentes de análise do admin."""
     conn = get_db()
     if not conn:
@@ -2271,7 +2271,7 @@ async def listar_atualizacoes_pendentes(admin = Depends(verificar_admin)):
 
 
 @app.get("/api/admin/clientes/{cadastro_id}/atualizacoes")
-async def listar_atualizacoes_cliente(cadastro_id: str, admin = Depends(verificar_admin)):
+async def listar_atualizacoes_cliente(cadastro_id: str, admin = Depends(verificar_token)):
     """Lista histórico de atualizações cadastrais de um cliente específico."""
     conn = get_db()
     if not conn:
@@ -2307,7 +2307,7 @@ async def listar_atualizacoes_cliente(cadastro_id: str, admin = Depends(verifica
 
 
 @app.get("/api/admin/atualizacoes/{atualizacao_id}")
-async def buscar_atualizacao(atualizacao_id: int, admin = Depends(verificar_admin)):
+async def buscar_atualizacao(atualizacao_id: int, admin = Depends(verificar_token)):
     """Busca detalhes de uma atualização específica."""
     conn = get_db()
     if not conn:
@@ -2347,7 +2347,7 @@ async def buscar_atualizacao(atualizacao_id: int, admin = Depends(verificar_admi
 
 
 @app.post("/api/admin/atualizacoes/{atualizacao_id}/aprovar")
-async def aprovar_atualizacao(atualizacao_id: int, admin = Depends(verificar_admin)):
+async def aprovar_atualizacao(atualizacao_id: int, admin = Depends(verificar_papel("admin", "advogado", "secretaria"))):
     """Aprova a atualização e aplica os novos dados ao cadastro do cliente."""
     conn = get_db()
     if not conn:
@@ -2421,9 +2421,9 @@ async def aprovar_atualizacao(atualizacao_id: int, admin = Depends(verificar_adm
 
 @app.post("/api/admin/atualizacoes/{atualizacao_id}/rejeitar")
 async def rejeitar_atualizacao(
-    atualizacao_id: int, 
+    atualizacao_id: int,
     dados: RejeicaoAtualizacao,
-    admin = Depends(verificar_admin)
+    admin = Depends(verificar_papel("admin", "advogado", "secretaria"))
 ):
     """Rejeita a atualização com um motivo."""
     conn = get_db()
@@ -2703,7 +2703,7 @@ async def listar_minhas_atualizacoes(cliente = Depends(verificar_token_cliente))
 
 @app.get("/api/admin/backup/listar-documentos")
 async def admin_listar_todos_documentos(
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Lista TODOS os documentos do sistema organizados por cliente.
@@ -2983,7 +2983,7 @@ class BackupRequest(BaseModel):
 @app.post("/api/admin/backup/download")
 async def admin_download_backup(
     request: BackupRequest,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Gera um ZIP com os documentos selecionados.
@@ -3173,7 +3173,7 @@ class DeleteDocumentosRequest(BaseModel):
 @app.post("/api/admin/backup/deletar-documentos")
 async def admin_deletar_documentos_selecionados(
     request: DeleteDocumentosRequest,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Deleta múltiplos documentos selecionados.
@@ -3363,7 +3363,7 @@ async def admin_deletar_documentos_selecionados(
 @app.get("/api/admin/backup/download-documento")
 async def admin_download_documento_backup(
     doc_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Faz download de um documento específico pelo seu ID de backup.
@@ -3472,7 +3472,7 @@ class DownloadSelecionadosRequest(BaseModel):
 @app.post("/api/admin/backup/download-selecionados")
 async def admin_download_documentos_selecionados(
     request: DownloadSelecionadosRequest,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Faz download de múltiplos documentos selecionados em um arquivo ZIP.
@@ -3639,7 +3639,7 @@ async def admin_download_documentos_selecionados(
 
 @app.get("/api/admin/backup/download-completo")
 async def admin_download_backup_completo(
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Gera um backup COMPLETO de todos os clientes e documentos.
@@ -3922,7 +3922,7 @@ async def cliente_aceitar_termos(request):
 @app.get("/api/admin/clientes/{cadastro_id}/aceites")
 async def get_aceites_cliente(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """
     Lista todos os aceites de termos de um cliente.
@@ -3985,7 +3985,7 @@ async def get_aceites_cliente(
 @app.get("/api/admin/aceites/exportar/{cadastro_id}")
 async def exportar_aceites_cliente(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """
     Exporta todos os aceites de um cliente em formato JSON completo.
@@ -4076,7 +4076,7 @@ async def exportar_aceites_cliente(
 @app.post("/api/admin/clientes/{cadastro_id}/importar-documentos-demanda")
 async def importar_documentos_para_demanda(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Importa documentos existentes da pasta do cliente para a tabela documentos_demanda.
     
@@ -4280,7 +4280,7 @@ async def download_documento_demanda(cadastro_id: str, doc_id: int):
 # ============================================
 
 @app.post("/api/admin/clientes/{cadastro_id}/gerar-peticao/{tipo_demanda}")
-async def gerar_peticao_inicial(cadastro_id: str, tipo_demanda: str, usuario: dict = Depends(verificar_admin)):
+async def gerar_peticao_inicial(cadastro_id: str, tipo_demanda: str, usuario: dict = Depends(verificar_papel("admin", "advogado"))):
     """Gera a petição inicial para uma demanda específica."""
     
     cadastro = buscar_cadastro(cadastro_id)
@@ -4326,7 +4326,7 @@ async def gerar_peticao_inicial(cadastro_id: str, tipo_demanda: str, usuario: di
         raise HTTPException(status_code=500, detail=f"Erro ao gerar petição: {str(e)}")
 
 @app.get("/api/admin/clientes/{cadastro_id}/peticao/{tipo_demanda}")
-async def download_peticao(cadastro_id: str, tipo_demanda: str, usuario: dict = Depends(verificar_admin)):
+async def download_peticao(cadastro_id: str, tipo_demanda: str, usuario: dict = Depends(verificar_token)):
     """Download da petição gerada."""
     
     cadastro = buscar_cadastro(cadastro_id)
@@ -4364,7 +4364,7 @@ async def upload_documento_final(
     cadastro_id: str,
     tipo_documento: str,
     arquivo: UploadFile = File(...),
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Faz upload do documento final (editado) para assinatura.
@@ -4453,7 +4453,7 @@ async def upload_documento_final(
 @app.get("/api/admin/clientes/{cadastro_id}/documentos-finais")
 async def obter_documentos_finais(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Retorna status dos documentos finais (editados) do cliente."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -4476,7 +4476,7 @@ async def obter_documentos_finais(
 async def download_documento_final(
     cadastro_id: str,
     tipo_documento: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Baixa o documento final (editado)."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -4504,7 +4504,7 @@ async def download_documento_final(
 async def enviar_documento_assinatura(
     cadastro_id: str,
     tipo_documento: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Envia documento para assinatura digital via ZapSign.
@@ -4705,7 +4705,7 @@ async def enviar_documento_assinatura(
 async def verificar_status_assinatura(
     cadastro_id: str,
     tipo_documento: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Verifica o status de assinatura de um documento."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -4750,7 +4750,7 @@ async def verificar_status_assinatura(
 async def download_documento_assinado(
     cadastro_id: str,
     tipo_documento: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_token)
 ):
     """Obtém URL do documento assinado."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -4779,7 +4779,7 @@ async def download_documento_assinado(
 async def verificar_e_baixar_assinatura(
     cadastro_id: str,
     tipo_documento: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Verifica status da assinatura no ZapSign.
@@ -4940,7 +4940,7 @@ async def verificar_e_baixar_assinatura(
 @app.post("/api/admin/clientes/{cadastro_id}/enviar-email-assinatura")
 async def enviar_email_com_assinatura(
     cadastro_id: str,
-    usuario: dict = Depends(verificar_admin)
+    usuario: dict = Depends(verificar_papel("admin", "advogado"))
 ):
     """Envia e-mail com links para assinatura digital (ZapSign + Gov.br)."""
     cadastro = buscar_cadastro(cadastro_id)
@@ -5545,7 +5545,7 @@ def buscar_clientes_similares(nome: str, limite: int = 5) -> list:
 @app.post("/api/admin/importar-astrea/preview")
 async def preview_importacao_astrea(
     arquivo: UploadFile = File(...),
-    admin = Depends(verificar_admin)
+    admin = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Faz preview dos dados do arquivo Excel antes de importar.
@@ -5655,7 +5655,7 @@ class ImportacaoAstreaRequest(BaseModel):
 @app.post("/api/admin/importar-astrea/confirmar")
 async def confirmar_importacao_astrea(
     dados: ImportacaoAstreaRequest,
-    admin = Depends(verificar_admin)
+    admin = Depends(verificar_papel("admin", "advogado"))
 ):
     """
     Efetua a importação dos processos e andamentos do Astrea.
@@ -5903,7 +5903,7 @@ def gerar_explicacao_andamento(descricao: str) -> str:
 
 
 @app.get("/api/admin/importacoes/historico")
-async def listar_historico_importacoes(admin = Depends(verificar_admin)):
+async def listar_historico_importacoes(admin = Depends(verificar_token)):
     """Lista o histórico de importações."""
     try:
         conn = get_db()
@@ -6111,7 +6111,7 @@ async def limpar_todos_processos_impl(admin):
 
 
 @app.get("/api/admin/clientes-para-importacao")
-async def listar_clientes_para_importacao(admin = Depends(verificar_admin)):
+async def listar_clientes_para_importacao(admin = Depends(verificar_token)):
     """Lista clientes para seleção na importação do Astrea."""
     try:
         cadastros = carregar_cadastros()

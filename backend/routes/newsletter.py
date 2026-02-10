@@ -11,7 +11,7 @@ import re
 
 from modules.config import logger
 from modules.database import get_db
-from modules.auth import verificar_admin
+from modules.auth import verificar_papel
 from modules.email import enviar_email_newsletter_boas_vindas
 
 router = APIRouter(prefix="/api", tags=["Newsletter"])
@@ -146,7 +146,7 @@ async def cancelar_newsletter(email: str):
 
 @router.get("/admin/newsletter/inscricoes")
 async def listar_inscricoes(
-    admin=Depends(verificar_admin),
+    admin=Depends(verificar_papel("admin", "advogado", "secretaria")),
     ativo: Optional[bool] = None,
     limite: int = 50,
     offset: int = 0,
@@ -210,7 +210,7 @@ async def listar_inscricoes(
 
 
 @router.get("/admin/newsletter/estatisticas")
-async def estatisticas_newsletter(admin=Depends(verificar_admin)):
+async def estatisticas_newsletter(admin=Depends(verificar_papel("admin", "advogado", "secretaria"))):
     """Retorna estatisticas da newsletter."""
     conn = get_db()
     if not conn:
@@ -262,7 +262,7 @@ async def estatisticas_newsletter(admin=Depends(verificar_admin)):
 
 
 @router.get("/admin/newsletter/exportar")
-async def exportar_newsletter(admin=Depends(verificar_admin), apenas_ativos: bool = True):
+async def exportar_newsletter(admin=Depends(verificar_papel("admin", "advogado", "secretaria")), apenas_ativos: bool = True):
     """Exporta lista de emails da newsletter."""
     conn = get_db()
     if not conn:
@@ -302,7 +302,7 @@ async def exportar_newsletter(admin=Depends(verificar_admin), apenas_ativos: boo
 
 
 @router.delete("/admin/newsletter/{inscricao_id}")
-async def remover_inscricao(inscricao_id: int, admin=Depends(verificar_admin)):
+async def remover_inscricao(inscricao_id: int, admin=Depends(verificar_papel("admin", "secretaria"))):
     """Remove uma inscricao da newsletter (admin)."""
     conn = get_db()
     if not conn:

@@ -80,12 +80,13 @@ def senha_precisa_atualizacao(hash_armazenado: str) -> bool:
 # FUNÇÕES DE TOKEN JWT - USUÁRIOS (ADMIN)
 # ============================================
 
-def gerar_token(user_id: int, email: str, is_admin: bool) -> str:
+def gerar_token(user_id: int, email: str, is_admin: bool, papel: str = "admin") -> str:
     """Gera um token JWT com informações do usuário e expiração."""
     payload = {
         "user_id": user_id,
         "email": email,
         "is_admin": is_admin,
+        "papel": papel,
         "type": "admin",
         "iat": datetime.utcnow(),
         "exp": datetime.utcnow() + timedelta(hours=TOKEN_EXPIRATION_HOURS)
@@ -104,7 +105,8 @@ def decodificar_token(token: str) -> Optional[dict]:
         return {
             "id": payload["user_id"],
             "email": payload["email"],
-            "is_admin": payload["is_admin"]
+            "is_admin": payload["is_admin"],
+            "papel": payload.get("papel", "admin")
         }
     except jwt.ExpiredSignatureError:
         # Token expirado

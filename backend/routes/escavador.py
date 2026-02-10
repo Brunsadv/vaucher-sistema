@@ -37,7 +37,7 @@ from modules.prazos import (
     prazo_ja_existe,
     criar_prazo,
 )
-from modules.auth import verificar_admin
+from modules.auth import verificar_admin, verificar_papel
 
 router = APIRouter(tags=["Escavador"])
 
@@ -239,7 +239,7 @@ async def webhook_escavador(request: Request):
 # ============================================
 
 @router.post("/api/admin/escavador/monitorar/{processo_id}")
-async def monitorar_processo(processo_id: int, admin=Depends(verificar_admin)):
+async def monitorar_processo(processo_id: int, admin=Depends(verificar_papel("admin", "advogado"))):
     """Cadastra monitoramento semanal de um processo no Escavador."""
     processo = buscar_processo(processo_id)
     if not processo:
@@ -302,7 +302,7 @@ async def monitorar_processo(processo_id: int, admin=Depends(verificar_admin)):
 # ============================================
 
 @router.post("/api/admin/escavador/monitorar-todos")
-async def monitorar_todos(admin=Depends(verificar_admin)):
+async def monitorar_todos(admin=Depends(verificar_papel("admin", "advogado"))):
     """Monitora todos os processos ativos que ainda não estão monitorados."""
     conn = get_db()
     if not conn:
@@ -366,7 +366,7 @@ async def monitorar_todos(admin=Depends(verificar_admin)):
 # ============================================
 
 @router.post("/api/admin/escavador/atualizar/{processo_id}")
-async def atualizar_processo_escavador(processo_id: int, admin=Depends(verificar_admin)):
+async def atualizar_processo_escavador(processo_id: int, admin=Depends(verificar_papel("admin", "advogado"))):
     """Solicita atualização imediata de um processo no tribunal via Escavador e sincroniza andamentos."""
     processo = buscar_processo(processo_id)
     if not processo:
@@ -419,7 +419,7 @@ async def atualizar_processo_escavador(processo_id: int, admin=Depends(verificar
 # ============================================
 
 @router.post("/api/admin/escavador/atualizar-todos")
-async def atualizar_todos(admin=Depends(verificar_admin)):
+async def atualizar_todos(admin=Depends(verificar_papel("admin", "advogado"))):
     """Atualiza todos os processos ativos: solicita ao tribunal e sincroniza andamentos."""
     conn = get_db()
     if not conn:
@@ -487,7 +487,7 @@ async def atualizar_todos(admin=Depends(verificar_admin)):
 # ============================================
 
 @router.get("/api/admin/escavador/processo/{numero_cnj:path}")
-async def consultar_processo_escavador(numero_cnj: str, admin=Depends(verificar_admin)):
+async def consultar_processo_escavador(numero_cnj: str, admin=Depends(verificar_papel("admin", "advogado"))):
     """Consulta capa e movimentações de um processo no Escavador."""
     resp = await escavador_request("GET", f"/v2/processos/numero_cnj/{numero_cnj}")
 
@@ -503,7 +503,7 @@ async def consultar_processo_escavador(numero_cnj: str, admin=Depends(verificar_
 # ============================================
 
 @router.get("/api/admin/escavador/resumo-ia/{numero_cnj:path}")
-async def resumo_ia_processo(numero_cnj: str, admin=Depends(verificar_admin)):
+async def resumo_ia_processo(numero_cnj: str, admin=Depends(verificar_papel("admin", "advogado"))):
     """Busca ou solicita resumo IA de um processo no Escavador."""
     resp = await escavador_request("GET", f"/v2/processos/numero_cnj/{numero_cnj}/resumo-ia")
 
@@ -519,7 +519,7 @@ async def resumo_ia_processo(numero_cnj: str, admin=Depends(verificar_admin)):
 # ============================================
 
 @router.get("/api/admin/escavador/monitoramentos")
-async def listar_monitoramentos(admin=Depends(verificar_admin)):
+async def listar_monitoramentos(admin=Depends(verificar_papel("admin", "advogado"))):
     """Lista todos os monitoramentos ativos com dados do processo e cadastro."""
     conn = get_db()
     if not conn:
@@ -567,7 +567,7 @@ async def listar_monitoramentos(admin=Depends(verificar_admin)):
 # ============================================
 
 @router.delete("/api/admin/escavador/monitorar/{processo_id}")
-async def remover_monitoramento(processo_id: int, admin=Depends(verificar_admin)):
+async def remover_monitoramento(processo_id: int, admin=Depends(verificar_papel("admin", "advogado"))):
     """Remove monitoramento de um processo (local + API Escavador)."""
     conn = get_db()
     if not conn:
@@ -615,7 +615,7 @@ async def remover_monitoramento(processo_id: int, admin=Depends(verificar_admin)
 # ============================================
 
 @router.post("/api/admin/escavador/sincronizar/{processo_id}")
-async def sincronizar_processo(processo_id: int, admin=Depends(verificar_admin)):
+async def sincronizar_processo(processo_id: int, admin=Depends(verificar_papel("admin", "advogado"))):
     """Busca movimentações no Escavador e sincroniza com o banco local."""
     processo = buscar_processo(processo_id)
     if not processo:
@@ -671,7 +671,7 @@ async def sincronizar_processo(processo_id: int, admin=Depends(verificar_admin))
 # ============================================
 
 @router.get("/api/admin/escavador/saldo")
-async def saldo_escavador(admin=Depends(verificar_admin)):
+async def saldo_escavador(admin=Depends(verificar_papel("admin", "advogado"))):
     """Consulta o saldo de créditos da conta Escavador (via API v1)."""
     resp = await escavador_request("GET", "/saldo")
 
