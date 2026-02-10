@@ -192,15 +192,51 @@ def listar_usuarios_api(usuario: dict = Depends(verificar_admin)):
 @router.post("/usuarios")
 def criar_usuario_api(dados: NovoUsuario, usuario: dict = Depends(verificar_admin)):
     """Cria um novo usuário."""
-    existente = buscar_usuario_por_email(dados.email)
+    # Verificar se email existe (incluindo usuários desativados)
+    conn = get_db()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+
+    try:
+        from psycopg2.extras import RealDictCursor
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute("SELECT id, ativo FROM usuarios WHERE email = %s", (dados.email,))
+        existente = cur.fetchone()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error(f"Erro ao verificar email: {e}")
+        raise HTTPException(status_code=500, detail="Erro ao verificar e-mail")
+
     if existente:
-        raise HTTPException(status_code=400, detail="E-mail já cadastrado")
+        if existente["ativo"]:
+            raise HTTPException(status_code=400, detail="E-mail já cadastrado")
+        else:
+            # Reativar usuário soft-deleted com novos dados
+            senha_hash_novo = hash_senha(dados.senha)
+            conn2 = get_db()
+            if not conn2:
+                raise HTTPException(status_code=500, detail="Erro de conexão com banco")
+            try:
+                cur2 = conn2.cursor()
+                cur2.execute("""
+                    UPDATE usuarios
+                    SET nome = %s, senha_hash = %s, is_admin = %s, papel = %s, ativo = TRUE
+                    WHERE id = %s
+                """, (dados.nome, senha_hash_novo, dados.is_admin, dados.papel, existente["id"]))
+                conn2.commit()
+                cur2.close()
+                conn2.close()
+                return {"success": True, "id": existente["id"], "reativado": True}
+            except Exception as e:
+                logger.error(f"Erro ao reativar usuário: {e}")
+                raise HTTPException(status_code=500, detail="Erro ao reativar usuário")
 
     # criar_usuario faz o hash internamente
-    novo_id = criar_usuario(dados.email, dados.senha, dados.nome, dados.is_admin, dados.papel)
+    resultado = criar_usuario(dados.email, dados.senha, dados.nome, dados.is_admin, dados.papel)
 
-    if novo_id:
-        return {"success": True, "id": novo_id}
+    if resultado:
+        return {"success": True}
     raise HTTPException(status_code=500, detail="Erro ao criar usuário")
 
 
