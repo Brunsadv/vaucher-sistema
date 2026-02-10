@@ -264,14 +264,10 @@ async def monitorar_processo(processo_id: int, admin=Depends(verificar_admin)):
             conn.close()
             raise HTTPException(status_code=409, detail="Processo já está sendo monitorado")
 
-        # Cadastrar no Escavador
-        resp = await escavador_request("POST", "/v2/monitoramentos/processos", data={
-            "numero_unico": numero,
-            "frequencia": "semanal",
-            "callback_url": ESCAVADOR_CALLBACK_URL,
-        })
+        # Solicitar primeira atualização no Escavador
+        resp = await escavador_request("POST", f"/v2/processos/numero_cnj/{numero}/solicitar-atualizacao")
 
-        escavador_id = str(resp.get("id", ""))
+        escavador_id = str(resp.get("id", resp.get("processo_id", "")))
 
         # Salvar no banco local
         cur.execute("""
@@ -334,13 +330,9 @@ async def monitorar_todos(admin=Depends(verificar_admin)):
 
         for proc in processos:
             try:
-                resp = await escavador_request("POST", "/v2/monitoramentos/processos", data={
-                    "numero_unico": proc["numero_processo"],
-                    "frequencia": "semanal",
-                    "callback_url": ESCAVADOR_CALLBACK_URL,
-                })
+                resp = await escavador_request("POST", f"/v2/processos/numero_cnj/{proc['numero_processo']}/solicitar-atualizacao")
 
-                escavador_id = str(resp.get("id", ""))
+                escavador_id = str(resp.get("id", resp.get("processo_id", "")))
 
                 conn2 = get_db()
                 if conn2:
@@ -383,15 +375,13 @@ async def atualizar_processo_escavador(processo_id: int, admin=Depends(verificar
     numero = processo["numero_processo"]
 
     # 1. Solicitar atualização no tribunal
-    resp = await escavador_request("POST", "/v2/processos/numero-unico", data={
-        "numero_unico": numero,
-        "atualizar": True,
-    })
+    await escavador_request("POST", f"/v2/processos/numero_cnj/{numero}/solicitar-atualizacao")
 
     logger.info(f"[ESCAVADOR] Atualização solicitada para {numero}")
 
-    # 2. Já sincronizar as movimentações que o Escavador tem agora
-    movimentacoes = resp.get("movimentacoes") or resp.get("movimentos") or []
+    # 2. Buscar dados atuais e sincronizar movimentações
+    resp = await escavador_request("GET", f"/v2/processos/numero_cnj/{numero}/movimentacoes")
+    movimentacoes = resp.get("items") or resp.get("movimentacoes") or resp.get("movimentos") or []
     andamentos_inseridos = 0
     prazos_gerados = 0
 
@@ -450,13 +440,12 @@ async def atualizar_todos(admin=Depends(verificar_admin)):
 
         for proc in processos:
             try:
-                resp = await escavador_request("POST", "/v2/processos/numero-unico", data={
-                    "numero_unico": proc["numero_processo"],
-                    "atualizar": True,
-                })
+                # Solicitar atualização no tribunal
+                await escavador_request("POST", f"/v2/processos/numero_cnj/{proc['numero_processo']}/solicitar-atualizacao")
 
-                # Sincronizar movimentações retornadas
-                movimentacoes = resp.get("movimentacoes") or resp.get("movimentos") or []
+                # Buscar movimentações atuais
+                resp = await escavador_request("GET", f"/v2/processos/numero_cnj/{proc['numero_processo']}/movimentacoes")
+                movimentacoes = resp.get("items") or resp.get("movimentacoes") or resp.get("movimentos") or []
                 for mov in movimentacoes:
                     data_mov = mov.get("data") or mov.get("data_hora", "")[:10]
                     descricao = mov.get("descricao") or mov.get("texto") or mov.get("conteudo", "")
@@ -500,7 +489,7 @@ async def atualizar_todos(admin=Depends(verificar_admin)):
 @router.get("/api/admin/escavador/processo/{numero_cnj:path}")
 async def consultar_processo_escavador(numero_cnj: str, admin=Depends(verificar_admin)):
     """Consulta capa e movimentações de um processo no Escavador."""
-    resp = await escavador_request("GET", f"/v2/processos/numero-unico/{numero_cnj}")
+    resp = await escavador_request("GET", f"/v2/processos/numero_cnj/{numero_cnj}")
 
     return {
         "sucesso": True,
@@ -516,7 +505,7 @@ async def consultar_processo_escavador(numero_cnj: str, admin=Depends(verificar_
 @router.get("/api/admin/escavador/resumo-ia/{numero_cnj:path}")
 async def resumo_ia_processo(numero_cnj: str, admin=Depends(verificar_admin)):
     """Busca ou solicita resumo IA de um processo no Escavador."""
-    resp = await escavador_request("GET", f"/v2/processos/numero-unico/{numero_cnj}/resumo-ia")
+    resp = await escavador_request("GET", f"/v2/processos/numero_cnj/{numero_cnj}/resumo-ia")
 
     return {
         "sucesso": True,
@@ -597,13 +586,8 @@ async def remover_monitoramento(processo_id: int, admin=Depends(verificar_admin)
             conn.close()
             raise HTTPException(status_code=404, detail="Monitoramento não encontrado")
 
-        # Tentar remover na API do Escavador
-        escavador_id = mon["escavador_id"]
-        if escavador_id:
-            try:
-                await escavador_request("DELETE", f"/v2/monitoramentos/processos/{escavador_id}")
-            except Exception as e:
-                logger.warning(f"[ESCAVADOR] Falha ao remover monitoramento na API: {e}")
+        # Nota: A API V2 do Escavador não tem endpoint de remoção de monitoramento.
+        # O monitoramento é apenas local — controlamos quais processos acompanhamos.
 
         # Marcar como inativo no banco local
         cur.execute(
@@ -639,10 +623,10 @@ async def sincronizar_processo(processo_id: int, admin=Depends(verificar_admin))
 
     numero = processo["numero_processo"]
 
-    # Buscar dados completos no Escavador
-    resp = await escavador_request("GET", f"/v2/processos/numero-unico/{numero}")
+    # Buscar movimentações no Escavador
+    resp = await escavador_request("GET", f"/v2/processos/numero_cnj/{numero}/movimentacoes")
 
-    movimentacoes = resp.get("movimentacoes") or resp.get("movimentos") or []
+    movimentacoes = resp.get("items") or resp.get("movimentacoes") or resp.get("movimentos") or []
 
     andamentos_inseridos = 0
     prazos_gerados = 0
@@ -688,8 +672,8 @@ async def sincronizar_processo(processo_id: int, admin=Depends(verificar_admin))
 
 @router.get("/api/admin/escavador/saldo")
 async def saldo_escavador(admin=Depends(verificar_admin)):
-    """Consulta o saldo de créditos da conta Escavador."""
-    resp = await escavador_request("GET", "/v2/creditos/saldo")
+    """Consulta o saldo de créditos da conta Escavador (via API v1)."""
+    resp = await escavador_request("GET", "/saldo")
 
     return {
         "sucesso": True,
